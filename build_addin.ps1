@@ -25,6 +25,10 @@ Write-Host "正在使用系统 .NET Framework 4.8 编译 LeeExcel.dll..." -Foreg
 
 $cmd = "& `"$csc`" /nologo /target:library /out:`"$outDir\LeeExcel.dll`" $refArgs $sources"
 Invoke-Expression $cmd
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "编译失败，退出码: $LASTEXITCODE" -ForegroundColor Red
+    exit $LASTEXITCODE
+}
 
 Write-Host "编译成功: $outDir\LeeExcel.dll" -ForegroundColor Green
 

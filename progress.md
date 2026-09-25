@@ -3,29 +3,29 @@
 ## Session: 2026-09-25
 
 ### 阶段与里程碑
-- [x] **只读审计与技术论证**
-  - 完成对 `hewliyang/office-agents` 全仓只读审计与代码位置证据提取。
-  - 深入剖析 VBA 动态注入底层原理（VBIDE、AccessVBOM、受信任位置）。
-  - 提出两条实现路线对比并完成架构选型答辩。
-- [x] **用户需求与设计规范对齐**
-  - 确认采用 C# 原生加载项 + 内嵌 Edge WebView2 混合架构。
-  - 确认始终全自动执行模式，默认折叠一句话简报。
-  - 确认多版本快照时间轴整本恢复策略。
-  - 确认 Office 经典原生绿（`#107C41`）UI 风格。
-- [x] **Phase 1: 环境与工程脚手架构建**
-  - 使用本地免安装 `nuget.exe` 拉取 `ExcelDna` 与 `WebView2` 依赖。
-  - 利用系统内置 .NET Framework 4.8 官方编译器 `csc.exe` 完成无 SDK 依赖编译。
-- [x] **Phase 2: 核心底层能力实现 (C# COM 引擎)**
-  - 实现 `SnapshotManager.cs`（多版本 SaveCopyAs 快照与整本回滚）。
-  - 实现 `VbaRunner.cs`（VBIDE 动态注入、Run 执行、1004 捕获、瞬时清理）。
-  - 实现 `ScriptManager.cs`（本地 `%AppData%\LeeExcel\Scripts\*.bas` 持久化）。
-  - 实现 `NativeBridge.cs`（双向协议调度）。
-  - 运行 `test_core.ps1`，所有 C# 核心方法单元测试 100% 通过！
-- [x] **Phase 3: 任务窗格与 Edge WebView2 进程内集成**
-  - 实现 `TaskPaneControl.cs` 与 `LeeExcelAddIn.cs`。
-- [x] **Phase 4: Office 经典原生风前端 UI 移植与重构**
-  - 实现 `office-fluent.css` 设计系统。
-  - 编写 `Header.svelte`, `ExecutionCard.svelte`, `SettingsModal.svelte`, `ScriptDrawer.svelte`, `ChatInput.svelte`, `App.svelte`。
-  - 成功执行 `pnpm build`，静态包输出至 `bin/dist/`。
-- [ ] **Phase 5: 综合联调与最小 PoC 闭环验证** (就绪)
-  - 编写 `run_excel.ps1`，可一键唤起 64 位 Excel 加载插件。
+- [x] **Git 隔离基线锁定**
+  - 在 `feat/system-quality-fix` 分支锁定提交 `fdab9e1` 作为安全回退基线。
+- [x] **根因排查与设计规范纠偏**
+  - 移除写死 temperature，转为前端可选配置，不强传参数。
+  - 严禁全盘使用 ActiveWorkbook；实现前端-宿主端显式 Target Workbook 绑定与身份核验。
+- [x] **1. 拆分聊天与自动化通道 (CHAT vs AUTOMATION)**
+  - 实现精确意图识别器 `detectIntent`，覆盖多措辞问答、解释代码、身份咨询、业务操作与歧义澄清。
+  - 问答闲聊走 CHAT：零 VBA、零快照、零注入。
+- [x] **2. 修复生成协议与代码提取**
+  - 彻底清理全局提示词中 D1:L9、35行上限、严禁逐格操作等负向偏置词。
+  - 实现结构化代码提取 `extractVbaCode`，彻底废弃脆弱的 `includes('Sub')`。
+  - 实现代码截断（未闭合围栏、缺少 End Sub）安全拦截。
+- [x] **3. 目标工作簿绑定与执行保护**
+  - 宿主与前端锁定具体工作簿（FullName / Name）。
+  - C# 规整 ThisWorkbook / ActiveWorkbook 为显式 `Application.Workbooks("...")`。
+  - 实现执行前目标激活与执行后身份校验，彻底免疫前台活动窗口切换造成的串改。
+- [x] **4. 区分“宏已运行”与“任务完成”**
+  - C# 引入写后读回机制 `WorkbookReadback`（UsedRange、首末坐标、公式、边框、底色、单元格抽样）。
+  - 前端引入 `verifyExecutionResult`，区分算式文本与纯数字，主观美化如实标为“效果待确认”，严禁伪装满分绿灯。
+- [x] **5. 保留诊断能力与极简界面**
+  - 气泡保持一句话汇报，默认折叠。
+  - ExecutionCard 增加“写后核验”与“审计日志”选项卡，记录脱敏参数、规整步骤与读回数据。
+- [x] **6. 跨任务回归测试**
+  - `node test_suite_unit.cjs`：30 项意图分类与提取单测 100% 通过。
+  - `powershell test_system_suite.ps1`：9 项真实 Excel COM 集成用例 100% 通过。
+  - `powershell test_core.ps1`：存量功能测试 100% 通过。

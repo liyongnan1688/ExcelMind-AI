@@ -12,6 +12,9 @@
     FileText,
     History,
     Check,
+    SearchCheck,
+    ShieldAlert,
+    AlertCircle,
   } from 'lucide-svelte';
   import { bridge, type SnapshotItem, type VbaExecutionData } from '../services/bridge';
 
@@ -22,11 +25,12 @@
   export let allSnapshots: SnapshotItem[] = [];
   export let onSaveScriptSuccess: () => void;
 
-  // 严格默认折叠，绝不主动铺开，保证窗口极致简洁
+  // 严格默认折叠，绝不主动展开，保证对话界面清爽
   let isExpanded = false;
-  let activeTab: 'code' | 'log' = 'code';
+  let activeTab: 'code' | 'readback' | 'audit' = 'readback';
 
-  $: displayCode = execution?.vbaCode || streamCode || '';
+  $: displayCode = execution?.executedVbaCode || execution?.vbaCode || streamCode || '';
+  $: rawCode = execution?.originalVbaCode || displayCode;
 
   let showSaveDialog = false;
   let scriptName = '';
@@ -82,7 +86,10 @@
     }
 
     isRestoring = true;
-    const res = await bridge.send('restore_snapshot', { snapshotId: targetId });
+    const res = await bridge.send('restore_snapshot', {
+      snapshotId: targetId,
+      targetWorkbookName: execution?.targetWorkbookName || '',
+    });
     isRestoring = false;
 
     if (res.ok) {
@@ -96,8 +103,16 @@
   }
 </script>
 
-<div class="execution-card {execution ? (execution.error ? 'card-error' : 'card-success') : 'card-running'}">
-  <!-- 默认折叠状态栏 (简洁一两句话) -->
+<div
+  class="execution-card {isExecuting
+    ? 'card-running'
+    : execution?.error
+    ? 'card-error'
+    : execution?.verificationStatus === 'verified'
+    ? 'card-success'
+    : 'card-unconfirmed'}"
+>
+  <!-- 默认折叠状态栏 (简洁一两句话，客观如实呈现，不伪称满分完成) -->
   <div class="summary-bar" on:click={() => (isExpanded = !isExpanded)}>
     <div class="status-left">
       {#if isExecuting}
@@ -111,19 +126,29 @@
         {#if execution.elapsedMs}
           <span class="badge badge-gray">{(execution.elapsedMs / 1000).toFixed(2)}s</span>
         {/if}
-      {:else}
+      {:else if execution?.verificationStatus === 'verified'}
         <CheckCircle2 size={16} color="#107C41" />
-        <span class="summary-text font-success" title={execution?.summary}>
-          {execution?.summary || '执行已完成'}
+        <span class="summary-text font-success" title={execution.summary}>
+          {execution.summary || '宏已运行，区域验证通过'}
         </span>
         {#if execution?.elapsedMs}
           <span class="badge badge-green">{(execution.elapsedMs / 1000).toFixed(2)}s</span>
+        {/if}
+      {:else}
+        <!-- 待确认或有差异状态 (显示中性/提示色，不伪装绿色的“任务完成”) -->
+        <AlertCircle size={16} color="#D83B01" />
+        <span class="summary-text font-unconfirmed" title={execution?.summary}>
+          {execution?.summary || '宏已运行，效果待确认'}
+        </span>
+        <span class="badge badge-amber">效果待确认</span>
+        {#if execution?.elapsedMs}
+          <span class="badge badge-gray">{(execution.elapsedMs / 1000).toFixed(2)}s</span>
         {/if}
       {/if}
     </div>
 
     <button class="expand-btn" type="button">
-      <span>{isExpanded ? '收起详情' : '展开代码与记录'}</span>
+      <span>{isExpanded ? '收起详情' : '展开核验与记录'}</span>
       {#if isExpanded}
         <ChevronUp size={14} />
       {:else}
@@ -138,13 +163,20 @@
       <!-- 选项卡头部 -->
       <div class="panel-tabs">
         <div class="tabs-left">
+          <button
+            class="tab-btn {activeTab === 'readback' ? 'active' : ''}"
+            on:click={() => (activeTab = 'readback')}
+          >
+            <SearchCheck size={13} />
+            <span>写后核验</span>
+          </button>
           <button class="tab-btn {activeTab === 'code' ? 'active' : ''}" on:click={() => (activeTab = 'code')}>
             <Code size={13} />
             <span>VBA 源码</span>
           </button>
-          <button class="tab-btn {activeTab === 'log' ? 'active' : ''}" on:click={() => (activeTab = 'log')}>
+          <button class="tab-btn {activeTab === 'audit' ? 'active' : ''}" on:click={() => (activeTab = 'audit')}>
             <FileText size={13} />
-            <span>执行日志</span>
+            <span>审计日志</span>
           </button>
         </div>
 
@@ -167,40 +199,123 @@
         {/if}
       </div>
 
-      <!-- Tab 1: 代码展示 -->
+      <!-- Tab 1: 写后核验详情 (从 Excel 真实读回的数据) -->
+      {#if activeTab === 'readback'}
+        <div class="readback-container">
+          {#if execution?.readback}
+            <div class="rb-row">
+              <span class="rb-label">目标工作簿:</span>
+              <span class="rb-val">
+                {execution.readback.targetWorkbookName}
+                {#if execution.readback.targetVerified}
+                  <span class="pill pill-green">身份核验一致</span>
+                {:else}
+                  <span class="pill pill-red">身份不一致</span>
+                {/if}
+              </span>
+            </div>
+
+            <div class="rb-row">
+              <span class="rb-label">目标工作表:</span>
+              <span class="rb-val">{execution.readback.targetSheetName || '默认活动表'}</span>
+            </div>
+
+            <div class="rb-row">
+              <span class="rb-label">实际使用区域:</span>
+              <span class="rb-val highlight-val">
+                {execution.readback.usedRangeAddress || '未检测到使用区域'}
+                {#if execution.readback.rowCount > 0}
+                  <span class="dim-text">
+                    ({execution.readback.rowCount}行 × {execution.readback.columnCount}列，起始: {execution.readback.startCell || 'N/A'})
+                  </span>
+                {/if}
+              </span>
+            </div>
+
+            <div class="rb-row">
+              <span class="rb-label">样式与特征:</span>
+              <div class="rb-badges">
+                {#if execution.readback.hasBorders}
+                  <span class="pill pill-blue">包含边框</span>
+                {/if}
+                {#if execution.readback.hasInteriorColor}
+                  <span class="pill pill-blue">包含单元格背景色</span>
+                {/if}
+                {#if execution.readback.hasFormulas}
+                  <span class="pill pill-blue">包含公式计算</span>
+                {/if}
+                {#if !execution.readback.hasBorders && !execution.readback.hasInteriorColor && !execution.readback.hasFormulas}
+                  <span class="pill pill-gray">无特殊样式/纯文本填入</span>
+                {/if}
+              </div>
+            </div>
+
+            {#if execution.readback.sampleValues && execution.readback.sampleValues.length > 0}
+              <div class="rb-row rb-samples">
+                <span class="rb-label">单元格抽样:</span>
+                <div class="sample-tags">
+                  {#each execution.readback.sampleValues.slice(0, 8) as sample}
+                    <code class="sample-code">{sample}</code>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+
+            {#if execution.verificationNote}
+              <div class="verification-box">
+                <span class="ver-label">核验摘要:</span>
+                <span class="ver-text">{execution.verificationNote}</span>
+              </div>
+            {/if}
+          {:else}
+            <div class="dim-empty">尚未获取到写后读回数据</div>
+          {/if}
+        </div>
+      {/if}
+
+      <!-- Tab 2: 代码展示 -->
       {#if activeTab === 'code'}
         <div class="code-container">
           <pre class="vba-code"><code>{displayCode || '正在生成代码...'}</code></pre>
         </div>
       {/if}
 
-      <!-- Tab 2: 日志展示 -->
-      {#if activeTab === 'log'}
+      <!-- Tab 3: 审计日志 -->
+      {#if activeTab === 'audit'}
         <div class="log-container">
-          {#if execution}
-            <div class="log-row">
-              <span class="log-label">耗时:</span>
-              <span class="log-val">{execution.elapsedMs} ms</span>
+          <div class="log-row">
+            <span class="log-label">用户指令:</span>
+            <span class="log-val">{prompt}</span>
+          </div>
+          <div class="log-row">
+            <span class="log-label">绑定目标:</span>
+            <span class="log-val">{execution?.targetWorkbookName || '当前活动工作簿'}</span>
+          </div>
+          <div class="log-row">
+            <span class="log-label">调用耗时:</span>
+            <span class="log-val">{execution?.elapsedMs || 0} ms</span>
+          </div>
+
+          {#if execution?.transformSteps && execution.transformSteps.length > 0}
+            <div class="log-row flex-col">
+              <span class="log-label">宿主规整步骤:</span>
+              <ul class="step-list">
+                {#each execution.transformSteps as step}
+                  <li>{step}</li>
+                {/each}
+              </ul>
             </div>
-            <div class="log-row">
-              <span class="log-label">指令摘要:</span>
-              <span class="log-val">{prompt}</span>
+          {/if}
+
+          {#if execution?.error}
+            <div class="log-row error-block">
+              <span class="log-label">异常详情:</span>
+              <pre class="error-text">{execution.error}</pre>
             </div>
-            {#if execution.error}
-              <div class="log-row error-block">
-                <span class="log-label">错误信息:</span>
-                <pre class="error-text">{execution.error}</pre>
-              </div>
-            {:else}
-              <div class="log-row">
-                <span class="log-label">状态:</span>
-                <span class="log-val" style="color: #107C41; font-weight: 500;">COM 调用顺利，模块已瞬时销毁清理</span>
-              </div>
-            {/if}
           {:else}
             <div class="log-row">
-              <span class="log-label">状态:</span>
-              <span class="log-val" style="color: #0078D4;">脚本执行准备中...</span>
+              <span class="log-label">运行状态:</span>
+              <span class="log-val" style="color: #107C41;">COM 宏调用完成，临时模块已瞬时销毁清理</span>
             </div>
           {/if}
         </div>
@@ -235,7 +350,7 @@
       <div class="snapshot-footer">
         <div class="snap-info">
           <History size={14} color="#605E5C" />
-          <span class="snap-label">恢复整本版本:</span>
+          <span class="snap-label">整本版本回滚:</span>
           {#if allSnapshots.length > 0}
             <select class="snap-select" bind:value={selectedSnapshotId}>
               {#each allSnapshots as s}
@@ -244,17 +359,17 @@
                 </option>
               {/each}
             </select>
-          {:else if execution.snapshot}
+          {:else if execution?.snapshot?.timeDisplay}
             <span class="snap-tag">{execution.snapshot.timeDisplay} 快照</span>
           {:else}
-            <span class="snap-none">未生成快照</span>
+            <span class="snap-none">未生成快照 (未保存工作簿)</span>
           {/if}
         </div>
 
-        {#if selectedSnapshotId || execution.snapshot}
+        {#if selectedSnapshotId || execution?.snapshot?.id}
           <button
             class="btn btn-sm btn-rollback"
-            on:click={() => handleRestore(selectedSnapshotId || execution.snapshot?.id || '')}
+            on:click={() => handleRestore(selectedSnapshotId || execution?.snapshot?.id || '')}
             disabled={isRestoring}
           >
             {#if restoreSuccess}
@@ -288,6 +403,10 @@
     border-left: 3px solid var(--excel-green);
   }
 
+  .card-unconfirmed {
+    border-left: 3px solid #d83b01;
+  }
+
   .card-error {
     border-left: 3px solid var(--office-danger);
   }
@@ -296,7 +415,6 @@
     border-left: 3px solid var(--office-blue);
   }
 
-  /* 默认一两句话简报栏 */
   .summary-bar {
     padding: 8px 12px;
     display: flex;
@@ -331,12 +449,25 @@
     color: #107c41;
   }
 
+  .font-unconfirmed {
+    color: #d83b01;
+  }
+
   .font-error {
     color: #a80000;
   }
 
   .font-running {
     color: #0078d4;
+  }
+
+  .badge-amber {
+    background: #fdf3eb;
+    color: #d83b01;
+    border: 1px solid #fed9cc;
+    font-size: 10px;
+    padding: 1px 5px;
+    border-radius: 3px;
   }
 
   .expand-btn {
@@ -358,7 +489,6 @@
     color: var(--office-text);
   }
 
-  /* 展开后面板 */
   .expanded-panel {
     border-top: 1px solid var(--office-border);
     background: #fbfbfb;
@@ -411,6 +541,110 @@
     font-size: 11px;
   }
 
+  /* 写后核验面板样式 */
+  .readback-container {
+    padding: 10px 12px;
+    font-size: 11px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background: #ffffff;
+  }
+
+  .rb-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  .rb-label {
+    color: var(--office-muted);
+    min-width: 80px;
+    flex-shrink: 0;
+  }
+
+  .rb-val {
+    color: var(--office-text);
+    word-break: break-all;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .highlight-val {
+    font-weight: 600;
+    color: #107c41;
+  }
+
+  .dim-text {
+    font-weight: normal;
+    color: var(--office-muted);
+    font-size: 11px;
+  }
+
+  .pill {
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 500;
+  }
+
+  .pill-green {
+    background: #e7f3ec;
+    color: #107c41;
+  }
+
+  .pill-blue {
+    background: #eff6fc;
+    color: #0078d4;
+  }
+
+  .pill-red {
+    background: #fdf3f4;
+    color: #a80000;
+  }
+
+  .pill-gray {
+    background: #f3f2f1;
+    color: #605e5c;
+  }
+
+  .sample-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .sample-code {
+    background: #f3f2f1;
+    padding: 2px 5px;
+    border-radius: 3px;
+    font-family: Consolas, monospace;
+    font-size: 10px;
+    color: #201f1e;
+  }
+
+  .verification-box {
+    margin-top: 4px;
+    padding: 6px 8px;
+    background: #fcf9f5;
+    border: 1px solid #fae8d4;
+    border-radius: 4px;
+    display: flex;
+    gap: 6px;
+    font-size: 11px;
+  }
+
+  .ver-label {
+    color: #d83b01;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+
+  .ver-text {
+    color: #323130;
+  }
+
   .code-container {
     padding: 10px 12px;
     background: #1e1e1e;
@@ -433,7 +667,7 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
-    max-height: 200px;
+    max-height: 220px;
     overflow-y: auto;
   }
 
@@ -442,14 +676,29 @@
     gap: 8px;
   }
 
+  .flex-col {
+    flex-direction: column;
+    gap: 3px;
+  }
+
   .log-label {
     color: var(--office-muted);
-    min-width: 60px;
+    min-width: 80px;
   }
 
   .log-val {
     color: var(--office-text);
     word-break: break-all;
+  }
+
+  .step-list {
+    margin: 2px 0 0 16px;
+    padding: 0;
+    color: #323130;
+  }
+
+  .step-list li {
+    margin-bottom: 2px;
   }
 
   .error-block {
@@ -467,7 +716,6 @@
     white-space: pre-wrap;
   }
 
-  /* 保存脚本内联面板 */
   .save-dialog-inline {
     padding: 8px 12px;
     background: #f3f9f5;
@@ -506,7 +754,6 @@
     border-radius: 3px;
   }
 
-  /* 快照回滚底栏 */
   .snapshot-footer {
     padding: 8px 12px;
     background: #ffffff;
@@ -552,6 +799,12 @@
 
   .btn-rollback:hover {
     background: #ffefc4;
+  }
+
+  .dim-empty {
+    color: var(--office-muted);
+    font-style: italic;
+    padding: 4px 0;
   }
 
   .spinner {

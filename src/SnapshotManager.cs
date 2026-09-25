@@ -96,7 +96,30 @@ namespace LeeExcel
             string snapshotFullPath = Path.Combine(folder, snapshotFileName);
 
             // 原生物理副本保存
-            workbook.SaveCopyAs(snapshotFullPath);
+            bool saveOk = false;
+            try
+            {
+                workbook.SaveCopyAs(snapshotFullPath);
+                saveOk = true;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("SaveCopyAs warning (likely unsaved workbook): " + ex.Message);
+            }
+
+            if (!saveOk)
+            {
+                return new SnapshotItem
+                {
+                    id = "",
+                    timestamp = DateTime.Now.ToString("o"),
+                    timeDisplay = DateTime.Now.ToString("HH:mm:ss"),
+                    fileName = "",
+                    originalPath = fullPath,
+                    promptSummary = "未保存工作簿，已跳过物理副本快照",
+                    vbaPreview = ""
+                };
+            }
 
             var item = new SnapshotItem
             {

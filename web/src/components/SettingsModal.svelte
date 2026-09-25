@@ -64,6 +64,19 @@
         <label><Cpu size={13} style="margin-right: 4px; vertical-align: -2px;" /> 模型名称 (Model Name)</label>
         <input type="text" bind:value={config.model} placeholder="deepseek-chat" />
       </div>
+
+      <div class="form-group">
+        <label>生成温度 (Temperature，可选)</label>
+        <input
+          type="number"
+          step="0.1"
+          min="0"
+          max="2"
+          bind:value={config.temperature}
+          placeholder="留空表示使用模型服务默认值"
+        />
+        <span class="hint">留空时不强制传参；若填写建议 0.3 ~ 0.7 之间</span>
+      </div>
     </div>
 
     <div class="modal-footer">

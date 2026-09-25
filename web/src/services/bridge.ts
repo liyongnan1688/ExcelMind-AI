@@ -12,6 +12,8 @@ export interface WorkbookInfo {
   name: string;
   fullName: string;
   isSaved: boolean;
+  activeSheetName?: string;
+  usedRangeAddress?: string;
   sheets: string[];
   snapshots: SnapshotItem[];
 }
@@ -25,12 +27,36 @@ export interface ScriptItem {
   code: string;
 }
 
+export interface WorkbookReadback {
+  targetWorkbookName: string;
+  targetWorkbookFullName: string;
+  targetSheetName: string;
+  usedRangeAddress: string;
+  rowCount: number;
+  columnCount: number;
+  startCell: string;
+  endCell: string;
+  sampleValues: string[];
+  hasFormulas: boolean;
+  hasBorders: boolean;
+  hasInteriorColor: boolean;
+  sheetCount: number;
+  targetVerified: boolean;
+}
+
 export interface VbaExecutionData {
   summary: string;
   error?: string;
   elapsedMs: number;
   snapshot?: SnapshotItem;
-  vbaCode: string;
+  originalVbaCode?: string;
+  executedVbaCode?: string;
+  vbaCode?: string; // backwards compatibility
+  transformSteps?: string[];
+  readback?: WorkbookReadback;
+  targetWorkbookName?: string;
+  verificationStatus?: 'verified' | 'unconfirmed' | 'failed';
+  verificationNote?: string;
 }
 
 export interface BridgeResponse<T = any> {
@@ -100,6 +126,8 @@ class NativeBridgeClient {
           name: '2026年9月部门预算与绩效表.xlsx',
           fullName: 'C:\\Users\\35651\\Documents\\2026年9月部门预算与绩效表.xlsx',
           isSaved: true,
+          activeSheetName: '汇总看板',
+          usedRangeAddress: 'A1:H25',
           sheets: ['汇总看板', '部门明细', '人员考评'],
           snapshots: [
             {
@@ -120,11 +148,31 @@ class NativeBridgeClient {
       return {
         ok: true,
         action,
-        message: '执行成功：已按指令完成当前工作簿操作 (Mock 模式)',
+        message: '宏已运行（耗时 382 ms）',
         data: {
-          summary: '执行成功：已按指令在“汇总看板”生成求和公式并标注高亮',
+          summary: '宏已运行（耗时 382 ms）',
           elapsedMs: 382,
+          originalVbaCode: payload.code,
+          executedVbaCode: payload.code,
           vbaCode: payload.code,
+          transformSteps: ['规整过程入口: RunTask -> LeeTaskEntry', '显式绑定目标工作簿'],
+          targetWorkbookName: payload.targetWorkbookName || '2026年9月部门预算与绩效表.xlsx',
+          readback: {
+            targetWorkbookName: payload.targetWorkbookName || '2026年9月部门预算与绩效表.xlsx',
+            targetWorkbookFullName: payload.targetWorkbookFullName || 'C:\\test.xlsx',
+            targetSheetName: '汇总看板',
+            usedRangeAddress: 'D1:L9',
+            rowCount: 9,
+            columnCount: 9,
+            startCell: 'D1',
+            endCell: 'L9',
+            sampleValues: ['1×1=1', '1×2=2', '1×3=3'],
+            hasFormulas: false,
+            hasBorders: true,
+            hasInteriorColor: true,
+            sheetCount: 3,
+            targetVerified: true,
+          },
           snapshot: {
             id: 'snap_' + Date.now(),
             timestamp: new Date().toISOString(),

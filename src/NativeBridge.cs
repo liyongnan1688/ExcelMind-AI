@@ -8,6 +8,8 @@ namespace LeeExcel
         public string name { get; set; }
         public string fullName { get; set; }
         public bool isSaved { get; set; }
+        public string activeSheetName { get; set; }
+        public string usedRangeAddress { get; set; }
         public List<string> sheets { get; set; }
         public List<SnapshotItem> snapshots { get; set; }
     }
@@ -18,7 +20,11 @@ namespace LeeExcel
         public string error { get; set; }
         public double elapsedMs { get; set; }
         public SnapshotItem snapshot { get; set; }
-        public string vbaCode { get; set; }
+        public string originalVbaCode { get; set; }
+        public string executedVbaCode { get; set; }
+        public List<string> transformSteps { get; set; }
+        public WorkbookReadback readback { get; set; }
+        public string targetWorkbookName { get; set; }
     }
 
     public class BridgeResponse
@@ -42,7 +48,7 @@ namespace LeeExcel
                 switch (action)
                 {
                     case "get_workbook_info":
-                        return HandleGetWorkbookInfo(app);
+                        return HandleGetWorkbookInfo(req, app);
 
                     case "execute_vba":
                         return HandleExecuteVba(req, app);
@@ -54,7 +60,7 @@ namespace LeeExcel
                         return HandleRestoreSnapshot(req, app);
 
                     case "list_snapshots":
-                        return HandleListSnapshots(app);
+                        return HandleListSnapshots(req, app);
 
                     case "list_scripts":
                         return HandleListScripts();
@@ -84,16 +90,63 @@ namespace LeeExcel
             }
         }
 
-        private static string HandleGetWorkbookInfo(dynamic app)
+        public static dynamic FindTargetWorkbook(dynamic app, string targetFullName, string targetName)
+        {
+            if (app == null) return null;
+
+            // 1. 优先按 FullName 匹配
+            if (!string.IsNullOrEmpty(targetFullName))
+            {
+                try
+                {
+                    foreach (dynamic wb in app.Workbooks)
+                    {
+                        if (string.Equals((string)wb.FullName, targetFullName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return wb;
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            // 2. 次选按 Name 匹配
+            if (!string.IsNullOrEmpty(targetName))
+            {
+                try
+                {
+                    foreach (dynamic wb in app.Workbooks)
+                    {
+                        if (string.Equals((string)wb.Name, targetName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return wb;
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            // 3. 若均未传参且存在活动工作簿，作为保底
+            if (string.IsNullOrEmpty(targetFullName) && string.IsNullOrEmpty(targetName))
+            {
+                try
+                {
+                    return app.ActiveWorkbook;
+                }
+                catch { }
+            }
+
+            return null;
+        }
+
+        private static string HandleGetWorkbookInfo(Dictionary<string, string> req, dynamic app)
         {
             try
             {
-                dynamic wb = null;
-                try
-                {
-                    wb = app.ActiveWorkbook;
-                }
-                catch { }
+                string targetFullName = req.ContainsKey("targetWorkbookFullName") ? req["targetWorkbookFullName"] : "";
+                string targetName = req.ContainsKey("targetWorkbookName") ? req["targetWorkbookName"] : "";
+
+                dynamic wb = FindTargetWorkbook(app, targetFullName, targetName);
 
                 if (wb == null)
                 {
@@ -106,6 +159,8 @@ namespace LeeExcel
                             name = "未检测到活动工作簿",
                             fullName = "",
                             isSaved = false,
+                            activeSheetName = "",
+                            usedRangeAddress = "",
                             sheets = new List<string>(),
                             snapshots = new List<SnapshotItem>()
                         }
@@ -115,6 +170,24 @@ namespace LeeExcel
                 string name = (string)wb.Name;
                 string fullName = (string)wb.FullName;
                 bool isSaved = !string.IsNullOrEmpty((string)wb.Path);
+                string activeSheetName = "";
+                string usedRangeAddress = "";
+
+                try
+                {
+                    dynamic sh = wb.ActiveSheet;
+                    if (sh != null)
+                    {
+                        activeSheetName = (string)sh.Name;
+                        dynamic ur = sh.UsedRange;
+                        if (ur != null)
+                        {
+                            string rawAddr = (string)ur.Address;
+                            usedRangeAddress = rawAddr != null ? rawAddr.Replace("$", "") : "";
+                        }
+                    }
+                }
+                catch { }
 
                 var sheets = new List<string>();
                 try
@@ -137,6 +210,8 @@ namespace LeeExcel
                         name = name,
                         fullName = fullName,
                         isSaved = isSaved,
+                        activeSheetName = activeSheetName,
+                        usedRangeAddress = usedRangeAddress,
                         sheets = sheets,
                         snapshots = snapshots
                     }
@@ -155,14 +230,19 @@ namespace LeeExcel
 
         private static string HandleExecuteVba(Dictionary<string, string> req, dynamic app)
         {
-            dynamic wb = app.ActiveWorkbook;
-            if (wb == null)
+            string targetFullName = req.ContainsKey("targetWorkbookFullName") ? req["targetWorkbookFullName"] : "";
+            string targetName = req.ContainsKey("targetWorkbookName") ? req["targetWorkbookName"] : "";
+
+            dynamic targetWb = FindTargetWorkbook(app, targetFullName, targetName);
+
+            if (targetWb == null)
             {
+                string targetDesc = !string.IsNullOrEmpty(targetFullName) ? targetFullName : targetName;
                 return SimpleJson.Serialize(new BridgeResponse
                 {
                     ok = false,
                     action = "execute_vba",
-                    error = "未检测到活动工作簿，无法执行"
+                    error = "未找到目标工作簿 (" + (targetDesc ?? "未指定") + ")，请确认该工作簿已在 Excel 中打开。"
                 });
             }
 
@@ -179,19 +259,19 @@ namespace LeeExcel
                 });
             }
 
-            // 1. 运行前自动执行整本物理副本快照 (未保存工作簿也尽力导出临时快照)
+            // 1. 运行前自动执行整本物理副本快照 (针对目标工作簿 targetWb)
             SnapshotItem snap = null;
             try
             {
-                snap = SnapshotManager.CreateSnapshot(wb, prompt, code);
+                snap = SnapshotManager.CreateSnapshot(targetWb, prompt, code);
             }
             catch (Exception snapEx)
             {
                 System.Diagnostics.Debug.WriteLine("快照创建告警: " + snapEx.Message);
             }
 
-            // 2. 执行动态 VBA
-            var result = VbaRunner.RunVbaCode(app, wb, code);
+            // 2. 在目标工作簿中执行动态 VBA 并读回实际状态
+            var result = VbaRunner.RunVbaCode(app, targetWb, code);
 
             return SimpleJson.Serialize(new BridgeResponse
             {
@@ -205,21 +285,28 @@ namespace LeeExcel
                     error = result.error,
                     elapsedMs = result.elapsedMs,
                     snapshot = snap,
-                    vbaCode = code
+                    originalVbaCode = result.originalVbaCode,
+                    executedVbaCode = result.executedVbaCode,
+                    transformSteps = result.transformSteps,
+                    readback = result.readback,
+                    targetWorkbookName = (string)targetWb.Name
                 }
             });
         }
 
         private static string HandleCreateSnapshot(Dictionary<string, string> req, dynamic app)
         {
-            dynamic wb = app.ActiveWorkbook;
+            string targetFullName = req.ContainsKey("targetWorkbookFullName") ? req["targetWorkbookFullName"] : "";
+            string targetName = req.ContainsKey("targetWorkbookName") ? req["targetWorkbookName"] : "";
+            dynamic wb = FindTargetWorkbook(app, targetFullName, targetName);
+
             if (wb == null || string.IsNullOrEmpty((string)wb.Path))
             {
                 return SimpleJson.Serialize(new BridgeResponse
                 {
                     ok = false,
                     action = "create_snapshot",
-                    error = "工作簿未保存，无法创建物理备份"
+                    error = "目标工作簿未保存或未找到，无法创建物理备份"
                 });
             }
 
@@ -235,14 +322,17 @@ namespace LeeExcel
 
         private static string HandleRestoreSnapshot(Dictionary<string, string> req, dynamic app)
         {
-            dynamic wb = app.ActiveWorkbook;
+            string targetFullName = req.ContainsKey("targetWorkbookFullName") ? req["targetWorkbookFullName"] : "";
+            string targetName = req.ContainsKey("targetWorkbookName") ? req["targetWorkbookName"] : "";
+            dynamic wb = FindTargetWorkbook(app, targetFullName, targetName);
+
             if (wb == null)
             {
                 return SimpleJson.Serialize(new BridgeResponse
                 {
                     ok = false,
                     action = "restore_snapshot",
-                    error = "未找到活动工作簿"
+                    error = "未找到目标工作簿"
                 });
             }
 
@@ -258,9 +348,12 @@ namespace LeeExcel
             });
         }
 
-        private static string HandleListSnapshots(dynamic app)
+        private static string HandleListSnapshots(Dictionary<string, string> req, dynamic app)
         {
-            dynamic wb = app.ActiveWorkbook;
+            string targetFullName = req.ContainsKey("targetWorkbookFullName") ? req["targetWorkbookFullName"] : "";
+            string targetName = req.ContainsKey("targetWorkbookName") ? req["targetWorkbookName"] : "";
+            dynamic wb = FindTargetWorkbook(app, targetFullName, targetName);
+
             if (wb == null || string.IsNullOrEmpty((string)wb.Path))
             {
                 return SimpleJson.Serialize(new BridgeResponse
