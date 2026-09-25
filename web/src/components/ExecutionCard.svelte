@@ -28,9 +28,17 @@
   // 严格默认折叠，绝不主动展开，保证对话界面清爽
   let isExpanded = false;
   let activeTab: 'code' | 'readback' | 'audit' = 'readback';
+  let codeViewMode: 'executed' | 'original' | 'wrapper' = 'executed';
 
-  $: displayCode = execution?.executedVbaCode || execution?.vbaCode || streamCode || '';
-  $: rawCode = execution?.originalVbaCode || displayCode;
+  $: executedCode = execution?.executedVbaCode || execution?.vbaCode || streamCode || '';
+  $: originalCode = execution?.originalVbaCode || executedCode;
+  $: wrapperCode = execution?.wrapperCode || '';
+  $: displayCode =
+    codeViewMode === 'original'
+      ? originalCode
+      : codeViewMode === 'wrapper'
+      ? wrapperCode
+      : executedCode;
 
   let showSaveDialog = false;
   let scriptName = '';
@@ -57,11 +65,13 @@
   }
 
   async function handleSaveScript() {
-    if (!scriptName.trim() || !displayCode) return;
+    // 始终保存真实执行过、可再次运行的实际代码
+    const codeToSave = executedCode || displayCode;
+    if (!scriptName.trim() || !codeToSave) return;
     isSaving = true;
     const res = await bridge.send('save_script', {
       name: scriptName.trim(),
-      code: displayCode,
+      code: codeToSave,
       description: scriptDesc.trim() || prompt,
     });
     isSaving = false;
@@ -81,7 +91,11 @@
 
   async function handleRestore(targetId: string) {
     if (!targetId) return;
-    if (!confirm('确认将当前工作簿恢复到该快照执行前的状态吗？\n当前工作簿未保存的修改将被放弃。')) {
+    if (
+      !confirm(
+        '【高危回滚提醒】\n确定将工作簿恢复到该宏执行前的快照吗？\n\n⚠️ 注意：宏执行后您所做的所有新增手工修改、单元格编辑都将被覆盖并永久丢失！\n（系统会在恢复前为当前状态保留一份紧急安全救援副本）'
+      )
+    ) {
       return;
     }
 
@@ -275,8 +289,49 @@
 
       <!-- Tab 2: 代码展示 -->
       {#if activeTab === 'code'}
-        <div class="code-container">
-          <pre class="vba-code"><code>{displayCode || '正在生成代码...'}</code></pre>
+        <div class="code-view-wrapper">
+          <div class="code-sub-bar">
+            <div class="code-sub-tabs">
+              <button
+                class="sub-tab-btn {codeViewMode === 'executed' ? 'active' : ''}"
+                on:click={() => (codeViewMode = 'executed')}
+              >
+                实际执行源码
+                {#if execution?.executedCodeHash}
+                  <span class="hash-tag">SHA:{execution.executedCodeHash.slice(0, 8)}</span>
+                {/if}
+              </button>
+              <button
+                class="sub-tab-btn {codeViewMode === 'original' ? 'active' : ''}"
+                on:click={() => (codeViewMode = 'original')}
+              >
+                模型原始提取
+                {#if execution?.originalCodeHash}
+                  <span class="hash-tag">SHA:{execution.originalCodeHash.slice(0, 8)}</span>
+                {/if}
+              </button>
+              {#if wrapperCode}
+                <button
+                  class="sub-tab-btn {codeViewMode === 'wrapper' ? 'active' : ''}"
+                  on:click={() => (codeViewMode = 'wrapper')}
+                >
+                  入口包装器
+                </button>
+              {/if}
+            </div>
+
+            <div class="code-integrity-badge">
+              {#if execution?.isSourceIdentical}
+                <span class="pill pill-green">正文与执行代码 100% 一致 (零暗改)</span>
+              {:else if wrapperCode}
+                <span class="pill pill-blue">正文零修改 + 追加透明包装器</span>
+              {/if}
+            </div>
+          </div>
+
+          <div class="code-container">
+            <pre class="vba-code"><code>{displayCode || '正在生成代码...'}</code></pre>
+          </div>
         </div>
       {/if}
 
@@ -296,9 +351,31 @@
             <span class="log-val">{execution?.elapsedMs || 0} ms</span>
           </div>
 
+          <!-- 哈希与源码一致性审计 -->
+          <div class="log-row">
+            <span class="log-label">源码哈希:</span>
+            <div class="hash-table">
+              <div class="hash-item">
+                <span class="hash-name">模型提取:</span>
+                <code>{execution?.originalCodeHash || 'N/A'}</code>
+              </div>
+              <div class="hash-item">
+                <span class="hash-name">实际执行:</span>
+                <code>{execution?.executedCodeHash || 'N/A'}</code>
+              </div>
+              <div class="hash-status">
+                {#if execution?.isSourceIdentical}
+                  <span class="pill pill-green">哈希一致 (模型原貌直调)</span>
+                {:else if wrapperCode}
+                  <span class="pill pill-blue">正文零暗改 (追加受控入口包装器)</span>
+                {/if}
+              </div>
+            </div>
+          </div>
+
           {#if execution?.transformSteps && execution.transformSteps.length > 0}
             <div class="log-row flex-col">
-              <span class="log-label">宿主规整步骤:</span>
+              <span class="log-label">规整与包装:</span>
               <ul class="step-list">
                 {#each execution.transformSteps as step}
                   <li>{step}</li>
@@ -307,6 +384,90 @@
             </div>
           {/if}
 
+          <!-- 预编译与运行阶段状态精确区分 -->
+          <div class="log-row">
+            <span class="log-label">预检与阶段:</span>
+            <div class="rb-badges">
+              {#if execution?.precheckStatus === 'passed'}
+                <span class="pill pill-green">静态预检通过 (VBE 578)</span>
+              {:else if execution?.precheckStatus === 'unavailable'}
+                <span class="pill pill-amber">预编译不可用 (未受检执行)</span>
+              {:else if execution?.precheckStatus === 'failed'}
+                <span class="pill pill-red">预编译拦截 (存在语法/引用错误)</span>
+              {:else if execution?.precheckStatus === 'scope_risk_intercepted'}
+                <span class="pill pill-red">范围失控拦截 (阻止运行)</span>
+              {:else if execution?.precheckStatus === 'workbook_locked'}
+                <span class="pill pill-red">工作簿已锁定保护</span>
+              {/if}
+
+              {#if execution?.executionPhase === 'macro_completed'}
+                <span class="pill pill-blue">宏真正运行完成</span>
+              {:else if execution?.executionPhase === 'hang_interrupted_recovered'}
+                <span class="pill pill-amber">挂起已中断并证实恢复</span>
+              {:else if execution?.executionPhase === 'hang_unconfirmed_locked'}
+                <span class="pill pill-red">挂起中断未证实 (已锁定)</span>
+              {:else if execution?.executionPhase === 'hang_suspected_interrupt_sent'}
+                <span class="pill pill-amber">疑似挂起已发中断</span>
+              {:else if execution?.executionPhase === 'runtime_hang'}
+                <span class="pill pill-red">运行期挂起</span>
+              {:else if execution?.executionPhase === 'runtime_error'}
+                <span class="pill pill-red">运行期异常抛出</span>
+              {:else if execution?.executionPhase === 'syntax_failed' || execution?.executionPhase === 'intercepted_before_run' || execution?.executionPhase === 'blocked_by_lock'}
+                <span class="pill pill-gray">未进入运行阶段</span>
+              {/if}
+            </div>
+          </div>
+
+          <!-- 生成重试与 Token 成本明细 (纠正标签数学逻辑) -->
+          {#if execution?.retryCount !== undefined || execution?.llmCost}
+            <div class="log-row">
+              <span class="log-label">生成开销:</span>
+              <div class="cost-info">
+                <span class="cost-item">
+                  重试: <strong>{execution?.retryCount || 0} 次</strong>
+                  {#if (execution?.retryCount || 0) > 0}
+                    <span class="dim-text">(安全纠偏/重试，绝不拼装半截代码)</span>
+                  {/if}
+                </span>
+                {#if execution?.llmCost?.totalTokens}
+                  {@const reasoningTokens = execution.llmCost.reasoningTokens || 0}
+                  {@const compTokens = execution.llmCost.completionTokens || 0}
+                  {@const contentTokens = execution.llmCost.contentTokens ?? (compTokens >= reasoningTokens ? compTokens - reasoningTokens : compTokens)}
+                  <span class="cost-item">
+                    Token 累计: <strong>{execution.llmCost.totalTokens}</strong>
+                    {#if reasoningTokens > 0}
+                      <span class="dim-text">(生成={compTokens}: 思考={reasoningTokens} + 正文={contentTokens})</span>
+                    {:else if contentTokens > 0}
+                      <span class="dim-text">(正文: {contentTokens})</span>
+                    {/if}
+                  </span>
+                  {#if execution.llmCost.promptTokens}
+                    <span class="cost-item dim-text">提示词: {execution.llmCost.promptTokens}</span>
+                  {/if}
+                {/if}
+              </div>
+            </div>
+          {/if}
+
+          {#if execution?.riskNotice}
+            <div class="log-row flex-col">
+              <span class="log-label">运行状态说明:</span>
+              <span class="log-val dim-text">{execution.riskNotice}</span>
+            </div>
+          {/if}
+
+          <!-- 跨工作簿隔离检查 -->
+          <div class="log-row">
+            <span class="log-label">跨文件检查:</span>
+            {#if execution?.readback?.otherWorkbooksAffected}
+              <span class="log-val font-error">
+                ⚠️ 检测到其他打开的工作簿受到影响：{execution.readback.affectedWorkbooksWarning}
+              </span>
+            {:else}
+              <span class="log-val" style="color: #107C41;">未影响其他已打开工作簿</span>
+            {/if}
+          </div>
+
           {#if execution?.error}
             <div class="log-row error-block">
               <span class="log-label">异常详情:</span>
@@ -314,10 +475,21 @@
             </div>
           {:else}
             <div class="log-row">
-              <span class="log-label">运行状态:</span>
+              <span class="log-label">模块清理:</span>
               <span class="log-val" style="color: #107C41;">COM 宏调用完成，临时模块已瞬时销毁清理</span>
             </div>
           {/if}
+
+          <!-- 开放式 VBA 安全与回滚边界警示 -->
+          <div class="boundary-warning-card">
+            <div class="bw-header">
+              <ShieldAlert size={14} color="#D83B01" />
+              <span class="bw-title">开放式 VBA 安全与回滚边界声明</span>
+            </div>
+            <p class="bw-body">
+              工作簿快照仅保障目标工作簿本身的数据与格式原位回滚。若模型生成的开放式 VBA 包含外部文件读写、修改了其他工作簿、调用系统 API 或执行外部进程等副作用，快照无法自动撤回。宿主负责核验目标并确保单点执行，宏的系统级行为仍需人工把关。
+            </p>
+          </div>
         </div>
       {/if}
 
@@ -383,6 +555,11 @@
             {/if}
           </button>
         {/if}
+      </div>
+
+      <!-- 快照保护边界明确声明，不夸大快照覆盖范围 -->
+      <div class="snapshot-boundary-note">
+        <span>ℹ️ 快照保护边界：快照完整备份和回滚目标工作簿本身的数据与结构；VBA 宏若涉及外部工作簿、本地磁盘或网络操作等外部副作用，快照无法自动回滚。</span>
       </div>
     </div>
   {/if}
@@ -609,6 +786,26 @@
     color: #605e5c;
   }
 
+  .pill-amber {
+    background: #fff4ce;
+    color: #797673;
+  }
+
+  .cost-info {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: var(--office-text);
+  }
+
+  .cost-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
   .sample-tags {
     display: flex;
     flex-wrap: wrap;
@@ -643,6 +840,62 @@
 
   .ver-text {
     color: #323130;
+  }
+
+  .code-view-wrapper {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .code-sub-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #252526;
+    padding: 4px 10px;
+    border-bottom: 1px solid #333333;
+  }
+
+  .code-sub-tabs {
+    display: flex;
+    gap: 4px;
+  }
+
+  .sub-tab-btn {
+    background: transparent;
+    border: 1px solid transparent;
+    color: #969696;
+    font-size: 10px;
+    padding: 2px 7px;
+    border-radius: 3px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .sub-tab-btn:hover {
+    color: #e0e0e0;
+    background: #2d2d2d;
+  }
+
+  .sub-tab-btn.active {
+    color: #ffffff;
+    background: #37373d;
+    border-color: #4b4b4b;
+    font-weight: 600;
+  }
+
+  .hash-tag {
+    font-family: Consolas, monospace;
+    font-size: 9px;
+    color: #4ec9b0;
+    opacity: 0.85;
+  }
+
+  .code-integrity-badge {
+    display: flex;
+    align-items: center;
   }
 
   .code-container {
@@ -689,6 +942,67 @@
   .log-val {
     color: var(--office-text);
     word-break: break-all;
+  }
+
+  .hash-table {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    background: #f3f2f1;
+    padding: 6px 8px;
+    border-radius: 4px;
+    flex: 1;
+  }
+
+  .hash-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10px;
+  }
+
+  .hash-name {
+    color: var(--office-muted);
+    min-width: 60px;
+  }
+
+  .hash-item code {
+    font-family: Consolas, monospace;
+    font-size: 10px;
+    color: #004e8c;
+    word-break: break-all;
+  }
+
+  .hash-status {
+    margin-top: 2px;
+  }
+
+  .boundary-warning-card {
+    margin-top: 6px;
+    padding: 8px 10px;
+    background: #fff8f5;
+    border: 1px solid #fed9cc;
+    border-radius: 4px;
+  }
+
+  .bw-header {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-bottom: 4px;
+  }
+
+  .bw-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: #d83b01;
+  }
+
+  .bw-body {
+    margin: 0;
+    font-size: 10.5px;
+    line-height: 1.45;
+    color: #605e5c;
   }
 
   .step-list {
@@ -818,5 +1132,14 @@
     to {
       transform: rotate(360deg);
     }
+  }
+
+  .snapshot-boundary-note {
+    font-size: 11px;
+    color: var(--office-muted);
+    padding: 6px 12px;
+    background: #fbfbfb;
+    border-top: 1px dashed var(--office-border);
+    line-height: 1.4;
   }
 </style>

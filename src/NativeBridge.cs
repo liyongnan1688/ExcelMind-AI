@@ -20,11 +20,19 @@ namespace LeeExcel
         public string error { get; set; }
         public double elapsedMs { get; set; }
         public SnapshotItem snapshot { get; set; }
+        public string rawModelResponse { get; set; }
         public string originalVbaCode { get; set; }
         public string executedVbaCode { get; set; }
+        public string wrapperCode { get; set; }
+        public string originalCodeHash { get; set; }
+        public string executedCodeHash { get; set; }
+        public bool isSourceIdentical { get; set; }
         public List<string> transformSteps { get; set; }
         public WorkbookReadback readback { get; set; }
         public string targetWorkbookName { get; set; }
+        public string precheckStatus { get; set; }
+        public string executionPhase { get; set; }
+        public string riskNotice { get; set; }
     }
 
     public class BridgeResponse
@@ -70,6 +78,9 @@ namespace LeeExcel
 
                     case "delete_script":
                         return HandleDeleteScript(req);
+
+                    case "unlock_workbook":
+                        return HandleUnlockWorkbook(req, app);
 
                     default:
                         return SimpleJson.Serialize(new BridgeResponse
@@ -259,6 +270,8 @@ namespace LeeExcel
                 });
             }
 
+            string rawModelResponse = req.ContainsKey("rawModelResponse") ? req["rawModelResponse"] : "";
+
             // 1. 运行前自动执行整本物理副本快照 (针对目标工作簿 targetWb)
             SnapshotItem snap = null;
             try
@@ -271,7 +284,7 @@ namespace LeeExcel
             }
 
             // 2. 在目标工作簿中执行动态 VBA 并读回实际状态
-            var result = VbaRunner.RunVbaCode(app, targetWb, code);
+            var result = VbaRunner.RunVbaCode(app, targetWb, code, rawModelResponse);
 
             return SimpleJson.Serialize(new BridgeResponse
             {
@@ -285,11 +298,19 @@ namespace LeeExcel
                     error = result.error,
                     elapsedMs = result.elapsedMs,
                     snapshot = snap,
+                    rawModelResponse = result.rawModelResponse,
                     originalVbaCode = result.originalVbaCode,
                     executedVbaCode = result.executedVbaCode,
+                    wrapperCode = result.wrapperCode,
+                    originalCodeHash = result.originalCodeHash,
+                    executedCodeHash = result.executedCodeHash,
+                    isSourceIdentical = result.isSourceIdentical,
                     transformSteps = result.transformSteps,
                     readback = result.readback,
-                    targetWorkbookName = (string)targetWb.Name
+                    targetWorkbookName = (string)targetWb.Name,
+                    precheckStatus = result.precheckStatus,
+                    executionPhase = result.executionPhase,
+                    riskNotice = result.riskNotice
                 }
             });
         }
@@ -339,12 +360,31 @@ namespace LeeExcel
             string snapId = req.ContainsKey("snapshotId") ? req["snapshotId"] : "";
             string err;
             bool ok = SnapshotManager.RestoreSnapshot(app, wb, snapId, out err);
+            if (ok)
+            {
+                try { VbaRunner.UnlockWorkbook((string)wb.Name); } catch { }
+            }
             return SimpleJson.Serialize(new BridgeResponse
             {
                 ok = ok,
                 action = "restore_snapshot",
-                message = ok ? "已成功恢复到快照执行前的整本工作簿状态！" : err,
+                message = ok ? "已成功恢复到快照执行前的整本工作簿状态，锁定已自动解除！" : err,
                 error = err
+            });
+        }
+
+        private static string HandleUnlockWorkbook(Dictionary<string, string> req, dynamic app)
+        {
+            string targetName = req.ContainsKey("targetWorkbookName") ? req["targetWorkbookName"] : "";
+            if (!string.IsNullOrEmpty(targetName))
+            {
+                VbaRunner.UnlockWorkbook(targetName);
+            }
+            return SimpleJson.Serialize(new BridgeResponse
+            {
+                ok = true,
+                action = "unlock_workbook",
+                message = "工作簿锁定已解除"
             });
         }
 

@@ -4,6 +4,9 @@ export interface LlmConfig {
   apiKey: string;
   model: string;
   temperature?: number;
+  maxTokens?: number;
+  thinkingMode?: 'auto' | 'disabled' | 'budget';
+  thinkingBudget?: number;
   systemPromptAddition: string;
 }
 
@@ -69,6 +72,9 @@ export function loadLlmConfig(): LlmConfig {
     baseUrl: 'https://api.deepseek.com/v1',
     apiKey: '',
     model: 'deepseek-chat',
+    maxTokens: 16384,
+    thinkingMode: 'auto',
+    thinkingBudget: 2048,
     systemPromptAddition: '',
   };
 }

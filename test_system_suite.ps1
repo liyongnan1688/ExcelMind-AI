@@ -88,11 +88,11 @@ try {
     $passed7A = ($truncResult.success -eq $false) -and ($truncResult.summary -like "*缺少 Sub 或 End Sub*")
     Record-Test "7A. Missing End Sub interception" "Code Validation" $passed7A $truncResult.summary
 
-    # 无参过程被安全约定拦截（拒绝盲目自动运行）
+    # 无参过程通过透明包装器安全执行（非拒绝，而是追加受控入口并传入目标 wb）
     $paramlessCode = "Sub ParameterlessTask()`r`n    Range(""A1"").Value = 123`r`nEnd Sub"
     $paramlessResult = [LeeExcel.VbaRunner]::RunVbaCode($excel, $wbA, $paramlessCode)
-    $passed7B = ($paramlessResult.success -eq $false) -and ($paramlessResult.summary -like "*未声明目标工作簿参数*")
-    Record-Test "7B. Parameterless procedure safely intercepted" "Target Binding Convention" $passed7B $paramlessResult.summary
+    $passed7B = ($paramlessResult.success -eq $true) -and ($paramlessResult.wrapperCode -ne $null) -and ($paramlessResult.wrapperCode -like "*LeeHostRunner*")
+    Record-Test "7B. Parameterless procedure safely wrapped and executed" "Target Binding Convention" $passed7B $paramlessResult.summary
 
     # -------------------------------------------------------------
     # 用例 8: 多工作簿并存、受控参数传递与窗口切换免疫

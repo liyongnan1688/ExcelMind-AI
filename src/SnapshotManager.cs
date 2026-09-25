@@ -175,15 +175,44 @@ namespace LeeExcel
                     return false;
                 }
 
+                // 0. 在覆盖前，为当前工作簿（含宏后手工修改）单独保存一份安全救援快照
+                string rescueFileName = "rescue_before_restore_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".xlsx";
+                string rescueFullPath = Path.Combine(folder, rescueFileName);
+                try
+                {
+                    currentWorkbook.SaveCopyAs(rescueFullPath);
+                }
+                catch (Exception rescueEx)
+                {
+                    System.Diagnostics.Debug.WriteLine("Rescue snapshot warning: " + rescueEx.Message);
+                }
+
                 // 1. 关闭当前工作簿（放弃修改）
                 currentWorkbook.Close(false);
 
                 if (Path.IsPathRooted(originalPath) && File.Exists(originalPath))
                 {
                     // 2. 将快照文件复制覆盖原文件
-                    File.Copy(snapshotFullPath, originalPath, true);
+                    try
+                    {
+                        File.Copy(snapshotFullPath, originalPath, true);
+                    }
+                    catch (Exception copyEx)
+                    {
+                        errorMessage = "文件覆盖失败（原文件可能被其他进程占用）: " + copyEx.Message + "。快照原件与恢复前紧急备份均完好无损。";
+                        return false;
+                    }
+
                     // 3. 重新打开工作簿
-                    app.Workbooks.Open(originalPath);
+                    try
+                    {
+                        app.Workbooks.Open(originalPath);
+                    }
+                    catch (Exception openEx)
+                    {
+                        errorMessage = "恢复成功但重新打开文件失败: " + openEx.Message + "。物理文件已恢复为快照，您可手动从 Excel 打开：" + originalPath;
+                        return false;
+                    }
                 }
                 else
                 {

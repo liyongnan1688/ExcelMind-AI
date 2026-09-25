@@ -210,6 +210,7 @@
         prompt: text,
         targetWorkbookName: targetWbName,
         targetWorkbookFullName: targetWbFullName,
+        rawModelResponse: rawResponse,
       });
 
       if (execRes.ok && execRes.data) {

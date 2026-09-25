@@ -77,6 +77,43 @@
         />
         <span class="hint">留空时不强制传参；若填写建议 0.3 ~ 0.7 之间</span>
       </div>
+
+      <div class="form-group">
+        <label>最大输出 Token 预算 (Max Tokens)</label>
+        <input
+          type="number"
+          step="1024"
+          min="2048"
+          max="65536"
+          bind:value={config.maxTokens}
+          placeholder="默认 16384 (充足预算避免复杂多步骤看板中途被截断)"
+        />
+        <span class="hint">为复杂大表与多过程 VBA 保留充足生成空间，默认 16384</span>
+      </div>
+
+      <div class="form-group">
+        <label>深度思考 / 推理模式 (Thinking Mode)</label>
+        <select bind:value={config.thinkingMode} class="select-input">
+          <option value="auto">自动 (完全由模型端默认决定)</option>
+          <option value="disabled">关闭思考链 (Token 全部分配给代码正文，防止思考耗尽预算)</option>
+          <option value="budget">限制思考预算 (指定思考 Token 上限，兼顾规划与输出)</option>
+        </select>
+      </div>
+
+      {#if config.thinkingMode === 'budget'}
+        <div class="form-group">
+          <label>思考链预算 Token 数 (Thinking Budget)</label>
+          <input
+            type="number"
+            step="512"
+            min="512"
+            max="16384"
+            bind:value={config.thinkingBudget}
+            placeholder="默认 2048"
+          />
+          <span class="hint">限制思考链占用的最大 Token 数，剩余预算全部留给 VBA 代码正文</span>
+        </div>
+      {/if}
     </div>
 
     <div class="modal-footer">
@@ -151,7 +188,7 @@
     color: var(--office-text);
   }
 
-  input {
+  input, .select-input {
     height: 32px;
     padding: 0 10px;
     font-size: 12px;
@@ -159,6 +196,7 @@
     border-radius: 4px;
     outline: none;
     transition: border-color 0.15s;
+    background: #fff;
   }
 
   input:focus {

@@ -51,14 +51,39 @@ export interface VbaExecutionData {
   error?: string;
   elapsedMs: number;
   snapshot?: SnapshotItem;
+  rawModelResponse?: string;
   originalVbaCode?: string;
   executedVbaCode?: string;
+  wrapperCode?: string;
+  originalCodeHash?: string;
+  executedCodeHash?: string;
+  isSourceIdentical?: boolean;
   vbaCode?: string; // backwards compatibility
   transformSteps?: string[];
   readback?: WorkbookReadback;
   targetWorkbookName?: string;
   verificationStatus?: 'verified' | 'unconfirmed' | 'failed';
   verificationNote?: string;
+  precheckStatus?: 'passed' | 'failed' | 'unavailable' | 'scope_risk_intercepted' | 'workbook_locked' | 'skipped';
+  executionPhase?:
+    | 'macro_completed'
+    | 'hang_suspected_interrupt_sent'
+    | 'hang_interrupted_recovered'
+    | 'hang_unconfirmed_locked'
+    | 'runtime_hang'
+    | 'runtime_error'
+    | 'syntax_failed'
+    | 'intercepted_before_run'
+    | 'blocked_by_lock';
+  retryCount?: number;
+  llmCost?: {
+    promptTokens?: number;
+    completionTokens?: number;
+    reasoningTokens?: number;
+    contentTokens?: number;
+    totalTokens?: number;
+  };
+  hangRecovery?: string;
 }
 
 export interface BridgeResponse<T = any> {

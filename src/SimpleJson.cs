@@ -67,6 +67,23 @@ namespace LeeExcel
             if (obj is bool) return (bool)obj ? "true" : "false";
             if (obj is int || obj is long || obj is double || obj is float) return obj.ToString();
 
+            var dict = obj as System.Collections.IDictionary;
+            if (dict != null)
+            {
+                var sbDict = new StringBuilder("{");
+                bool first = true;
+                foreach (System.Collections.DictionaryEntry de in dict)
+                {
+                    if (!first) sbDict.Append(",");
+                    first = false;
+                    string k = de.Key != null ? de.Key.ToString() : "";
+                    sbDict.Append("\"").Append(Escape(k)).Append("\":");
+                    sbDict.Append(Serialize(de.Value));
+                }
+                sbDict.Append("}");
+                return sbDict.ToString();
+            }
+
             if (obj is System.Collections.IEnumerable && !(obj is IDictionary<string, object>))
             {
                 var sbArr = new StringBuilder("[");

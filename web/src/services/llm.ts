@@ -10,10 +10,18 @@ export interface ParsedStreamOutput {
   isTruncated: boolean;
 }
 
+export interface ScopeRiskResult {
+  hasRisk: boolean;
+  riskType?: 'ALL_CELLS_FORMAT' | 'ALL_CELLS_CLEAR' | 'ALL_COLUMNS_FORMAT';
+  matchedSnippet?: string;
+  advice?: string;
+}
+
 export interface ExtractedVbaResult {
   code: string;
   isTruncated: boolean;
   error?: string;
+  scopeRisk?: ScopeRiskResult;
 }
 
 /**
@@ -121,25 +129,12 @@ export function buildAutomationSystemPrompt(
 目标工作簿包含的工作表: [${sheets.join(', ')}]。
 当前活动工作表: "${activeSheet || '默认'}"，使用区域: "${usedRange || '空'}"。
 
-【核心执行规范 - 目标对象显式绑定约定】：
-1. 必须且仅编写一个主过程，显式声明并接收目标工作簿参数：
-   \`Sub LeeTaskEntry(targetWb As Workbook)\`
-2. 所有针对工作表、单元格、图表的操作必须显式基于传入的 targetWb 进行操作！
-   例如：
-   Dim ws As Worksheet
-   Set ws = targetWb.Worksheets.Add() ' 或 Set ws = targetWb.Sheets(1)
-   ws.Range("D1").Value = ...
-3. 【严禁事项】：
-   - 严禁编写无参过程 \`Sub RunTask()\` 或 \`Sub LeeTaskEntry()\`；
-   - 严禁脱离 targetWb 盲目使用未限定的 ActiveWorkbook、ThisWorkbook 或省略工作簿引用的 Worksheets.Add / ActiveSheet；
-   - 严禁调用 MsgBox，严禁使用 Application.Quit，严禁弹出任何交互确认框；
-   - 严禁在写入数据后对目标区域调用 .ClearContents 或 .Clear，以免误清空已生成的数据。
-4. 【多形态任务排版处理】：
-   对于日常可能存在多种理解形态的任务（如“九九乘法表”）：
-   - 若用户无附加限定，在中文办公场景下通常期望标准算式口诀表（如 1×1=1，阶梯形排列并应用清爽排版）；
-   - 若用户明确要求“数值乘积矩阵”，则生成 1~9 行列纯乘积数字；
-   - 在生成的 1 句话简述中明确告知所选用的形态排版。
-5. 过程必须以 \`End Sub\` 完整闭合，完整包裹在 \`\`\`vba ... \`\`\` 代码块中。`;
+【核心执行协议与规范】：
+1. 根据用户的自然语言需求，自主决定最合适的高效实现方案（可自由使用循环、数组、公式、格式、图表、筛选、数据透视表及辅助过程等，不受限固定模板与行数）。
+2. 主过程可以声明接收目标工作簿参数（如 Sub Main(targetWb As Workbook)），也可以编写无参主过程（如 Sub Main()）；允许定义多个辅助过程与函数。
+3. 代码必须是完整可编译运行的标准 VBA，语法严格遵循 VB6/VBA 规范（仔细检查括号与属性调用的位置如 ws.Columns(1).ColumnWidth，提前退出请使用 Exit Sub/Function，禁止书写非法的自定义 End 标签 如 End CleanExit 等），包裹在单个 \`\`\`vba ... \`\`\` 代码块中，以 End Sub 正常闭合。
+4. 【安全约束】：严禁调用 MsgBox、Application.Quit 或弹出阻塞式交互确认框。
+5. 【结构与输出】：直接输出完整可执行的标准 VBA 代码，包裹在 \`\`\`vba ... \`\`\` 代码块中，在代码块前后仅提供简明扼要的说明，避免冗长说明以确保代码完整不被截断。`;
 }
 
 /**
@@ -203,11 +198,13 @@ export function extractVbaCode(content: string): ExtractedVbaResult {
 
   const rawCode = rest.slice(0, closeFenceIndex).trim();
 
-  // 严格结构校验：必须具备过程声明与完整的 End Sub
-  const hasSubDecl = /(?:Public\s+|Private\s+)?Sub\s+[a-zA-Z0-9_\u4e00-\u9fa5]+\s*\(/i.test(rawCode);
-  const hasEndSub = /End\s+Sub/i.test(rawCode);
+  // 严格结构校验：必须具备过程声明，且 Sub/Function 与 End Sub/End Function 数量必须严格配对
+  const subMatches = rawCode.match(/(?:^|\n)\s*(?:Public\s+|Private\s+)?Sub\s+[a-zA-Z0-9_\u4e00-\u9fa5]+\s*\(/gi) || [];
+  const endSubMatches = rawCode.match(/(?:^|\n)\s*End\s+Sub\b/gi) || [];
+  const fnMatches = rawCode.match(/(?:^|\n)\s*(?:Public\s+|Private\s+)?Function\s+[a-zA-Z0-9_\u4e00-\u9fa5]+\s*\(/gi) || [];
+  const endFnMatches = rawCode.match(/(?:^|\n)\s*End\s+Function\b/gi) || [];
 
-  if (!hasSubDecl) {
+  if (subMatches.length === 0) {
     return {
       code: rawCode,
       isTruncated: false,
@@ -215,21 +212,84 @@ export function extractVbaCode(content: string): ExtractedVbaResult {
     };
   }
 
-  if (!hasEndSub) {
+  if (subMatches.length > endSubMatches.length || fnMatches.length > endFnMatches.length) {
     return {
       code: rawCode,
       isTruncated: true,
-      error: '代码结构不完整 (缺少闭合 End Sub)，可能由于响应截断引起，已拦截未执行。',
+      error: `代码结构不完整 (检测到 ${subMatches.length} 个 Sub、${endSubMatches.length} 个 End Sub；${fnMatches.length} 个 Function、${endFnMatches.length} 个 End Function)，可能由于模型生成被截断引起，已安全拦截未执行。`,
+    };
+  }
+
+  // 检查非法的 End 语句 (如 End CleanExit, End Try)
+  const invalidEndMatch = rawCode.match(/^\s*End\s+(?!Sub\b|Function\b|Property\b|If\b|With\b|Select\b|Type\b|Enum\b)([A-Za-z0-9_]+)/im);
+  if (invalidEndMatch) {
+    return {
+      code: rawCode,
+      isTruncated: false,
+      error: `代码包含非标准 VBA 语法语句 '${invalidEndMatch[0].trim()}'（跳出请使用 Exit Sub/Function），已安全拦截未注入。`,
     };
   }
 
   // 清理行前可能的 markdown 符号
   const cleanedCode = rawCode.replace(/^[ \t]*[*\-•][ \t]+/gm, '');
 
+  const scopeRisk = checkVbaScopeRisk(cleanedCode);
+
   return {
     code: cleanedCode,
     isTruncated: false,
+    scopeRisk,
+    error: scopeRisk.hasRisk ? `影响范围失控警告: ${scopeRisk.matchedSnippet}` : undefined,
   };
+}
+
+/**
+ * 执行前影响范围检查：重点检测对整张工作表 171 亿单元格做重度格式化、批量删除的高危操作
+ * 杜绝 ws.Cells.Borders.LineStyle = xlContinuous 等合法语法但失控导致 Excel 挂死的代码
+ */
+export function checkVbaScopeRisk(code: string): ScopeRiskResult {
+  if (!code) return { hasRisk: false };
+
+  // 1. 全表单元格边框、背景色或条件格式
+  const allCellsFormatRegex =
+    /(?:(?:ws|ActiveSheet|Worksheets\([^)]+\)|targetWb\.ActiveSheet)\s*\.\s*Cells|(?<!\.)\bCells)\s*\.\s*(?:Borders|Interior|FormatConditions)\b/i;
+  const match1 = code.match(allCellsFormatRegex);
+  if (match1) {
+    return {
+      hasRisk: true,
+      riskType: 'ALL_CELLS_FORMAT',
+      matchedSnippet: match1[0],
+      advice: `代码包含对整张工作表全部单元格的格式化操作（${match1[0]}）。Excel单张表包含171亿个单元格，对全表Cells直接设置边框或背景色会耗尽系统资源导致Excel深度卡死。请将边框与背景色限定在实际业务数据区域（如 ws.Range(...) 或 Range(ws.Cells(r1, c1), ws.Cells(r2, c2))）。`,
+    };
+  }
+
+  // 2. 全表单元格清空格式或删除
+  const allCellsClearRegex =
+    /(?:(?:ws|ActiveSheet|Worksheets\([^)]+\)|targetWb\.ActiveSheet)\s*\.\s*Cells|(?<!\.)\bCells)\s*\.\s*(?:ClearFormats|Delete)\b/i;
+  const match2 = code.match(allCellsClearRegex);
+  if (match2) {
+    return {
+      hasRisk: true,
+      riskType: 'ALL_CELLS_CLEAR',
+      matchedSnippet: match2[0],
+      advice: `代码包含对全表单元格的批量删除或清格式操作（${match2[0]}）。请改为仅对数据表使用区域（ws.UsedRange）或指定数据Range操作。`,
+    };
+  }
+
+  // 3. 整列/整行批量格式化（整列含104万行，批量设置边框极易引发性能灾难）
+  const allColumnsFormatRegex =
+    /(?:(?:ws|ActiveSheet|Worksheets\([^)]+\))\s*\.\s*)?(?:Columns(?:\([^)]+\))?|Rows(?:\([^)]+\))?)\s*\.\s*(?:Borders|Interior|FormatConditions)\b/i;
+  const match3 = code.match(allColumnsFormatRegex);
+  if (match3) {
+    return {
+      hasRisk: true,
+      riskType: 'ALL_COLUMNS_FORMAT',
+      matchedSnippet: match3[0],
+      advice: `代码尝试对整列/整行全部单元格设置边框或背景色（${match3[0]}）。整列包含104万个单元格，请仅在有效数据行范围内设置格式。`,
+    };
+  }
+
+  return { hasRisk: false };
 }
 
 /**
@@ -261,7 +321,6 @@ export function verifyExecutionResult(
     };
   }
 
-  const p = prompt.toLowerCase();
   const notes: string[] = [];
 
   // 1. 坐标起点核验
@@ -269,57 +328,43 @@ export function verifyExecutionResult(
   if (startMatch) {
     const expectedStart = startMatch[1].toUpperCase();
     if (readback.startCell && readback.startCell.toUpperCase() !== expectedStart) {
-      notes.push(`要求从 ${expectedStart} 开始，实际起始于 ${readback.startCell}`);
+      notes.push(`指令指定从 ${expectedStart} 开始，实际检测起始于 ${readback.startCell}`);
     }
   }
 
-  // 2. 算式文本 vs 纯数字乘积核验
-  const wantsEquationExplicit = /(?:算式|口诀|乘法口诀|带算式)/i.test(prompt);
-  const wantsNumericExplicit = /(?:数值乘积矩阵|纯数字|数值矩阵|乘积矩阵)/i.test(prompt);
-  const isMultiplicationGeneral = /(?:九九乘法表|乘法表)/i.test(prompt);
-
-  const hasEquationText =
-    readback.sampleValues &&
-    readback.sampleValues.some((v) => v.includes('×') || v.includes('*') || v.includes('=') || v.includes('得'));
-
-  if (wantsEquationExplicit && !hasEquationText) {
-    notes.push('明确要求算式口诀，实际检测为纯数字矩阵，未生成算式文本');
-  } else if (wantsNumericExplicit && hasEquationText) {
-    notes.push('明确要求数值矩阵，实际生成了算式文本');
-  } else if (isMultiplicationGeneral && !wantsNumericExplicit && !wantsEquationExplicit) {
-    if (hasEquationText) {
-      notes.push('已生成标准算式口诀表（D1:L9）');
-    } else {
-      notes.push('已生成乘积数值矩阵（D1:L9）');
-    }
+  // 2. 公式核验
+  const wantsFormula = /(?:公式|求和|sum|计算|平均|average|vlookup|xlookup)/i.test(prompt);
+  if (wantsFormula && !readback.hasFormulas) {
+    notes.push('指令包含公式计算诉求，实际区域内未检测到标准 Excel 公式（可能直接写入了数值）');
   }
 
-  // 3. 主观美观排版提示
-  const wantsBeauty = /(?:美化|商务|好看|排版|样式|颜色|边框)/i.test(prompt);
-  if (wantsBeauty) {
+  // 3. 主观美观排版与图表提示（如实标为待人工确认，不冒充万能语义验收器）
+  const wantsBeautyOrChart = /(?:美化|商务|好看|排版|样式|颜色|边框|图表|柱状图|折线图|饼图)/i.test(prompt);
+  if (wantsBeautyOrChart) {
     const styleFeatures: string[] = [];
-    if (readback.hasBorders) styleFeatures.push('已添加边框');
-    if (readback.hasInteriorColor) styleFeatures.push('已应用背景填充');
-    notes.push(`视觉样式(${styleFeatures.join('、') || '基础样式'})已应用，效果待人工确认`);
+    if (readback.hasBorders) styleFeatures.push('检测到边框');
+    if (readback.hasInteriorColor) styleFeatures.push('检测到背景填充');
+    notes.push(`视觉样式(${styleFeatures.join('、') || '已渲染'})，视觉与版式呈现需人工确认`);
   }
 
-  if (notes.some((n) => n.includes('未生成算式文本') || n.includes('实际起始于') || n.includes('实际生成了算式文本'))) {
+  if (notes.some((n) => n.includes('实际检测起始于') || n.includes('未检测到标准 Excel 公式'))) {
     return {
       status: 'unconfirmed',
-      note: `宏已运行，但与指令存在差异：${notes.join('；')}`,
+      note: `宏已运行，但与指令存在客观差异：${notes.join('；')}`,
     };
   }
 
-  if (wantsBeauty || isMultiplicationGeneral) {
+  if (wantsBeautyOrChart || notes.length > 0) {
     return {
       status: 'unconfirmed',
-      note: `宏已运行（区域: ${readback.usedRangeAddress || '已更新'}），${notes.join('；')}。`,
+      note: `宏已运行（更新区域: ${readback.usedRangeAddress || '已更新'}），${notes.join('；')}。`,
     };
   }
 
+  // 对无法建立确定性断言的常规开放式任务，诚实显示“宏已运行，效果待确认”
   return {
-    status: 'verified',
-    note: `宏已运行，数据区域 ${readback.usedRangeAddress || ''} 验证通过。`,
+    status: 'unconfirmed',
+    note: `宏已运行（更新区域: ${readback.usedRangeAddress || ''}，共 ${readback.rowCount || 0} 行 ${readback.columnCount || 0} 列），具体效果请在工作表中人工核验确认。`,
   };
 }
 
@@ -364,6 +409,7 @@ export async function callLlmStream(
     }))
     .filter((h) => !!h.content);
 
+  const maxTokens = config.maxTokens && config.maxTokens > 0 ? config.maxTokens : 16384;
   const payload: Record<string, any> = {
     model: config.model,
     messages: [
@@ -371,9 +417,19 @@ export async function callLlmStream(
       ...cleanHistory,
       { role: 'user', content: prompt },
     ],
-    max_tokens: 4096,
+    max_tokens: maxTokens,
     stream: true,
   };
+
+  // 支持思考模式配置：disabled (关闭深度思考，全速输出代码) / budget (设定思考预算) / auto (默认)
+  if (config.thinkingMode === 'disabled') {
+    payload.thinking = { type: 'disabled' };
+  } else if (config.thinkingMode === 'budget') {
+    payload.thinking = {
+      type: 'enabled',
+      budget_tokens: config.thinkingBudget && config.thinkingBudget > 0 ? config.thinkingBudget : 2048,
+    };
+  }
 
   // 用户有配置温度才传入，未配置则不传，使用模型默认行为
   if (typeof config.temperature === 'number' && !isNaN(config.temperature)) {
@@ -388,7 +444,7 @@ export async function callLlmStream(
     headers['Authorization'] = `Bearer ${config.apiKey}`;
   }
 
-  // 超时守护
+  // 超时守护：深度思考模型规划时间较长，心跳超时设为 60 秒，避免误杀
   const abortController = new AbortController();
   let chunkTimer: any = null;
 
@@ -396,7 +452,7 @@ export async function callLlmStream(
     if (chunkTimer) clearTimeout(chunkTimer);
     chunkTimer = setTimeout(() => {
       abortController.abort(new Error('LLM_HEARTBEAT_TIMEOUT'));
-    }, 15000);
+    }, 60000);
   };
 
   resetHeartbeat();
