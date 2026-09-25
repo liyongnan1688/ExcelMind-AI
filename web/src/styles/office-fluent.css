@@ -1,0 +1,133 @@
+:root {
+  --excel-green: #107c41;
+  --excel-dark: #0b5a2f;
+  --excel-light: #e7f3ec;
+  --office-bg: #f3f2f1;
+  --office-card: #ffffff;
+  --office-border: #edebe9;
+  --office-border-subtle: #f3f2f1;
+  --office-text: #201f1e;
+  --office-muted: #605e5c;
+  --office-danger: #a80000;
+  --office-danger-light: #fdf3f2;
+  --office-blue: #0078d4;
+  --office-shadow: 0 1.6px 3.6px 0 rgba(0, 0, 0, 0.13), 0 0.3px 0.9px 0 rgba(0, 0, 0, 0.11);
+  --office-radius: 4px;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 13px;
+  color: var(--office-text);
+  background-color: var(--office-bg);
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* 按钮通用风格 */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: var(--office-radius);
+  border: 1px solid var(--office-border);
+  background: white;
+  color: var(--office-text);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn:hover {
+  background: #f8f8f8;
+  border-color: #c8c6c4;
+}
+
+.btn:active {
+  background: #edebe9;
+}
+
+.btn-primary {
+  background: var(--excel-green);
+  border-color: var(--excel-green);
+  color: white;
+}
+
+.btn-primary:hover {
+  background: var(--excel-dark);
+  border-color: var(--excel-dark);
+}
+
+.btn-icon {
+  padding: 5px;
+  border-radius: var(--office-radius);
+  border: none;
+  background: transparent;
+  color: var(--office-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-icon:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--office-text);
+}
+
+.btn-danger {
+  color: var(--office-danger);
+  border-color: #f3d6d8;
+  background: var(--office-danger-light);
+}
+
+.btn-danger:hover {
+  background: #fde7e9;
+}
+
+/* 徽标 */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  font-size: 11px;
+  border-radius: 3px;
+  font-weight: 500;
+}
+
+.badge-green {
+  background: var(--excel-light);
+  color: var(--excel-green);
+}
+
+.badge-gray {
+  background: #edebe9;
+  color: var(--office-muted);
+}
+
+/* 滚动条 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #c8c6c4;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #a19f9d;
+}
