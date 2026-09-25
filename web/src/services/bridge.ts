@@ -42,6 +42,8 @@ export interface WorkbookReadback {
   hasInteriorColor: boolean;
   sheetCount: number;
   targetVerified: boolean;
+  otherWorkbooksAffected?: boolean;
+  affectedWorkbooksWarning?: string;
 }
 
 export interface VbaExecutionData {

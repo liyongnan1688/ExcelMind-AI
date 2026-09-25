@@ -21,6 +21,8 @@ namespace LeeExcel
         public bool hasInteriorColor { get; set; }
         public int sheetCount { get; set; }
         public bool targetVerified { get; set; }
+        public bool otherWorkbooksAffected { get; set; }
+        public string affectedWorkbooksWarning { get; set; }
     }
 
     public class VbaExecutionResult
@@ -70,15 +72,38 @@ namespace LeeExcel
                 };
             }
 
-            // 1. 严格校验代码是否包含完整的 Sub 与 End Sub
-            if (!Regex.IsMatch(vbaCode, @"(?:Public\s+|Private\s+)?Sub\s+[a-zA-Z0-9_\u4e00-\u9fa5]+\s*\(", RegexOptions.IgnoreCase) ||
-                !Regex.IsMatch(vbaCode, @"End\s+Sub", RegexOptions.IgnoreCase))
+            // 1. 结构完整性校验：必须包含过程定义与 End Sub
+            var matchSub = Regex.Match(vbaCode, @"(?:Public\s+|Private\s+)?Sub\s+([a-zA-Z0-9_\u4e00-\u9fa5]+)\s*\((.*?)\)", RegexOptions.IgnoreCase);
+            bool hasEndSub = Regex.IsMatch(vbaCode, @"End\s+Sub", RegexOptions.IgnoreCase);
+
+            if (!matchSub.Success || !hasEndSub)
             {
                 return new VbaExecutionResult
                 {
                     success = false,
                     summary = "执行中断：VBA 代码不完整 (缺少 Sub 或 End Sub)",
                     error = "模型输出的代码结构不完整，已在注入前安全拦截，避免导致 Excel 编译错误。",
+                    originalVbaCode = vbaCode,
+                    executedVbaCode = vbaCode,
+                    transformSteps = transformSteps,
+                    elapsedMs = sw.ElapsedMilliseconds
+                };
+            }
+
+            string subName = matchSub.Groups[1].Value;
+            string paramsList = matchSub.Groups[2].Value.Trim();
+
+            // 2. 目标对象显式绑定约定校验：
+            // 拒绝使用 Regex.Replace 全局重写 ThisWorkbook / ActiveWorkbook
+            // 依据受控约定：宏过程必须声明接收目标工作簿参数 (如 targetWb As Workbook 或 targetWb As Object)
+            // 若代码未声明参数，拒绝自动运行，防止无目标或漂移到其他前台活动窗口
+            if (string.IsNullOrEmpty(paramsList))
+            {
+                return new VbaExecutionResult
+                {
+                    success = false,
+                    summary = "安全拦截：宏过程未声明目标工作簿参数",
+                    error = "安全约定拦截：模型生成的宏未接收目标工作簿参数 (需声明 Sub LeeTaskEntry(targetWb As Workbook))，存在误改其他前台窗口的风险，已安全拒绝自动运行以保护工作簿。",
                     originalVbaCode = vbaCode,
                     executedVbaCode = vbaCode,
                     transformSteps = transformSteps,
@@ -109,49 +134,42 @@ namespace LeeExcel
                 };
             }
 
-            // 2. 规整过程入口为标准化英文 LeeTaskEntry，彻底根除中文过程名引发的 COM 0x800A9C68 异常
+            // 3. 仅对过程名标准化为英文 LeeTaskEntry，保持参数签名完整传递，绝不篡改代码正文中的任何文本
             string entrySubName = "LeeTaskEntry";
             string finalCode = vbaCode;
-            var matchSub = Regex.Match(finalCode, @"(?:Public\s+|Private\s+)?Sub\s+([a-zA-Z0-9_\u4e00-\u9fa5]+)\s*\(", RegexOptions.IgnoreCase);
-            if (matchSub.Success)
+            if (!string.Equals(subName, entrySubName, StringComparison.OrdinalIgnoreCase))
             {
-                string originalSubName = matchSub.Groups[1].Value;
                 finalCode = Regex.Replace(
                     finalCode,
-                    @"(?:Public\s+|Private\s+)?Sub\s+" + Regex.Escape(originalSubName) + @"\s*\(",
+                    @"(?:Public\s+|Private\s+)?Sub\s+" + Regex.Escape(subName) + @"\s*\(",
                     "Sub " + entrySubName + "(",
                     RegexOptions.IgnoreCase
                 );
-                transformSteps.Add("规整过程入口: " + originalSubName + " -> " + entrySubName);
+                transformSteps.Add("规整过程入口: " + subName + " -> " + entrySubName + " (保持目标工作簿参数: " + paramsList + ")");
             }
 
-            // 3. 显式目标工作簿绑定：
-            // 将代码中可能存在的 ThisWorkbook 或 ActiveWorkbook 显式绑定为 Application.Workbooks("<targetWbName>")
-            // 防止执行期间因用户切换前台活动窗口造成对非目标工作簿的串改
-            bool replacedThis = Regex.IsMatch(finalCode, @"\bThisWorkbook\b", RegexOptions.IgnoreCase);
-            bool replacedActive = Regex.IsMatch(finalCode, @"\bActiveWorkbook\b", RegexOptions.IgnoreCase);
-
-            if (replacedThis)
+            // 4. 执行前：记录当前 Excel 实例中所有【非目标工作簿】的初始状态快照
+            var otherWbSnapshots = new List<Tuple<string, int, string>>();
+            try
             {
-                finalCode = Regex.Replace(
-                    finalCode,
-                    @"\bThisWorkbook\b",
-                    "Application.Workbooks(\"" + targetWbName.Replace("\"", "\"\"") + "\")",
-                    RegexOptions.IgnoreCase
-                );
-                transformSteps.Add("规整 ThisWorkbook -> Application.Workbooks(\"" + targetWbName + "\")");
+                foreach (dynamic wb in app.Workbooks)
+                {
+                    try
+                    {
+                        string oFull = (string)wb.FullName;
+                        if (!string.Equals(oFull, targetWbFullName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            string oName = (string)wb.Name;
+                            int sCount = (int)wb.Sheets.Count;
+                            string uAddr = "";
+                            try { uAddr = ((string)wb.ActiveSheet.UsedRange.Address) ?? ""; } catch { }
+                            otherWbSnapshots.Add(Tuple.Create(oName, sCount, uAddr));
+                        }
+                    }
+                    catch { }
+                }
             }
-
-            if (replacedActive)
-            {
-                finalCode = Regex.Replace(
-                    finalCode,
-                    @"\bActiveWorkbook\b",
-                    "Application.Workbooks(\"" + targetWbName.Replace("\"", "\"\"") + "\")",
-                    RegexOptions.IgnoreCase
-                );
-                transformSteps.Add("规整 ActiveWorkbook -> Application.Workbooks(\"" + targetWbName + "\")");
-            }
+            catch { }
 
             dynamic vbComp = null;
             dynamic vbProj = null;
@@ -159,7 +177,7 @@ namespace LeeExcel
 
             try
             {
-                // 4. 检查 VBProject 访问权限
+                // 5. 检查 VBProject 访问权限
                 try
                 {
                     vbProj = targetWorkbook.VBProject;
@@ -182,19 +200,13 @@ namespace LeeExcel
                     throw;
                 }
 
-                // 5. 动态创建标准临时模块 (1 = vbext_ct_StdModule)
+                // 6. 动态创建标准临时模块并注入宏
                 string moduleName = "LeeMod_" + DateTime.Now.ToString("yyyyMMdd_HHmmss");
                 vbComp = vbProj.VBComponents.Add(1);
                 vbComp.Name = moduleName;
                 vbComp.CodeModule.AddFromString(finalCode);
 
-                // 6. 执行前置激活目标工作簿并挂起屏幕刷新与告警
-                try
-                {
-                    targetWorkbook.Activate();
-                }
-                catch { }
-
+                // 7. 挂起屏幕刷新与系统弹窗
                 try
                 {
                     app.ScreenUpdating = false;
@@ -203,20 +215,44 @@ namespace LeeExcel
                 }
                 catch { }
 
-                // 7. 调用标准化宏
+                // 8. 调用标准化受控宏，将真实 targetWorkbook COM 对象通过参数安全传入
                 string macroAddress = "'" + targetWbName + "'!" + entrySubName;
-                app.Run(macroAddress);
+                app.Run(macroAddress, targetWorkbook);
 
                 sw.Stop();
 
-                // 8. 执行后身份核验与实际状态写后读回 (Readback)
+                // 9. 执行后检查：核验非目标工作簿是否受到意外影响
+                bool otherAffected = false;
+                string otherWarning = null;
+                foreach (var snap in otherWbSnapshots)
+                {
+                    try
+                    {
+                        dynamic oWb = app.Workbooks[snap.Item1];
+                        int postCount = (int)oWb.Sheets.Count;
+                        string postAddr = "";
+                        try { postAddr = ((string)oWb.ActiveSheet.UsedRange.Address) ?? ""; } catch { }
+
+                        if (postCount != snap.Item2 || postAddr != snap.Item3)
+                        {
+                            otherAffected = true;
+                            otherWarning = "检测到非目标工作簿 [" + snap.Item1 + "] 发生附带变更！";
+                            break;
+                        }
+                    }
+                    catch { }
+                }
+
+                // 10. 目标工作簿写后读回与核验
                 var readback = PerformReadback(targetWorkbook, targetWbName, targetWbFullName, preSheetCount);
+                readback.otherWorkbooksAffected = otherAffected;
+                readback.affectedWorkbooksWarning = otherWarning;
 
                 return new VbaExecutionResult
                 {
-                    success = true,
-                    summary = "宏已运行（耗时 " + sw.ElapsedMilliseconds + " ms）",
-                    error = null,
+                    success = !otherAffected,
+                    summary = otherAffected ? ("执行告警：" + otherWarning) : ("宏已运行（耗时 " + sw.ElapsedMilliseconds + " ms）"),
+                    error = otherWarning,
                     originalVbaCode = vbaCode,
                     executedVbaCode = finalCode,
                     transformSteps = transformSteps,
@@ -230,7 +266,6 @@ namespace LeeExcel
                 string errDetail = ex.Message;
                 if (ex.InnerException != null) errDetail += " (" + ex.InnerException.Message + ")";
 
-                // 若触发了编译错误导致 VBE 弹窗，强制将 VBE 窗口隐藏
                 if (vbProj != null)
                 {
                     try
@@ -253,7 +288,7 @@ namespace LeeExcel
             }
             finally
             {
-                // 9. 瞬时清理临时模块，保持工作簿纯净无宏
+                // 11. 瞬时清理临时模块，保持工作簿纯净无宏
                 if (vbComp != null && vbProj != null)
                 {
                     try
@@ -266,7 +301,6 @@ namespace LeeExcel
                     }
                 }
 
-                // 恢复屏幕刷新
                 if (screenUpdated)
                 {
                     try
@@ -286,6 +320,8 @@ namespace LeeExcel
                 targetWorkbookName = expectedName,
                 targetWorkbookFullName = expectedFullName,
                 targetVerified = false,
+                otherWorkbooksAffected = false,
+                affectedWorkbooksWarning = null,
                 sampleValues = new List<string>(),
                 rowCount = 0,
                 columnCount = 0,
@@ -302,9 +338,7 @@ namespace LeeExcel
             {
                 // 1. 验证目标工作簿身份
                 string currentName = (string)targetWb.Name;
-                string currentFullName = (string)targetWb.FullName;
                 rb.targetVerified = string.Equals(currentName, expectedName, StringComparison.OrdinalIgnoreCase);
-
                 rb.sheetCount = (int)targetWb.Sheets.Count;
 
                 // 2. 获取当前活动工作表或新建的工作表
@@ -349,7 +383,7 @@ namespace LeeExcel
                             rb.endCell = parts.Length > 1 ? parts[1] : parts[0];
                         }
 
-                        // 3. 抽样单元格文本（优先提取前 5 行 5 列及对角线采样）
+                        // 3. 抽样单元格文本
                         int sampleMaxRows = Math.Min(rb.rowCount, 9);
                         int sampleMaxCols = Math.Min(rb.columnCount, 9);
 

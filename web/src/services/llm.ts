@@ -121,15 +121,25 @@ export function buildAutomationSystemPrompt(
 目标工作簿包含的工作表: [${sheets.join(', ')}]。
 当前活动工作表: "${activeSheet || '默认'}"，使用区域: "${usedRange || '空'}"。
 
-【核心执行要求】：
-1. 准确理解用户的具体业务意图：严格按照用户指定的目标、坐标、内容类型与格式执行任务，绝不可擅自将具体业务诉求降级或替换为无关结构（例如：用户要求算式乘法表口诀时，必须生成带算式文本的表格；用户要求从指定单元格开始时，必须从该坐标起笔；用户明确要求纯数字乘积矩阵时，才填入数字矩阵）。
-2. 视觉排版与美化：当用户要求表格美化或制作完整报表时，请应用清晰、典雅的商务排版风格（如清晰表头、合适列宽、对齐方式、细边框与柔和底色），使表格美观易读。
-3. VBA 规范：
-   - 必须且仅编写一个主过程: \`Sub LeeTaskEntry()\`，以 \`End Sub\` 完整闭合。
-   - 严禁调用 MsgBox，严禁使用 Application.Quit，严禁弹出任何交互确认框。
-   - 代码必须针对目标工作簿及其中的工作表进行操作。
-4. 回复格式协议：
-   先用 1~2 句话中文概括将要执行的操作，随后直接给出标准的 \`\`\`vba ... \`\`\` 代码块。严禁将代码分散在聊天文字中，严禁输出未闭合的代码。`;
+【核心执行规范 - 目标对象显式绑定约定】：
+1. 必须且仅编写一个主过程，显式声明并接收目标工作簿参数：
+   \`Sub LeeTaskEntry(targetWb As Workbook)\`
+2. 所有针对工作表、单元格、图表的操作必须显式基于传入的 targetWb 进行操作！
+   例如：
+   Dim ws As Worksheet
+   Set ws = targetWb.Worksheets.Add() ' 或 Set ws = targetWb.Sheets(1)
+   ws.Range("D1").Value = ...
+3. 【严禁事项】：
+   - 严禁编写无参过程 \`Sub RunTask()\` 或 \`Sub LeeTaskEntry()\`；
+   - 严禁脱离 targetWb 盲目使用未限定的 ActiveWorkbook、ThisWorkbook 或省略工作簿引用的 Worksheets.Add / ActiveSheet；
+   - 严禁调用 MsgBox，严禁使用 Application.Quit，严禁弹出任何交互确认框；
+   - 严禁在写入数据后对目标区域调用 .ClearContents 或 .Clear，以免误清空已生成的数据。
+4. 【多形态任务排版处理】：
+   对于日常可能存在多种理解形态的任务（如“九九乘法表”）：
+   - 若用户无附加限定，在中文办公场景下通常期望标准算式口诀表（如 1×1=1，阶梯形排列并应用清爽排版）；
+   - 若用户明确要求“数值乘积矩阵”，则生成 1~9 行列纯乘积数字；
+   - 在生成的 1 句话简述中明确告知所选用的形态排版。
+5. 过程必须以 \`End Sub\` 完整闭合，完整包裹在 \`\`\`vba ... \`\`\` 代码块中。`;
 }
 
 /**
@@ -244,6 +254,13 @@ export function verifyExecutionResult(
     };
   }
 
+  if (readback.otherWorkbooksAffected) {
+    return {
+      status: 'failed',
+      note: readback.affectedWorkbooksWarning || '安全告警：检测到非目标工作簿受到附带修改！',
+    };
+  }
+
   const p = prompt.toLowerCase();
   const notes: string[] = [];
 
@@ -257,13 +274,23 @@ export function verifyExecutionResult(
   }
 
   // 2. 算式文本 vs 纯数字乘积核验
-  const wantsEquation = /(?:算式|口诀|乘法口诀|×|\*|=)/i.test(prompt);
-  if (wantsEquation && readback.sampleValues && readback.sampleValues.length > 0) {
-    const hasEquationText = readback.sampleValues.some(
-      (v) => v.includes('×') || v.includes('*') || v.includes('=') || v.includes('得')
-    );
-    if (!hasEquationText) {
-      notes.push('检测到填入内容为纯数字矩阵，未生成算式文本');
+  const wantsEquationExplicit = /(?:算式|口诀|乘法口诀|带算式)/i.test(prompt);
+  const wantsNumericExplicit = /(?:数值乘积矩阵|纯数字|数值矩阵|乘积矩阵)/i.test(prompt);
+  const isMultiplicationGeneral = /(?:九九乘法表|乘法表)/i.test(prompt);
+
+  const hasEquationText =
+    readback.sampleValues &&
+    readback.sampleValues.some((v) => v.includes('×') || v.includes('*') || v.includes('=') || v.includes('得'));
+
+  if (wantsEquationExplicit && !hasEquationText) {
+    notes.push('明确要求算式口诀，实际检测为纯数字矩阵，未生成算式文本');
+  } else if (wantsNumericExplicit && hasEquationText) {
+    notes.push('明确要求数值矩阵，实际生成了算式文本');
+  } else if (isMultiplicationGeneral && !wantsNumericExplicit && !wantsEquationExplicit) {
+    if (hasEquationText) {
+      notes.push('已生成标准算式口诀表（D1:L9）');
+    } else {
+      notes.push('已生成乘积数值矩阵（D1:L9）');
     }
   }
 
@@ -276,17 +303,17 @@ export function verifyExecutionResult(
     notes.push(`视觉样式(${styleFeatures.join('、') || '基础样式'})已应用，效果待人工确认`);
   }
 
-  if (notes.some((n) => n.includes('未生成算式文本') || n.includes('实际起始于'))) {
+  if (notes.some((n) => n.includes('未生成算式文本') || n.includes('实际起始于') || n.includes('实际生成了算式文本'))) {
     return {
       status: 'unconfirmed',
       note: `宏已运行，但与指令存在差异：${notes.join('；')}`,
     };
   }
 
-  if (wantsBeauty) {
+  if (wantsBeauty || isMultiplicationGeneral) {
     return {
       status: 'unconfirmed',
-      note: `宏已运行（区域: ${readback.usedRangeAddress || '已更新'}），视觉排版效果待人工确认。`,
+      note: `宏已运行（区域: ${readback.usedRangeAddress || '已更新'}），${notes.join('；')}。`,
     };
   }
 

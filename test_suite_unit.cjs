@@ -25,6 +25,7 @@ function detectIntent(text) {
     return 'CHAT';
   }
 
+  // 3. 匹配用户粘贴代码或提及代码询问含义（必须只解释、不执行）
   const asksCodeMeaningRegex =
     /(?:这段代码|这个宏|这几行代码|这段VBA|以下代码|这段宏|Sub\s+[\s\S]+End\s+Sub)[\s\S]*(?:什么意思|含义|解释|怎么理解|干嘛|干什么|作用|读懂|请教|为什么|如何理解)/i;
   if (asksCodeMeaningRegex.test(trimmed)) {
@@ -123,6 +124,10 @@ function verifyExecutionResult(prompt, readback) {
     return { status: 'failed', note: `目标工作簿身份核验失败（预期: ${readback.targetWorkbookName}）。` };
   }
 
+  if (readback.otherWorkbooksAffected) {
+    return { status: 'failed', note: readback.affectedWorkbooksWarning || '安全告警：检测到非目标工作簿受到附带修改！' };
+  }
+
   const notes = [];
   const startMatch = prompt.match(/(?:从|在)\s*([A-Za-z]+[0-9]+)/i);
   if (startMatch) {
@@ -132,13 +137,23 @@ function verifyExecutionResult(prompt, readback) {
     }
   }
 
-  const wantsEquation = /(?:算式|口诀|乘法口诀|×|\*|=)/i.test(prompt);
-  if (wantsEquation && readback.sampleValues && readback.sampleValues.length > 0) {
-    const hasEquationText = readback.sampleValues.some(
-      (v) => v.includes('×') || v.includes('*') || v.includes('=') || v.includes('得')
-    );
-    if (!hasEquationText) {
-      notes.push('检测到填入内容为纯数字矩阵，未生成算式文本');
+  const wantsEquationExplicit = /(?:算式|口诀|乘法口诀|带算式)/i.test(prompt);
+  const wantsNumericExplicit = /(?:数值乘积矩阵|纯数字|数值矩阵|乘积矩阵)/i.test(prompt);
+  const isMultiplicationGeneral = /(?:九九乘法表|乘法表)/i.test(prompt);
+
+  const hasEquationText =
+    readback.sampleValues &&
+    readback.sampleValues.some((v) => v.includes('×') || v.includes('*') || v.includes('=') || v.includes('得'));
+
+  if (wantsEquationExplicit && !hasEquationText) {
+    notes.push('明确要求算式口诀，实际检测为纯数字矩阵，未生成算式文本');
+  } else if (wantsNumericExplicit && hasEquationText) {
+    notes.push('明确要求数值矩阵，实际生成了算式文本');
+  } else if (isMultiplicationGeneral && !wantsNumericExplicit && !wantsEquationExplicit) {
+    if (hasEquationText) {
+      notes.push('已生成标准算式口诀表（D1:L9）');
+    } else {
+      notes.push('已生成乘积数值矩阵（D1:L9）');
     }
   }
 
@@ -150,17 +165,17 @@ function verifyExecutionResult(prompt, readback) {
     notes.push(`视觉样式(${styleFeatures.join('、') || '基础样式'})已应用，效果待人工确认`);
   }
 
-  if (notes.some((n) => n.includes('未生成算式文本') || n.includes('实际起始于'))) {
+  if (notes.some((n) => n.includes('未生成算式文本') || n.includes('实际起始于') || n.includes('实际生成了算式文本'))) {
     return {
       status: 'unconfirmed',
       note: `宏已运行，但与指令存在差异：${notes.join('；')}`,
     };
   }
 
-  if (wantsBeauty) {
+  if (wantsBeauty || isMultiplicationGeneral) {
     return {
       status: 'unconfirmed',
-      note: `宏已运行（区域: ${readback.usedRangeAddress || '已更新'}），视觉排版效果待人工确认。`,
+      note: `宏已运行（区域: ${readback.usedRangeAddress || '已更新'}），${notes.join('；')}。`,
     };
   }
 
@@ -230,15 +245,15 @@ for (const m of ambigTests) {
 console.log('\n=== 2. Strict Code Extraction & Truncation Suite ===');
 
 // Valid code
-const validRes = extractVbaCode('这里是说明\n```vba\nSub LeeTaskEntry()\n  Range("A1").Value = 1\nEnd Sub\n```');
+const validRes = extractVbaCode('这里是说明\n```vba\nSub LeeTaskEntry(targetWb As Workbook)\n  targetWb.Sheets(1).Range("A1").Value = 1\nEnd Sub\n```');
 assert('Valid complete code extracted', !validRes.error && !validRes.isTruncated && validRes.code.includes('LeeTaskEntry'));
 
 // Truncated code (unclosed code fence)
-const truncRes1 = extractVbaCode('这里是说明\n```vba\nSub LeeTaskEntry()\n  Range("A1").Value = 1\n  ws.Range(');
+const truncRes1 = extractVbaCode('这里是说明\n```vba\nSub LeeTaskEntry(targetWb As Workbook)\n  Range("A1").Value = 1\n  ws.Range(');
 assert('Truncated code (unclosed fence) detected', truncRes1.isTruncated && truncRes1.error.includes('未闭合'));
 
 // Truncated code (missing End Sub inside closed fence)
-const truncRes2 = extractVbaCode('```vba\nSub LeeTaskEntry()\n  Range("A1").Value = 1\n```');
+const truncRes2 = extractVbaCode('```vba\nSub LeeTaskEntry(targetWb As Workbook)\n  Range("A1").Value = 1\n```');
 assert('Incomplete code (missing End Sub) detected', truncRes2.isTruncated && truncRes2.error.includes('End Sub'));
 
 // Chat text mentioning Sub (No code fence -> must NOT guess a macro)
@@ -247,7 +262,7 @@ assert('Chat text mentioning Sub does not extract executable code', noFenceRes.c
 
 console.log('\n=== 3. Post-execution Verification Suite ===');
 
-// Case: User asked for equation, but result is pure number matrix
+// Case 3.1: Explicit equation requested, but result is pure number matrix -> flagged
 const verRes1 = verifyExecutionResult('生成从 D1 开始的算式九九乘法表', {
   targetWorkbookName: 'Book1.xlsx',
   targetVerified: true,
@@ -258,42 +273,57 @@ const verRes1 = verifyExecutionResult('生成从 D1 开始的算式九九乘法�
   usedRangeAddress: 'D1:L9',
 });
 assert(
-  'Flagged when user requested equations but got pure numbers',
-  verRes1.status === 'unconfirmed' && verRes1.note.includes('纯数字矩阵')
+  'Flagged when explicit equation requested but got pure numbers',
+  verRes1.status === 'unconfirmed' && verRes1.note.includes('未生成算式文本')
 );
 
-// Case: User asked for start at D1, but result starts at A1
-const verRes2 = verifyExecutionResult('在 D1 开始写入数据', {
+// Case 3.2: Original user prompt ("新建一个表格，在 D1 开始写入九九乘法表，并美化这个表格")
+// Neither form is errored out; both truthfully labeled with style pending human confirmation
+const verResOrigEquation = verifyExecutionResult('新建一个表格，在 D1 开始写入九九乘法表，并美化这个表格', {
   targetWorkbookName: 'Book1.xlsx',
   targetVerified: true,
-  startCell: 'A1',
-  sampleValues: ['Test'],
-  hasBorders: false,
-  hasInteriorColor: false,
-  usedRangeAddress: 'A1:A10',
-});
-assert(
-  'Flagged when starting cell does not match user requirement',
-  verRes2.status === 'unconfirmed' && verRes2.note.includes('要求从 D1 开始，实际起始于 A1')
-);
-
-// Case: Subjective beauty request -> status is 'unconfirmed' (never false green complete)
-const verRes3 = verifyExecutionResult('生成表格并美化', {
-  targetWorkbookName: 'Book1.xlsx',
-  targetVerified: true,
-  startCell: 'A1',
-  sampleValues: ['Data'],
+  startCell: 'D1',
+  sampleValues: ['1×1=1', '2×2=4'],
   hasBorders: true,
   hasInteriorColor: true,
-  usedRangeAddress: 'A1:C5',
+  usedRangeAddress: 'D1:L9',
 });
 assert(
-  'Subjective beauty is marked as unconfirmed (effect pending human confirmation)',
-  verRes3.status === 'unconfirmed' && verRes3.note.includes('效果待人工确认')
+  'Original prompt with equation table labeled as unconfirmed with layout note',
+  verResOrigEquation.status === 'unconfirmed' && verResOrigEquation.note.includes('标准算式口诀表')
 );
 
-// Case: Target workbook identity mismatch
-const verRes4 = verifyExecutionResult('生成表格', {
+const verResOrigMatrix = verifyExecutionResult('新建一个表格，在 D1 开始写入九九乘法表，并美化这个表格', {
+  targetWorkbookName: 'Book1.xlsx',
+  targetVerified: true,
+  startCell: 'D1',
+  sampleValues: ['1', '2', '4', '81'],
+  hasBorders: true,
+  hasInteriorColor: true,
+  usedRangeAddress: 'D1:L9',
+});
+assert(
+  'Original prompt with numeric matrix labeled as unconfirmed with layout note',
+  verResOrigMatrix.status === 'unconfirmed' && verResOrigMatrix.note.includes('乘积数值矩阵')
+);
+
+// Case 3.3: Explicit numeric matrix prompt
+const verResNumExplicit = verifyExecutionResult('生成 9×9 数值乘积矩阵', {
+  targetWorkbookName: 'Book1.xlsx',
+  targetVerified: true,
+  startCell: 'A1',
+  sampleValues: ['1', '2', '4', '81'],
+  hasBorders: false,
+  hasInteriorColor: false,
+  usedRangeAddress: 'A1:I9',
+});
+assert(
+  'Explicit numeric matrix request without beauty matches verified status',
+  verResNumExplicit.status === 'verified' && verResNumExplicit.note.includes('验证通过')
+);
+
+// Case 3.4: Target workbook mismatch triggers failed
+const verResFailTarget = verifyExecutionResult('生成表格', {
   targetWorkbookName: 'Book1.xlsx',
   targetVerified: false,
   startCell: 'A1',
@@ -304,7 +334,24 @@ const verRes4 = verifyExecutionResult('生成表格', {
 });
 assert(
   'Target workbook mismatch triggers failed status',
-  verRes4.status === 'failed' && verRes4.note.includes('身份核验失败')
+  verResFailTarget.status === 'failed' && verResFailTarget.note.includes('身份核验失败')
+);
+
+// Case 3.5: Cross-workbook contamination detected triggers failed
+const verResContam = verifyExecutionResult('生成表格', {
+  targetWorkbookName: 'Book1.xlsx',
+  targetVerified: true,
+  otherWorkbooksAffected: true,
+  affectedWorkbooksWarning: '安全告警：检测到非目标工作簿受到附带修改！',
+  startCell: 'A1',
+  sampleValues: ['1'],
+  hasBorders: false,
+  hasInteriorColor: false,
+  usedRangeAddress: 'A1:A10',
+});
+assert(
+  'Other workbooks affected triggers failed status',
+  verResContam.status === 'failed' && verResContam.note.includes('安全告警')
 );
 
 console.log(`\nUnit Tests Summary: Pass = ${passCount}, Fail = ${failCount}`);

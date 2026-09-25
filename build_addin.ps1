@@ -32,15 +32,18 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "编译成功: $outDir\LeeExcel.dll" -ForegroundColor Green
 
-# 拷贝运行时依赖
-Copy-Item "packages\ExcelDna.Integration.1.9.0\lib\net462\ExcelDna.Integration.dll" $outDir -Force
-Copy-Item "packages\Microsoft.Web.WebView2.1.0.4191.47\lib\net462\Microsoft.Web.WebView2.Core.dll" $outDir -Force
-Copy-Item "packages\Microsoft.Web.WebView2.1.0.4191.47\lib\net462\Microsoft.Web.WebView2.WinForms.dll" $outDir -Force
-Copy-Item "packages\Microsoft.Web.WebView2.1.0.4191.47\runtimes\win-x64\native\WebView2Loader.dll" $outDir -Force
+function Safe-Copy($src, $dst) {
+    if (!(Test-Path $dst)) {
+        Copy-Item $src $dst -Force
+    }
+}
 
-# 拷贝 Excel-DNA 宿主 xll 并重命名
-Copy-Item "packages\ExcelDna.AddIn.1.9.0\tools\net462\ExcelDna64.xll" "$outDir\LeeExcel64.xll" -Force
-Copy-Item "LeeExcel.dna" $outDir -Force
-Copy-Item "LeeExcel64.dna" $outDir -Force
+Safe-Copy "packages\ExcelDna.Integration.1.9.0\lib\net462\ExcelDna.Integration.dll" "$outDir\ExcelDna.Integration.dll"
+Safe-Copy "packages\Microsoft.Web.WebView2.1.0.4191.47\lib\net462\Microsoft.Web.WebView2.Core.dll" "$outDir\Microsoft.Web.WebView2.Core.dll"
+Safe-Copy "packages\Microsoft.Web.WebView2.1.0.4191.47\lib\net462\Microsoft.Web.WebView2.WinForms.dll" "$outDir\Microsoft.Web.WebView2.WinForms.dll"
+Safe-Copy "packages\Microsoft.Web.WebView2.1.0.4191.47\runtimes\win-x64\native\WebView2Loader.dll" "$outDir\WebView2Loader.dll"
+Safe-Copy "packages\ExcelDna.AddIn.1.9.0\tools\net462\ExcelDna64.xll" "$outDir\LeeExcel64.xll"
+Safe-Copy "LeeExcel.dna" "$outDir\LeeExcel.dna"
+Safe-Copy "LeeExcel64.dna" "$outDir\LeeExcel64.dna"
 
 Write-Host "原生加载项组织就绪: $outDir\LeeExcel64.xll" -ForegroundColor Green
