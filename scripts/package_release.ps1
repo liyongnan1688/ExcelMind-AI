@@ -37,10 +37,18 @@ $pnpmCmd = Get-Command pnpm -ErrorAction SilentlyContinue
 if (!$pnpmCmd) {
     Write-Host "      未找到 pnpm 命令，尝试使用 npm..." -ForegroundColor DarkGray
     Push-Location $webDir
+    if (!(Test-Path "node_modules")) {
+        Write-Host "      正在安装前端依赖 (npm install)..." -ForegroundColor Yellow
+        npm install
+    }
     npm run build
     Pop-Location
 } else {
     Push-Location $webDir
+    if (!(Test-Path "node_modules")) {
+        Write-Host "      正在安装前端依赖 (pnpm install)..." -ForegroundColor Yellow
+        pnpm install
+    }
     pnpm run build
     Pop-Location
 }

@@ -1,0 +1,96 @@
+name: Build & Publish Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '发布版本号 (例如 v1.1.0)'
+        required: false
+        default: 'v1.1.0'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Release Package
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+          run_install: false
+
+      - name: Run Offline Quality Gates
+        shell: pwsh
+        run: |
+          node test_suite_unit.cjs
+          node test_regex_counter_example.cjs
+
+      - name: Determine Version
+        id: meta
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch' -and '${{ github.event.inputs.version }}' -ne '') {
+              $v = '${{ github.event.inputs.version }}'
+              $isPre = $false
+          } elseif ($env:GITHUB_REF_TYPE -eq 'tag') {
+              $v = $env:GITHUB_REF_NAME
+              $isPre = $false
+          } else {
+              $v = "v1.1.0"
+              $isPre = $false
+          }
+          echo "version=$v" >> $env:GITHUB_OUTPUT
+          echo "tag=$v" >> $env:GITHUB_OUTPUT
+          echo "is_prerelease=$isPre" >> $env:GITHUB_OUTPUT
+          Write-Host "Target Version: $v"
+
+      - name: Build Frontend & Package Add-In
+        shell: pwsh
+        run: |
+          pwsh -File scripts/package_release.ps1 -Version "${{ steps.meta.outputs.version }}"
+
+      - name: Upload Release Artifact to GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: "ExcelMind AI ${{ steps.meta.outputs.version }}"
+          draft: false
+          prerelease: ${{ steps.meta.outputs.is_prerelease == 'true' }}
+          generate_release_notes: true
+          files: |
+            .artifacts/release/*.zip
+          body: |
+            ## ExcelMind AI 桌面原生插件发布包
+
+            ### 📦 下载与运行指南
+            1. 下载下方的 `ExcelMind_AI_Release_${{ steps.meta.outputs.version }}.zip` 压缩包并解压；
+            2. **方式一（一键安装常驻）**：双击运行 `安装插件(开启常驻).bat`，自动解除系统下载锁定并写入 Excel 启动项；
+            3. **方式二（便携免安装）**：双击运行 `免安装启动.bat`，即开即用，关闭 Excel 即退出；
+            4. 打开任意 Excel 文件，顶部功能区将自动出现 **【ExcelMind AI】** 选项卡。
+
+            ---
+            ### 🖥️ 系统与 Office 兼容性
+            - **系统环境**：Windows 7 SP1 / Windows 10 / Windows 11（32 位与 64 位自适应）
+            - **Office 支持**：Office 2010 / 2013 / 2016 / 2019 / 2021 及 Microsoft 365
+            - **自动化构建**：本分发包由 GitHub Actions CI/CD 在 Windows 官方原生纯净环境中编译打包。
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
