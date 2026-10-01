@@ -151,20 +151,41 @@ namespace LeeExcel
         {
             try
             {
-                string msg = e.TryGetWebMessageAsString();
+                string msg = null;
+                try { msg = e.TryGetWebMessageAsString(); } catch { }
+                if (string.IsNullOrEmpty(msg))
+                {
+                    try { msg = e.WebMessageAsJson; } catch { }
+                }
                 if (string.IsNullOrEmpty(msg)) return;
 
+                Console.WriteLine("    [TaskPane 收到前端 WebMessage] action=" + (msg.Contains("execute_vba") ? "execute_vba" : (msg.Contains("restore_snapshot") ? "restore_snapshot" : "other")));
                 string reply = NativeBridge.Dispatch(msg, _app);
-                _webView.CoreWebView2.PostWebMessageAsString(reply);
+                Console.WriteLine("    [TaskPane 宿主处理完成，向 WebView2 发送回复] action=" + (reply.Contains("execute_vba") ? "execute_vba" : (reply.Contains("restore_snapshot") ? "restore_snapshot" : "other")));
+                if (_webView != null && _webView.CoreWebView2 != null)
+                {
+                    _webView.CoreWebView2.PostWebMessageAsString(reply);
+                }
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine("WebMessage error: " + ex.Message);
+                Console.WriteLine("    [TaskPane 异常] " + ex.Message);
+                System.Diagnostics.Debug.WriteLine("OnWebMessageReceived error: " + ex.Message);
             }
         }
 
         public void NotifyWorkbookChanged()
         {
+            if (this.InvokeRequired)
+            {
+                try
+                {
+                    this.BeginInvoke(new Action(NotifyWorkbookChanged));
+                }
+                catch { }
+                return;
+            }
+
             if (_webView != null && _webView.CoreWebView2 != null)
             {
                 string info = NativeBridge.Dispatch("{\"action\":\"get_workbook_info\"}", _app);

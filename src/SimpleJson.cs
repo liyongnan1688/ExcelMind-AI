@@ -205,9 +205,47 @@ namespace LeeExcel
                     }
                     val = sb.ToString();
                 }
+                else if (json[i] == '{' || json[i] == '[')
+                {
+                    // 复合对象或数组：深度平衡扫描直到闭合
+                    int valStart = i;
+                    char openChar = json[i];
+                    char closeChar = openChar == '{' ? '}' : ']';
+                    int depth = 0;
+                    bool inString = false;
+                    while (i < len)
+                    {
+                        char c = json[i];
+                        if (inString)
+                        {
+                            if (c == '\\' && i + 1 < len) i += 2;
+                            else
+                            {
+                                if (c == '"') inString = false;
+                                i++;
+                            }
+                        }
+                        else
+                        {
+                            if (c == '"') inString = true;
+                            else if (c == openChar) depth++;
+                            else if (c == closeChar)
+                            {
+                                depth--;
+                                if (depth == 0)
+                                {
+                                    i++;
+                                    break;
+                                }
+                            }
+                            i++;
+                        }
+                    }
+                    val = json.Substring(valStart, i - valStart).Trim();
+                }
                 else
                 {
-                    // 非字符串 (布尔值、数字、null 等)
+                    // 非字符串基础类型 (布尔值、数字、null 等)
                     int valStart = i;
                     while (i < len && json[i] != ',' && json[i] != '}') i++;
                     val = json.Substring(valStart, i - valStart).Trim();

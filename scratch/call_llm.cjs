@@ -3,16 +3,38 @@ const https = require('https');
 const crypto = require('crypto');
 
 const systemPromptFile = process.argv[2];
-const userPrompt = process.argv[3];
+let userPrompt = process.argv[3];
 const outputFile = process.argv[4];
 const metaOutputFile = process.argv[5]; // 可选：输出元数据包含 usage、finish_reason、retryCount 等
 
 if (!systemPromptFile || !userPrompt) {
-  console.error("Usage: node call_llm.cjs <systemPromptFile> <userPrompt> [outputFile] [metaOutputFile]");
+  console.error("Usage: node call_llm.cjs <systemPromptFile> <userPrompt|userPromptFile> [outputFile] [metaOutputFile]");
   process.exit(1);
 }
 
-const systemPrompt = fs.readFileSync(systemPromptFile, 'utf8');
+let messages = null;
+let systemPrompt = "";
+if (fs.existsSync(systemPromptFile)) {
+  try {
+    const raw = fs.readFileSync(systemPromptFile, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      messages = parsed;
+    } else {
+      systemPrompt = raw;
+    }
+  } catch (e) {
+    systemPrompt = fs.readFileSync(systemPromptFile, 'utf8');
+  }
+} else {
+  systemPrompt = systemPromptFile;
+}
+
+if (fs.existsSync(userPrompt)) {
+  try {
+    userPrompt = fs.readFileSync(userPrompt, 'utf8');
+  } catch (e) {}
+}
 
 // 读取 LocalStorage 配置
 const logPath = process.env.LOCALAPPDATA + '\\LeeExcel\\WebView2Profile\\EBWebView\\Default\\Local Storage\\leveldb\\000003.log';
@@ -41,7 +63,7 @@ const thinkingBudget = process.env.THINKING_BUDGET ? parseInt(process.env.THINKI
 function makePayload(attempt) {
   const p = {
     model: model,
-    messages: [
+    messages: messages ? messages : [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt }
     ],
@@ -215,93 +237,72 @@ function requestLlm(payload) {
   }
 
   function extractCode(text) {
-    if (!text) return '';
-    const openMatch = text.match(/```(?:vba|vb)?\s*/i);
-    if (!openMatch) return '';
-    const start = openMatch.index + openMatch[0].length;
-    const closeIdx = text.indexOf('```', start);
-    return closeIdx < 0 ? text.substring(start).trim() : text.substring(start, closeIdx).trim();
+    if (!text || typeof text !== 'string') return { code: '', isTruncated: false, error: '内容为空' };
+    const trimmed = text.trim();
+    const fenceRegex = /```(?:vba|vb)?\s*([\s\S]*?)(?:```|$)/i;
+    const match = trimmed.match(fenceRegex);
+
+    if (match && match.index !== undefined) {
+      const codePart = trimmed.slice(match.index + 3);
+      if (!codePart.includes('```')) {
+        return {
+          code: match[1],
+          isTruncated: true,
+          error: '代码围栏未闭合 (``` 截断)'
+        };
+      }
+      return { code: match[1], isTruncated: false };
+    }
+
+    // 纯 VBA 源码形态（无围栏）
+    const isVbaText = /^\s*(?:Option\s+Explicit|Attribute\s+|'(?:[^\r\n]*)|(?:\b(?:Public\s+|Private\s+)?(?:Sub|Function)\b))/im.test(trimmed);
+    if (isVbaText) {
+      const hasSubStart = /(?:^|\n)\s*(?:Public\s+|Private\s+)?Sub\s+/i.test(trimmed);
+      const hasSubEnd = /(?:^|\n)\s*End\s+Sub\b/i.test(trimmed);
+      const hasFnStart = /(?:^|\n)\s*(?:Public\s+|Private\s+)?Function\s+/i.test(trimmed);
+      const hasFnEnd = /(?:^|\n)\s*End\s+Function\b/i.test(trimmed);
+      if ((hasSubStart && !hasSubEnd) || (hasFnStart && !hasFnEnd)) {
+        return { code: trimmed, isTruncated: true, error: '纯 VBA 源码未闭合 (缺少 End Sub / End Function)' };
+      }
+      return { code: trimmed, isTruncated: false };
+    }
+
+    return { code: '', isTruncated: false, error: '未检测到合法的纯 VBA 源码或代码围栏' };
   }
 
-  let originalCodeVersion = extractCode(content);
-  let regeneratedCodeVersion = null;
+  const extractResult = extractCode(content);
+
+  // 严格截断阻断：若 finishReason 为 length 或 extractResult.isTruncated，拒绝写出代码并退出
+  if (finishReason === 'length' || extractResult.isTruncated) {
+    const errMsg = finishReason === 'length' 
+      ? `模型响应达到 Token 上限被硬截断 (finish_reason=length)` 
+      : `代码截断异常 (${extractResult.error})`;
+    console.error(`[Fatal Truncation] ${errMsg}。已安全中止，绝不向执行器提供残缺代码！`);
+    if (metaOutputFile) {
+      fs.writeFileSync(metaOutputFile, JSON.stringify({
+        status: 'FAILED_TRUNCATED',
+        error: errMsg,
+        finishReason: finishReason,
+        isTruncated: true,
+        usage: usage
+      }, null, 2), 'utf8');
+    }
+    process.exit(1);
+  }
+
   let scopeAudit = {
     hasRisk: false,
     riskSnippet: null,
-    riskAdvice: null,
-    correctionTriggered: false
+    riskAdvice: null
   };
 
-  const initialScopeRisk = checkVbaScopeRisk(originalCodeVersion);
-  if (initialScopeRisk.hasRisk) {
-    console.warn(`[Scope Warning] 检测到全局影响范围失控风险: ${initialScopeRisk.matchedSnippet}`);
-    scopeAudit.hasRisk = true;
-    scopeAudit.riskSnippet = initialScopeRisk.matchedSnippet;
-    scopeAudit.riskAdvice = initialScopeRisk.advice;
-    scopeAudit.correctionTriggered = true;
-
-    // 带有明确范围反馈向模型发起针对性重生，绝不静默暗改源码
-    const fixPrompt = `${userPrompt}\n\n【重要范围规范修正】：\n上一版代码包含【${initialScopeRisk.matchedSnippet}】。Excel包含171亿个单元格，直接对全表Cells设置边框或底色会导致Excel进程长时间无响应挂起。\n请保留您的所有业务逻辑、公式计算、指标卡片与表格设计，但务必将边框、背景色等格式化语句限定在实际业务数据区域（例如使用 ws.Range(...) 或 Range(ws.Cells(...), ws.Cells(...))），请重新输出一份完整可运行的标准 VBA 代码。`;
-
-    console.log("-> 正在请模型结合范围诊断重新生成完整 VBA (保持算法自由，纠偏失控范围)...");
-    const regenPayload = {
-      model: model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'assistant', content: content },
-        { role: 'user', content: fixPrompt }
-      ],
-      max_tokens: maxTokens,
-      stream: false
-    };
-    if (thinkingMode === 'disabled') regenPayload.thinking = { type: 'disabled' };
-    else if (thinkingMode === 'budget') regenPayload.thinking = { type: 'enabled', budget_tokens: thinkingBudget };
-
-    try {
-      const regenStartTime = Date.now();
-      const regenResp = await requestLlm(regenPayload);
-      const regenElapsed = Date.now() - regenStartTime;
-      const regenChoice = regenResp.choices?.[0];
-      const regenContent = regenChoice?.message?.content || '';
-      const regenUsage = regenResp.usage || {};
-
-      totalCost.prompt_tokens += (regenUsage.prompt_tokens || 0);
-      totalCost.completion_tokens += (regenUsage.completion_tokens || 0);
-      totalCost.reasoning_tokens += (regenUsage.completion_tokens_details?.reasoning_tokens || 0);
-      totalCost.total_tokens += (regenUsage.total_tokens || 0);
-
-      retryHistory.push({
-        attempt: 'scope_correction',
-        finishReason: regenChoice?.finish_reason,
-        contentLength: regenContent.length,
-        usage: regenUsage,
-        elapsedMs: regenElapsed,
-        triggeredBySnippet: initialScopeRisk.matchedSnippet
-      });
-
-      if (regenContent) {
-        regeneratedCodeVersion = extractCode(regenContent);
-        content = regenContent; // 最终候选版
-        finishReason = regenChoice?.finish_reason || 'stop';
-
-        // 校验重新生成的版本是否仍包含失控范围
-        const secondScopeRisk = checkVbaScopeRisk(regeneratedCodeVersion);
-        if (secondScopeRisk.hasRisk) {
-          console.warn(`[Scope Warning] 重新生成的版本仍包含失控操作: ${secondScopeRisk.matchedSnippet}。将移除代码块，不予放行执行！`);
-          scopeAudit.hasRiskAfterRegen = true;
-          scopeAudit.secondRiskSnippet = secondScopeRisk.matchedSnippet;
-          // 关键：移除 content 中的代码块，使下游 extractVbaCode 无法提取可执行代码
-          // 保留模型的文字说明部分，仅删除 ```vba...``` 围栏
-          content = content.replace(/```(?:vba|vb)?\s*[\s\S]*?```/gi,
-            '\n\n【安全拦截】模型两次生成的 VBA 均包含对整张工作表的全局格式化操作，已阻止自动执行。请手动简化需求或明确数据区域后重试。\n');
-          finishReason = 'scope_blocked';
-        } else {
-          scopeAudit.hasRiskAfterRegen = false;
-          console.log("-> 重新生成成功！第二版代码已纠偏，影响范围已限定在数据区域。");
-        }
-      }
-    } catch (regenErr) {
-      console.warn("重新生成请求失败: " + regenErr.message);
+  if (extractResult.code) {
+    const initialScopeRisk = checkVbaScopeRisk(extractResult.code);
+    if (initialScopeRisk.hasRisk) {
+      console.warn(`[Scope Warning] 检测到全局影响范围失控风险: ${initialScopeRisk.matchedSnippet}`);
+      scopeAudit.hasRisk = true;
+      scopeAudit.riskSnippet = initialScopeRisk.matchedSnippet;
+      scopeAudit.riskAdvice = initialScopeRisk.advice;
     }
   }
 
@@ -310,11 +311,7 @@ function requestLlm(payload) {
     return crypto.createHash('sha256').update(t, 'utf8').digest('hex');
   }
 
-  const executedCode = extractCode(content);
-  const activeUsage = (regeneratedCodeVersion && retryHistory.length > 0 && retryHistory[retryHistory.length - 1].usage)
-    ? retryHistory[retryHistory.length - 1].usage
-    : usage;
-
+  const activeUsage = usage;
   const activeReasoningTokens = activeUsage.completion_tokens_details?.reasoning_tokens || 0;
   const activeCompletionTokens = activeUsage.completion_tokens || 0;
   const activeContentTokens = activeCompletionTokens >= activeReasoningTokens
@@ -338,21 +335,18 @@ function requestLlm(payload) {
       reasoningTokens: activeReasoningTokens,
       contentTokens: activeContentTokens,
       totalTokens: activeUsage.total_tokens || 0,
-      // 数学关系说明：completion_tokens = reasoning_tokens + content_tokens
-      // DeepSeek API: completion_tokens 包含 reasoning_tokens (思考草稿) + content_tokens (正文输出)
-      // reasoning_tokens 来自 usage.completion_tokens_details.reasoning_tokens
-      // content_tokens = completion_tokens - reasoning_tokens
       mathNote: `completion(${activeCompletionTokens}) = reasoning(${activeReasoningTokens}) + content(${activeContentTokens})`
     },
     accumulatedCost: totalCost,
     scopeAudit: scopeAudit,
-    versionControl: {
-      firstVersionCode: originalCodeVersion,
-      firstVersionHash: hashText(originalCodeVersion),
-      regeneratedVersionCode: regeneratedCodeVersion,
-      regeneratedVersionHash: hashText(regeneratedCodeVersion),
-      executedVersionCode: executedCode,
-      executedVersionHash: hashText(executedCode)
+    evidenceSeparation: {
+      rawModelResponseLength: content.length,
+      extractedModelCode: extractResult.code || "",
+      extractedModelCodeLength: (extractResult.code || "").length,
+      extractedModelCodeHash: hashText(extractResult.code || ""),
+      isTruncated: extractResult.isTruncated,
+      extractionError: extractResult.error || null,
+      note: "本探针仅记录模型回复与提取代码。实际执行代码(executedVbaCode)、包装器(wrapperCode)与执行结果必须由宿主执行器(VbaRunner)回报提供，绝不提前假定执行。"
     }
   };
 
@@ -366,5 +360,5 @@ function requestLlm(payload) {
     fs.writeFileSync(metaOutputFile, JSON.stringify(metadata, null, 2), 'utf8');
   }
 
-  console.log(`Success! Attempts: ${attempts}, Finish: ${finishReason}, ContentLen: ${content.length}, ReasoningTokens: ${activeReasoningTokens}, ContentTokens: ${activeContentTokens}, TotalTokens: ${activeUsage.total_tokens}`);
+  console.log(`Success! Attempts: ${attempts}, Finish: ${finishReason}, ContentLen: ${content.length}, CodeLen: ${(extractResult.code || '').length}, TotalTokens: ${activeUsage.total_tokens}`);
 })();

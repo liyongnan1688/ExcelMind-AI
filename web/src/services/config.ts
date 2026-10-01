@@ -72,9 +72,9 @@ export function loadLlmConfig(): LlmConfig {
     baseUrl: 'https://api.deepseek.com/v1',
     apiKey: '',
     model: 'deepseek-chat',
-    maxTokens: 16384,
+    maxTokens: undefined,
     thinkingMode: 'auto',
-    thinkingBudget: 2048,
+    thinkingBudget: undefined,
     systemPromptAddition: '',
   };
 }

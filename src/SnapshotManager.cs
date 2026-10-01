@@ -107,18 +107,10 @@ namespace LeeExcel
                 System.Diagnostics.Debug.WriteLine("SaveCopyAs warning (likely unsaved workbook): " + ex.Message);
             }
 
-            if (!saveOk)
+            if (!saveOk || !File.Exists(snapshotFullPath) || new FileInfo(snapshotFullPath).Length == 0)
             {
-                return new SnapshotItem
-                {
-                    id = "",
-                    timestamp = DateTime.Now.ToString("o"),
-                    timeDisplay = DateTime.Now.ToString("HH:mm:ss"),
-                    fileName = "",
-                    originalPath = fullPath,
-                    promptSummary = "未保存工作簿，已跳过物理副本快照",
-                    vbaPreview = ""
-                };
+                System.Diagnostics.Debug.WriteLine("快照创建失败：物理备份文件不存在或为空 -> " + snapshotFullPath);
+                return null;
             }
 
             var item = new SnapshotItem
@@ -169,22 +161,37 @@ namespace LeeExcel
                 }
 
                 string snapshotFullPath = Path.Combine(folder, target.fileName);
-                if (!File.Exists(snapshotFullPath))
+                if (!File.Exists(snapshotFullPath) || new FileInfo(snapshotFullPath).Length == 0)
                 {
-                    errorMessage = "快照物理文件已不存在: " + snapshotFullPath;
+                    errorMessage = "快照物理文件已不存在或损坏(0字节): " + snapshotFullPath;
                     return false;
                 }
 
-                // 0. 在覆盖前，为当前工作簿（含宏后手工修改）单独保存一份安全救援快照
+                // 0. 检查工作簿是否有未保存的手工修改，并在覆盖前尝试保存紧急救援快照
+                bool isDirty = false;
+                try { isDirty = !(bool)currentWorkbook.Saved; } catch { }
+
+                bool rescueSuccess = false;
                 string rescueFileName = "rescue_before_restore_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".xlsx";
                 string rescueFullPath = Path.Combine(folder, rescueFileName);
                 try
                 {
                     currentWorkbook.SaveCopyAs(rescueFullPath);
+                    if (File.Exists(rescueFullPath) && new FileInfo(rescueFullPath).Length > 0)
+                    {
+                        rescueSuccess = true;
+                    }
                 }
                 catch (Exception rescueEx)
                 {
                     System.Diagnostics.Debug.WriteLine("Rescue snapshot warning: " + rescueEx.Message);
+                }
+
+                // 若工作簿存在未保存的修改且救援快照未能生成，为防数据永久丢失，拒绝盲目覆盖回滚
+                if (isDirty && !rescueSuccess)
+                {
+                    errorMessage = "恢复中止：工作簿存在未保存的手工修改，且紧急救援快照生成失败。为防止手工数据意外丢失，已安全终止回滚。";
+                    return false;
                 }
 
                 // 1. 关闭当前工作簿（放弃修改）

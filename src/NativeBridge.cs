@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 
 namespace LeeExcel
 {
@@ -30,15 +31,36 @@ namespace LeeExcel
         public List<string> transformSteps { get; set; }
         public WorkbookReadback readback { get; set; }
         public string targetWorkbookName { get; set; }
+        public string targetWorkbookFullName { get; set; }
         public string precheckStatus { get; set; }
         public string executionPhase { get; set; }
         public string riskNotice { get; set; }
+        public string injectedModuleName { get; set; }
+        public string failureStage { get; set; }
+        public string rawErrorCode { get; set; }
+        public string errorTriggerPoint { get; set; }
+        public int? vbaErrNumber { get; set; }
+        public string vbaErrDescription { get; set; }
+        public string comHResult { get; set; }
+        public string hostExecutionPhase { get; set; }
+        public bool isPartiallyModified { get; set; }
+        public bool hostStateRestored { get; set; }
+        public string hostStateRestoreDetails { get; set; }
+        public bool? origScreenUpdating { get; set; }
+        public bool? origDisplayAlerts { get; set; }
+        public bool? origEnableEvents { get; set; }
+        public int? origCalculation { get; set; }
+        public bool? restoredScreenUpdating { get; set; }
+        public bool? restoredDisplayAlerts { get; set; }
+        public bool? restoredEnableEvents { get; set; }
+        public int? restoredCalculation { get; set; }
     }
 
     public class BridgeResponse
     {
         public bool ok { get; set; }
         public string action { get; set; }
+        public string requestId { get; set; }
         public string message { get; set; }
         public object data { get; set; }
         public string error { get; set; }
@@ -48,54 +70,74 @@ namespace LeeExcel
     {
         public static string Dispatch(string jsonString, dynamic app)
         {
+            string requestId = null;
             try
             {
                 var req = SimpleJson.ParseFlatObject(jsonString);
                 string action = req.ContainsKey("action") ? req["action"] : "";
+                if (req.ContainsKey("requestId")) requestId = req["requestId"];
 
+                BridgeResponse resp;
                 switch (action)
                 {
                     case "get_workbook_info":
-                        return HandleGetWorkbookInfo(req, app);
+                        resp = HandleGetWorkbookInfo(req, app);
+                        break;
 
                     case "execute_vba":
-                        return HandleExecuteVba(req, app);
+                        resp = HandleExecuteVba(req, app);
+                        break;
 
                     case "create_snapshot":
-                        return HandleCreateSnapshot(req, app);
+                        resp = HandleCreateSnapshot(req, app);
+                        break;
 
                     case "restore_snapshot":
-                        return HandleRestoreSnapshot(req, app);
+                        resp = HandleRestoreSnapshot(req, app);
+                        break;
 
                     case "list_snapshots":
-                        return HandleListSnapshots(req, app);
+                        resp = HandleListSnapshots(req, app);
+                        break;
 
                     case "list_scripts":
-                        return HandleListScripts();
+                        resp = HandleListScripts();
+                        break;
 
                     case "save_script":
-                        return HandleSaveScript(req);
+                        resp = HandleSaveScript(req);
+                        break;
 
                     case "delete_script":
-                        return HandleDeleteScript(req);
+                        resp = HandleDeleteScript(req);
+                        break;
 
                     case "unlock_workbook":
-                        return HandleUnlockWorkbook(req, app);
+                        resp = HandleUnlockWorkbook(req, app);
+                        break;
 
                     default:
-                        return SimpleJson.Serialize(new BridgeResponse
+                        resp = new BridgeResponse
                         {
                             ok = false,
                             action = action,
                             error = "未知请求动作: " + action
-                        });
+                        };
+                        break;
                 }
+
+                if (resp != null)
+                {
+                    resp.requestId = requestId;
+                }
+                return SimpleJson.Serialize(resp);
             }
             catch (Exception ex)
             {
                 return SimpleJson.Serialize(new BridgeResponse
                 {
                     ok = false,
+                    requestId = requestId,
                     error = "Bridge异常: " + ex.Message
                 });
             }
@@ -150,7 +192,7 @@ namespace LeeExcel
             return null;
         }
 
-        private static string HandleGetWorkbookInfo(Dictionary<string, string> req, dynamic app)
+        private static BridgeResponse HandleGetWorkbookInfo(Dictionary<string, string> req, dynamic app)
         {
             try
             {
@@ -161,7 +203,7 @@ namespace LeeExcel
 
                 if (wb == null)
                 {
-                    return SimpleJson.Serialize(new BridgeResponse
+                    return new BridgeResponse
                     {
                         ok = true,
                         action = "get_workbook_info",
@@ -175,7 +217,7 @@ namespace LeeExcel
                             sheets = new List<string>(),
                             snapshots = new List<SnapshotItem>()
                         }
-                    });
+                    };
                 }
 
                 string name = (string)wb.Name;
@@ -212,7 +254,7 @@ namespace LeeExcel
 
                 var snapshots = isSaved ? SnapshotManager.LoadSnapshots(fullName) : new List<SnapshotItem>();
 
-                return SimpleJson.Serialize(new BridgeResponse
+                return new BridgeResponse
                 {
                     ok = true,
                     action = "get_workbook_info",
@@ -226,20 +268,20 @@ namespace LeeExcel
                         sheets = sheets,
                         snapshots = snapshots
                     }
-                });
+                };
             }
             catch (Exception ex)
             {
-                return SimpleJson.Serialize(new BridgeResponse
+                return new BridgeResponse
                 {
                     ok = false,
                     action = "get_workbook_info",
                     error = ex.Message
-                });
+                };
             }
         }
 
-        private static string HandleExecuteVba(Dictionary<string, string> req, dynamic app)
+        private static BridgeResponse HandleExecuteVba(Dictionary<string, string> req, dynamic app)
         {
             string targetFullName = req.ContainsKey("targetWorkbookFullName") ? req["targetWorkbookFullName"] : "";
             string targetName = req.ContainsKey("targetWorkbookName") ? req["targetWorkbookName"] : "";
@@ -249,12 +291,12 @@ namespace LeeExcel
             if (targetWb == null)
             {
                 string targetDesc = !string.IsNullOrEmpty(targetFullName) ? targetFullName : targetName;
-                return SimpleJson.Serialize(new BridgeResponse
+                return new BridgeResponse
                 {
                     ok = false,
                     action = "execute_vba",
                     error = "未找到目标工作簿 (" + (targetDesc ?? "未指定") + ")，请确认该工作簿已在 Excel 中打开。"
-                });
+                };
             }
 
             string code = req.ContainsKey("code") ? req["code"] : "";
@@ -262,12 +304,12 @@ namespace LeeExcel
 
             if (string.IsNullOrEmpty(code))
             {
-                return SimpleJson.Serialize(new BridgeResponse
+                return new BridgeResponse
                 {
                     ok = false,
                     action = "execute_vba",
                     error = "传入的 VBA 代码为空"
-                });
+                };
             }
 
             string rawModelResponse = req.ContainsKey("rawModelResponse") ? req["rawModelResponse"] : "";
@@ -280,13 +322,64 @@ namespace LeeExcel
             }
             catch (Exception snapEx)
             {
-                System.Diagnostics.Debug.WriteLine("快照创建告警: " + snapEx.Message);
+                System.Diagnostics.Debug.WriteLine("快照创建失败: " + snapEx.Message);
+                return new BridgeResponse
+                {
+                    ok = false,
+                    action = "execute_vba",
+                    error = "执行已安全中止：执行前目标工作簿快照备份失败 (" + snapEx.Message + ")。为保障数据可回滚安全，拒绝执行代码。"
+                };
+            }
+
+            if (snap == null || string.IsNullOrEmpty(snap.id) || string.IsNullOrEmpty(snap.fileName))
+            {
+                return new BridgeResponse
+                {
+                    ok = false,
+                    action = "execute_vba",
+                    error = "执行已安全中止：目标工作簿物理快照备份未能成功生成有效副本。请确认工作簿已保存并具有有效磁盘路径。为保障数据可回滚安全，拒绝执行代码。"
+                };
+            }
+
+            try
+            {
+                string wbPathForFolder = !string.IsNullOrEmpty(targetFullName) ? targetFullName : targetName;
+                string snapFolder = SnapshotManager.GetBackupFolderForWorkbook(wbPathForFolder);
+                string snapFile = Path.Combine(snapFolder, snap.fileName);
+                if (!File.Exists(snapFile) || new FileInfo(snapFile).Length == 0)
+                {
+                    return new BridgeResponse
+                    {
+                        ok = false,
+                        action = "execute_vba",
+                        error = "执行已安全中止：快照物理文件未能有效写入磁盘（文件不存在或为0字节）。拒绝执行代码以防数据丢失。"
+                    };
+                }
+            }
+            catch (Exception checkEx)
+            {
+                return new BridgeResponse
+                {
+                    ok = false,
+                    action = "execute_vba",
+                    error = "执行已安全中止：快照文件物理校验异常 (" + checkEx.Message + ")。拒绝执行代码以防数据丢失。"
+                };
             }
 
             // 2. 在目标工作簿中执行动态 VBA 并读回实际状态
             var result = VbaRunner.RunVbaCode(app, targetWb, code, rawModelResponse);
 
-            return SimpleJson.Serialize(new BridgeResponse
+            // 安全获取工作簿名称与路径：宏可能关闭了工作簿导致 COM 引用失效
+            string resolvedTargetName = targetName;
+            string resolvedTargetFullName = targetFullName;
+            try
+            {
+                resolvedTargetName = (string)targetWb.Name;
+                resolvedTargetFullName = (string)targetWb.FullName;
+            }
+            catch { }
+
+            return new BridgeResponse
             {
                 ok = result.success,
                 action = "execute_vba",
@@ -307,15 +400,35 @@ namespace LeeExcel
                     isSourceIdentical = result.isSourceIdentical,
                     transformSteps = result.transformSteps,
                     readback = result.readback,
-                    targetWorkbookName = (string)targetWb.Name,
+                    targetWorkbookName = resolvedTargetName,
+                    targetWorkbookFullName = resolvedTargetFullName,
                     precheckStatus = result.precheckStatus,
                     executionPhase = result.executionPhase,
-                    riskNotice = result.riskNotice
+                    riskNotice = result.riskNotice,
+                    injectedModuleName = result.injectedModuleName,
+                    failureStage = result.failureStage,
+                    rawErrorCode = result.rawErrorCode,
+                    errorTriggerPoint = result.errorTriggerPoint,
+                    vbaErrNumber = result.vbaErrNumber,
+                    vbaErrDescription = result.vbaErrDescription,
+                    comHResult = result.comHResult,
+                    hostExecutionPhase = result.hostExecutionPhase,
+                    isPartiallyModified = result.isPartiallyModified,
+                    hostStateRestored = result.hostStateRestored,
+                    hostStateRestoreDetails = result.hostStateRestoreDetails,
+                    origScreenUpdating = result.origScreenUpdating,
+                    origDisplayAlerts = result.origDisplayAlerts,
+                    origEnableEvents = result.origEnableEvents,
+                    origCalculation = result.origCalculation,
+                    restoredScreenUpdating = result.restoredScreenUpdating,
+                    restoredDisplayAlerts = result.restoredDisplayAlerts,
+                    restoredEnableEvents = result.restoredEnableEvents,
+                    restoredCalculation = result.restoredCalculation
                 }
-            });
+            };
         }
 
-        private static string HandleCreateSnapshot(Dictionary<string, string> req, dynamic app)
+        private static BridgeResponse HandleCreateSnapshot(Dictionary<string, string> req, dynamic app)
         {
             string targetFullName = req.ContainsKey("targetWorkbookFullName") ? req["targetWorkbookFullName"] : "";
             string targetName = req.ContainsKey("targetWorkbookName") ? req["targetWorkbookName"] : "";
@@ -323,25 +436,25 @@ namespace LeeExcel
 
             if (wb == null || string.IsNullOrEmpty((string)wb.Path))
             {
-                return SimpleJson.Serialize(new BridgeResponse
+                return new BridgeResponse
                 {
                     ok = false,
                     action = "create_snapshot",
                     error = "目标工作簿未保存或未找到，无法创建物理备份"
-                });
+                };
             }
 
             string prompt = req.ContainsKey("prompt") ? req["prompt"] : "手动创建快照";
             var snap = SnapshotManager.CreateSnapshot(wb, prompt, "");
-            return SimpleJson.Serialize(new BridgeResponse
+            return new BridgeResponse
             {
                 ok = true,
                 action = "create_snapshot",
                 data = snap
-            });
+            };
         }
 
-        private static string HandleRestoreSnapshot(Dictionary<string, string> req, dynamic app)
+        private static BridgeResponse HandleRestoreSnapshot(Dictionary<string, string> req, dynamic app)
         {
             string targetFullName = req.ContainsKey("targetWorkbookFullName") ? req["targetWorkbookFullName"] : "";
             string targetName = req.ContainsKey("targetWorkbookName") ? req["targetWorkbookName"] : "";
@@ -349,12 +462,12 @@ namespace LeeExcel
 
             if (wb == null)
             {
-                return SimpleJson.Serialize(new BridgeResponse
+                return new BridgeResponse
                 {
                     ok = false,
                     action = "restore_snapshot",
                     error = "未找到目标工作簿"
-                });
+                };
             }
 
             string snapId = req.ContainsKey("snapshotId") ? req["snapshotId"] : "";
@@ -364,31 +477,31 @@ namespace LeeExcel
             {
                 try { VbaRunner.UnlockWorkbook((string)wb.Name); } catch { }
             }
-            return SimpleJson.Serialize(new BridgeResponse
+            return new BridgeResponse
             {
                 ok = ok,
                 action = "restore_snapshot",
                 message = ok ? "已成功恢复到快照执行前的整本工作簿状态，锁定已自动解除！" : err,
                 error = err
-            });
+            };
         }
 
-        private static string HandleUnlockWorkbook(Dictionary<string, string> req, dynamic app)
+        private static BridgeResponse HandleUnlockWorkbook(Dictionary<string, string> req, dynamic app)
         {
             string targetName = req.ContainsKey("targetWorkbookName") ? req["targetWorkbookName"] : "";
             if (!string.IsNullOrEmpty(targetName))
             {
                 VbaRunner.UnlockWorkbook(targetName);
             }
-            return SimpleJson.Serialize(new BridgeResponse
+            return new BridgeResponse
             {
                 ok = true,
                 action = "unlock_workbook",
                 message = "工作簿锁定已解除"
-            });
+            };
         }
 
-        private static string HandleListSnapshots(Dictionary<string, string> req, dynamic app)
+        private static BridgeResponse HandleListSnapshots(Dictionary<string, string> req, dynamic app)
         {
             string targetFullName = req.ContainsKey("targetWorkbookFullName") ? req["targetWorkbookFullName"] : "";
             string targetName = req.ContainsKey("targetWorkbookName") ? req["targetWorkbookName"] : "";
@@ -396,35 +509,35 @@ namespace LeeExcel
 
             if (wb == null || string.IsNullOrEmpty((string)wb.Path))
             {
-                return SimpleJson.Serialize(new BridgeResponse
+                return new BridgeResponse
                 {
                     ok = true,
                     action = "list_snapshots",
                     data = new List<SnapshotItem>()
-                });
+                };
             }
 
             var list = SnapshotManager.LoadSnapshots((string)wb.FullName);
-            return SimpleJson.Serialize(new BridgeResponse
+            return new BridgeResponse
             {
                 ok = true,
                 action = "list_snapshots",
                 data = list
-            });
+            };
         }
 
-        private static string HandleListScripts()
+        private static BridgeResponse HandleListScripts()
         {
             var list = ScriptManager.ListScripts();
-            return SimpleJson.Serialize(new BridgeResponse
+            return new BridgeResponse
             {
                 ok = true,
                 action = "list_scripts",
                 data = list
-            });
+            };
         }
 
-        private static string HandleSaveScript(Dictionary<string, string> req)
+        private static BridgeResponse HandleSaveScript(Dictionary<string, string> req)
         {
             string name = req.ContainsKey("name") ? req["name"] : "";
             string code = req.ContainsKey("code") ? req["code"] : "";
@@ -432,27 +545,27 @@ namespace LeeExcel
 
             string err;
             bool ok = ScriptManager.SaveScript(name, code, desc, out err);
-            return SimpleJson.Serialize(new BridgeResponse
+            return new BridgeResponse
             {
                 ok = ok,
                 action = "save_script",
                 message = ok ? "脚本已成功保存到本地“我的脚本”库！" : err,
                 error = err
-            });
+            };
         }
 
-        private static string HandleDeleteScript(Dictionary<string, string> req)
+        private static BridgeResponse HandleDeleteScript(Dictionary<string, string> req)
         {
             string fileName = req.ContainsKey("fileName") ? req["fileName"] : "";
             string err;
             bool ok = ScriptManager.DeleteScript(fileName, out err);
-            return SimpleJson.Serialize(new BridgeResponse
+            return new BridgeResponse
             {
                 ok = ok,
                 action = "delete_script",
                 message = ok ? "脚本已删除" : err,
                 error = err
-            });
+            };
         }
     }
 }

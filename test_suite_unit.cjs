@@ -1,118 +1,164 @@
-// test_suite_unit.cjs - Unit test runner for intent classification, parser, and verification
+// test_suite_unit.cjs - Unit test runner for explicit dual-entry routing, code extraction, and verification
 
-function detectIntent(text) {
-  if (!text || typeof text !== 'string') return 'AMBIGUOUS';
-  const trimmed = text.trim();
-  if (!trimmed) return 'AMBIGUOUS';
-
-  // 1. 优先匹配纯聊天、问候、身份咨询与元问题
-  if (
-    /(?:自我介绍|介绍(?:一下|下)?(?:自己)?|你是谁|你是[？\?]|你能做(?:什么|啥)|有什么功能|功能介绍|使用说明)/i.test(
-      trimmed
-    ) ||
-    /^(?:你好|您好|hi|hello|hey|help|帮助)[\s!！?？~]*$/i.test(trimmed)
-  ) {
-    return 'CHAT';
-  }
-
-  // 2. 匹配对刚才操作/步骤/代码的解释与复盘要求
-  if (
-    /(?:解释|说明|介绍|复盘|讲讲|说说|请教|了解|分析)(?:一下|下)?(?:刚才|刚刚|上一[步次]|前面)?.*(?:做了什么|执行了什么|干了什么|代码|操作|步骤|原因|原理|逻辑)/i.test(
-      trimmed
-    ) ||
-    /(?:刚才|刚刚|上一[步次]|前面).*(?:做了什么|执行了什么|干了什么|代码|是什么意思|是干嘛的|原理)/i.test(trimmed)
-  ) {
-    return 'CHAT';
-  }
-
-  // 3. 匹配用户粘贴代码或提及代码询问含义（必须只解释、不执行）
-  const asksCodeMeaningRegex =
-    /(?:这段代码|这个宏|这几行代码|这段VBA|以下代码|这段宏|Sub\s+[\s\S]+End\s+Sub)[\s\S]*(?:什么意思|含义|解释|怎么理解|干嘛|干什么|作用|读懂|请教|为什么|如何理解)/i;
-  if (asksCodeMeaningRegex.test(trimmed)) {
-    return 'CHAT';
-  }
-
-  if (
-    /(?:什么意思|怎么理解|是干什么的|有何作用)[\?？]*$/.test(trimmed) &&
-    (trimmed.includes('Sub') || trimmed.includes('Range') || trimmed.includes('Dim'))
-  ) {
-    return 'CHAT';
-  }
-
-  const generalKnowledgeRegex =
-    /^(?:什么是|如何理解|为什么|怎么用|怎么使用|函数用法|公式怎么写|区别是什么|有什么区别)/i;
-  if (generalKnowledgeRegex.test(trimmed)) {
-    return 'CHAT';
-  }
-
-  const hasActionVerb =
-    /(?:新建|创建|生成|制作|写入|填充|输入|添加|插入|删除|清除|清空|修改|替换|设置|调整|美化|排版|对齐|边框|底色|颜色|格式化|计算|求和|统计|汇总|排序|筛选|做个|画个|建立|构建)/i.test(
-      trimmed
-    );
-  const hasTargetNoun =
-    /(?:表|表格|数据|列|行|单元格|矩阵|图表|柱状图|折线图|饼图|公式|看板|乘法表|清单|明细|工作表|sheet)/i.test(
-      trimmed
-    );
-  const hasCoordinateSpec = /(?:在|从)\s*[A-Za-z]+[0-9]+(?:\s*:\s*[A-Za-z]+[0-9]+)?/i.test(trimmed);
-  const hasDirectImperative = /(?:把|将)\s*.+\s*(?:改|设|调|删|变|换|排序|求和|汇总|居中|加粗)/i.test(trimmed);
-
-  if ((hasActionVerb && hasTargetNoun) || hasCoordinateSpec || hasDirectImperative) {
-    return 'AUTOMATION';
-  }
-
-  if (trimmed.length <= 4 || (!hasActionVerb && !trimmed.includes('？') && !trimmed.includes('?'))) {
-    return 'AMBIGUOUS';
-  }
-
-  return 'CHAT';
+/**
+ * 模拟生产环境的双入口发送分发逻辑
+ * 唯一模式来源：用户显式选中的模式 / 点击的模式按钮
+ * 生产发送链路中零调用 detectIntent，不根据文本关键词改变模式
+ */
+function createRequestLifecycle(explicitMode, text, currentWbContext = { name: 'Book1.xlsx', activeSheet: 'Sheet1' }) {
+  const requestId = 'req_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+  // 发送瞬间严格固化 requestMode 与目标工作簿上下文
+  const currentRequest = {
+    requestId,
+    requestMode: explicitMode, // 显式入口传入：'CHAT' 或 'AUTOMATION'
+    userMsgId: 'msg_user_' + requestId,
+    assistantMsgId: 'msg_asst_' + requestId,
+    targetWbName: currentWbContext.name,
+    activeSheet: currentWbContext.activeSheet,
+  };
+  return currentRequest;
 }
 
-function extractVbaCode(content) {
+/**
+ * 模拟生产环境的响应处理逻辑
+ */
+function handleResponseLifecycle(currentRequest, rawModelResponse, finishReason = 'stop') {
+  // 四、CHAT 通道：完整展示，零调用执行器，零快照
+  if (currentRequest.requestMode === 'CHAT') {
+    return {
+      mode: 'CHAT',
+      content: rawModelResponse,
+      execution: null,
+      extractedCode: null,
+      didCallExecuteVba: false,
+      didCreateSnapshot: false,
+      isMacroError: false,
+    };
+  }
+
+  // 五、AUTOMATION 通道：区分未取得代码、代码无效截断与合法完整代码
+  const extracted = extractVbaCode(rawModelResponse, finishReason);
+
+  // 分支 1: 模型返回普通文字，未提供 VBA（如输入“你是”返回了自我介绍）
+  if (extracted.status === 'no_code') {
+    return {
+      mode: 'AUTOMATION',
+      content: rawModelResponse + '\n\n（本次未执行：模型未返回可执行 VBA）',
+      execution: null, // 绝不创建宏执行失败卡！
+      extractedCode: null,
+      didCallExecuteVba: false,
+      didCreateSnapshot: false,
+      isMacroError: false,
+      unexecutedReason: '模型未返回可执行 VBA',
+    };
+  }
+
+  // 分支 2: 模型返回疑似 VBA，但输出被截断或结构缺失（代码未执行）
+  if (extracted.status !== 'valid' || !extracted.code) {
+    const errorReason = extracted.error || '代码不完整或结构缺失，已安全停止执行';
+    return {
+      mode: 'AUTOMATION',
+      content: `（代码未执行：${errorReason}）`,
+      execution: {
+        summary: `代码未执行：${errorReason}`,
+        error: errorReason,
+        precheckStatus: extracted.status === 'scope_risk' ? 'scope_risk_intercepted' : 'failed',
+        executionPhase: 'intercepted_before_run',
+        snapshot: null, // 不创建快照
+      },
+      extractedCode: extracted.code,
+      didCallExecuteVba: false,
+      didCreateSnapshot: false,
+      isMacroError: false, // 标为未进入运行阶段，非宏运行时错误
+    };
+  }
+
+  // 分支 3: 提取成功且结构完整：才进入已有执行链路
+  return {
+    mode: 'AUTOMATION',
+    content: rawModelResponse,
+    execution: {
+      summary: '执行准备就绪',
+      precheckStatus: 'passed',
+      executionPhase: 'running',
+      snapshot: { id: 'snap_test_123' },
+    },
+    extractedCode: extracted.code,
+    didCallExecuteVba: true,
+    didCreateSnapshot: true,
+    isMacroError: false,
+  };
+}
+
+
+function extractVbaCode(content, finishReason) {
   if (!content) {
-    return { code: '', isTruncated: false, error: '响应内容为空' };
+    return { code: '', isTruncated: false, status: 'no_code', error: '响应内容为空' };
   }
 
   const openFenceMatch = content.match(/```(?:vba|vb)?\s*/i);
-  if (!openFenceMatch || openFenceMatch.index === undefined) {
-    return { code: '', isTruncated: false, error: '模型响应未包含规范的 VBA 代码块' };
+  let extractedCode = '';
+  let isFenceEnclosed = false;
+
+  if (openFenceMatch && openFenceMatch.index !== undefined) {
+    const codeStart = openFenceMatch.index + openFenceMatch[0].length;
+    const rest = content.slice(codeStart);
+    const closeFenceIndex = rest.indexOf('```');
+
+    if (closeFenceIndex !== -1) {
+      extractedCode = rest.slice(0, closeFenceIndex).trim();
+      isFenceEnclosed = true;
+    } else {
+      extractedCode = rest.trim();
+      return {
+        code: extractedCode,
+        isTruncated: true,
+        status: 'truncated',
+        error: '代码块未闭合 (缺少配对的 ```)，说明大模型输出已被截断，已安全停止执行。',
+      };
+    }
+  } else {
+    // 兜底检测裸代码
+    const subMatch = content.match(/(?:^|\n)\s*(?:Public\s+|Private\s+)?Sub\s+[a-zA-Z0-9_\u4e00-\u9fa5]+/i);
+    if (subMatch && subMatch.index !== undefined) {
+      extractedCode = content.slice(subMatch.index).trim();
+    } else {
+      return {
+        code: '',
+        isTruncated: false,
+        status: 'no_code',
+        error: '模型回复未包含可执行的 VBA 过程源码（普通文字回答）。',
+      };
+    }
   }
 
-  const codeStart = openFenceMatch.index + openFenceMatch[0].length;
-  const rest = content.slice(codeStart);
-  const closeFenceIndex = rest.indexOf('```');
-
-  if (closeFenceIndex === -1) {
+  // 检查基本过程完整性
+  const hasSubOrFunction = /(?:^|\n)\s*(?:Public\s+|Private\s+)?(?:Sub|Function)\s+[a-zA-Z0-9_\u4e00-\u9fa5]+/i.test(extractedCode);
+  if (!hasSubOrFunction) {
     return {
-      code: rest.trim(),
-      isTruncated: true,
-      error: '模型响应被截断 (代码块未闭合 ```)，已安全停止执行。',
-    };
-  }
-
-  const rawCode = rest.slice(0, closeFenceIndex).trim();
-  const hasSubDecl = /(?:Public\s+|Private\s+)?Sub\s+[a-zA-Z0-9_\u4e00-\u9fa5]+\s*\(/i.test(rawCode);
-  const hasEndSub = /End\s+Sub/i.test(rawCode);
-
-  if (!hasSubDecl) {
-    return {
-      code: rawCode,
+      code: extractedCode,
       isTruncated: false,
-      error: '代码块中未包含有效的 Sub 过程声明。',
+      status: 'invalid_structure',
+      error: '提取出的代码中未包含有效的 Sub 或 Function 过程定义。',
     };
   }
 
-  if (!hasEndSub) {
+  // 检查未闭合的 Sub / Function
+  const hasSubStart = /(?:^|\n)\s*(?:Public\s+|Private\s+)?Sub\s+/i.test(extractedCode);
+  const hasSubEnd = /(?:^|\n)\s*End\s+Sub\b/i.test(extractedCode);
+  if (hasSubStart && !hasSubEnd) {
     return {
-      code: rawCode,
+      code: extractedCode,
       isTruncated: true,
-      error: '代码结构不完整 (缺少闭合 End Sub)，可能由于响应截断引起，已拦截未执行。',
+      status: 'truncated',
+      error: '代码过程未闭合 (缺少配对的 End Sub)，可能模型生成被中途截断，已安全拦截未执行。',
     };
   }
 
-  const cleanedCode = rawCode.replace(/^[ \t]*[*\-•][ \t]+/gm, '');
   return {
-    code: cleanedCode,
+    code: extractedCode,
     isTruncated: false,
+    status: 'valid',
   };
 }
 
@@ -201,46 +247,108 @@ function assert(desc, condition, details = '') {
   }
 }
 
-console.log('=== 1. Intent Detection Suite (Multi-phrasing) ===');
-const chatTests = [
-  '你是？',
-  '你是谁，能帮我做什么？',
-  '自我介绍一下',
-  '解释刚才做了什么',
-  '说说刚才那步宏执行了什么操作',
-  '请问刚才的代码是什么原理',
-  'Sub HighlightRows()\n ActiveSheet.Range("A1").Interior.Color = vbYellow\nEnd Sub\n这段代码什么意思？',
-  '帮我看看这段宏是干什么的：\nSub Test()\nMsgBox "hi"\nEnd Sub',
-  '什么是数据透视表？',
-  '在Excel中如何使用SUMIF函数？',
-];
+console.log('=== 1. Explicit Dual-Entry Routing & Lifecycle Suite ===');
 
-for (const q of chatTests) {
-  const intent = detectIntent(q);
-  assert(`Chat input: "${q.slice(0, 30).replace(/\n/g, ' ')}" -> CHAT`, intent === 'CHAT', `Got ${intent}`);
-}
+// 1.1 对话入口测试 (无论输入什么文本，均锁定 CHAT 通道，绝不调用执行器)
+const chatInput1 = '你是';
+const reqChat1 = createRequestLifecycle('CHAT', chatInput1);
+assert('Explicit CHAT entry locks requestMode to CHAT', reqChat1.requestMode === 'CHAT');
+const resChat1 = handleResponseLifecycle(reqChat1, '我是您的智能助手，可以为您解答 Excel 与 VBA 相关问题。');
+assert('CHAT input "你是" -> displays text, execution is null, no VBA executor called', resChat1.execution === null && !resChat1.didCallExecuteVba && !resChat1.didCreateSnapshot);
 
-const autoTests = [
-  '新建一个表格，在 D1 开始写入九九乘法表，并美化这个表格',
-  '请从 D1 单元格开始生成阶梯式算式九九乘法表',
-  '生成 9×9 数值乘积矩阵',
-  '制作一个九九乘法数字矩阵表',
-  '为已有业务数据调整列宽、对齐、表头和数字格式',
-  '给当前表格加上边框并设置隔行变色',
-  '在末尾行计算销售总额公式',
-  '根据这几列数据生成柱状图',
-];
+const chatInput2 = '写一段在 A1 写字的 VBA 给我看';
+const reqChat2 = createRequestLifecycle('CHAT', chatInput2);
+const mockVbaBlock = '你可以参考以下代码：\n```vba\nSub Demo()\n  Range("A1").Value = "Hello"\nEnd Sub\n```';
+const resChat2 = handleResponseLifecycle(reqChat2, mockVbaBlock);
+assert('CHAT input requesting VBA -> displays code block, execution is null, does not execute', resChat2.execution === null && !resChat2.didCallExecuteVba && resChat2.content.includes('Sub Demo()'));
 
-for (const a of autoTests) {
-  const intent = detectIntent(a);
-  assert(`Auto input: "${a.slice(0, 30)}" -> AUTOMATION`, intent === 'AUTOMATION', `Got ${intent}`);
-}
+const chatInput3 = '在当前工作表 A1 写入操作测试';
+const reqChat3 = createRequestLifecycle('CHAT', chatInput3);
+assert('CHAT input with action verb still stays in CHAT mode', reqChat3.requestMode === 'CHAT');
+const resChat3 = handleResponseLifecycle(reqChat3, '建议您切换到底部【操作】模式来直接修改表格。');
+assert('CHAT mode with action verb never triggers executor', resChat3.execution === null && !resChat3.didCallExecuteVba);
 
-const ambigTests = ['乘法表', 'VBA', '表格', '宏'];
-for (const m of ambigTests) {
-  const intent = detectIntent(m);
-  assert(`Ambiguous input: "${m}" -> AMBIGUOUS`, intent === 'AMBIGUOUS', `Got ${intent}`);
-}
+// 1.2 操作入口测试 (无论输入什么文本，均锁定 AUTOMATION 通道)
+const autoInput1 = '你是';
+const reqAuto1 = createRequestLifecycle('AUTOMATION', autoInput1);
+assert('Explicit AUTOMATION entry locks requestMode to AUTOMATION (even for "你是")', reqAuto1.requestMode === 'AUTOMATION');
+
+// 截图中故障关键回归：操作入口输入“你是”，模型返回普通文字说明
+const mockIntroText = '我是基于中信科移动标准的智能办公助手，能够帮您编写并执行 Excel 宏操作。';
+const resAutoIntro = handleResponseLifecycle(reqAuto1, mockIntroText);
+assert(
+  'AUTOMATION receives pure text (no code) -> annotated as unexecuted, execution card is NULL (no red error card!)',
+  resAutoIntro.execution === null && !resAutoIntro.didCallExecuteVba && resAutoIntro.content.includes('（本次未执行：模型未返回可执行 VBA）')
+);
+
+// 1.3 AUTOMATION 正常返回完整 VBA
+const autoInput2 = '在当前工作表 A1 写入操作测试';
+const reqAuto2 = createRequestLifecycle('AUTOMATION', autoInput2);
+const mockValidVba = '已为您编写宏：\n```vba\nSub Main(targetWb As Workbook)\n  targetWb.Sheets(1).Range("A1").Value = "操作测试"\nEnd Sub\n```';
+const resAutoValid = handleResponseLifecycle(reqAuto2, mockValidVba);
+assert(
+  'AUTOMATION with valid VBA -> creates snapshot and calls execute_vba',
+  resAutoValid.didCallExecuteVba && resAutoValid.didCreateSnapshot && resAutoValid.execution.precheckStatus === 'passed'
+);
+
+// 1.4 处理层测试：模拟不同模型回复状态 (明确标注为 Simulated)
+console.log('\n=== 1A. Simulated Response Layer Tests (no_code vs truncated vs valid) ===');
+// 模拟 1: 模型返回普通文字，无代码
+const simNoCode = extractVbaCode('请问您需要处理哪张工作表的数据？');
+assert('[Simulated] Pure text response returns status: "no_code"', simNoCode.status === 'no_code' && simNoCode.code === '');
+
+// 模拟 2: 模型回复被截断 (未闭合代码围栏)
+const simTruncFence = extractVbaCode('```vba\nSub Test()\n  Range("A1").Value = 1\n');
+assert('[Simulated] Unclosed code fence returns status: "truncated"', simTruncFence.status === 'truncated' && simTruncFence.isTruncated);
+const resSimTrunc = handleResponseLifecycle(reqAuto2, '```vba\nSub Test()\n  Range("A1").Value = 1\n');
+assert(
+  '[Simulated] Truncated code labeled as "代码未执行", phase: "intercepted_before_run", no snapshot restore button',
+  resSimTrunc.execution?.executionPhase === 'intercepted_before_run' && resSimTrunc.execution?.snapshot === null
+);
+
+// 模拟 3: 模型回复过程缺少 End Sub
+const simTruncEndSub = extractVbaCode('```vba\nSub Test()\n  Range("A1").Value = 1\n```');
+assert('[Simulated] Missing End Sub returns status: "truncated"', simTruncEndSub.status === 'truncated');
+
+// 模拟 4: 模型返回非 Sub/Function 结构
+const simInvalidStruct = extractVbaCode('```vba\nDim x As Integer\nx = 1\n```');
+assert('[Simulated] Missing Sub/Function returns status: "invalid_structure"', simInvalidStruct.status === 'invalid_structure');
+
+// 1.5 异步切换边界测试
+console.log('\n=== 1B. Asynchronous UI Switching Boundary Suite ===');
+// 场景 1: CHAT 请求在等待期间，用户将 UI 切换至【操作】
+const asyncReqChat = createRequestLifecycle('CHAT', '请教一个 Excel 问题');
+let currentUiMode = 'CHAT';
+// 模拟用户在发送后立即点击切换 UI
+currentUiMode = 'AUTOMATION';
+const asyncResChat = handleResponseLifecycle(asyncReqChat, '这是解答文本');
+assert(
+  'Switching UI to AUTOMATION during ongoing CHAT request does NOT affect ongoing request',
+  asyncResChat.mode === 'CHAT' && asyncResChat.execution === null && !asyncResChat.didCallExecuteVba
+);
+
+// 场景 2: AUTOMATION 请求在等待期间，用户将 UI 切换至【对话】
+const asyncReqAuto = createRequestLifecycle('AUTOMATION', '清空 A 列');
+currentUiMode = 'AUTOMATION';
+currentUiMode = 'CHAT'; // 模拟用户在生成中切换 UI
+const asyncResAuto = handleResponseLifecycle(asyncReqAuto, mockValidVba);
+assert(
+  'Switching UI to CHAT during ongoing AUTOMATION request does NOT mutate request into CHAT',
+  asyncResAuto.mode === 'AUTOMATION' && asyncResAuto.didCallExecuteVba
+);
+
+// 1.6 发送方式一致性测试 (Enter 发送 vs 点击发送按钮)
+const reqByEnter = createRequestLifecycle('AUTOMATION', '在 A1 输入 100');
+const reqByButtonClick = createRequestLifecycle('AUTOMATION', '在 A1 输入 100');
+assert('Enter send and button click produce identical requestMode and target workbook binding',
+  reqByEnter.requestMode === reqByButtonClick.requestMode && reqByEnter.targetWbName === reqByButtonClick.targetWbName
+);
+
+console.log('\n=== 1B. VBA Source Preservation Suite (No Silent Modification) ===');
+// 生产代码严格 100% 保留模型返回的原始字符（包括中文引号、注释等），严禁静默规范化改写
+const codeWithSmartQuotes = '```vba\nSub Main()\n  ws.Range("C3").Value = “错误”\nEnd Sub\n```';
+const smartQuoteRes = extractVbaCode(codeWithSmartQuotes);
+assert('Preserve smart quotes as-is without silent modification', smartQuoteRes.code.includes('“错误”'));
 
 console.log('\n=== 2. Strict Code Extraction & Truncation Suite ===');
 

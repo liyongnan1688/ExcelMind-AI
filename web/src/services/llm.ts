@@ -20,103 +20,121 @@ export interface ScopeRiskResult {
 export interface ExtractedVbaResult {
   code: string;
   isTruncated: boolean;
+  status: 'valid' | 'no_code' | 'truncated' | 'invalid_structure' | 'scope_risk';
   error?: string;
   scopeRisk?: ScopeRiskResult;
 }
 
 /**
  * 意图识别器：严禁仅凭是否含有 '表格' 或 'Sub' 等简单词判定
- * 精确区分：
- * 1. CHAT：问答、解释、闲聊、代码解读（即使粘贴了 VBA 代码询问含义）
- * 2. AUTOMATION：明确要求修改/操作当前工作簿
- * 3. AMBIGUOUS：意图不明确，需简短澄清
+export type UserIntent = 'CHAT' | 'AUTOMATION' | 'AMBIGUOUS';
+
+
+/**
+ * 获取当前本地系统时钟信息
  */
-export function detectIntent(text: string): UserIntent {
-  if (!text || typeof text !== 'string') return 'AMBIGUOUS';
-  const trimmed = text.trim();
-  if (!trimmed) return 'AMBIGUOUS';
-
-  // 1. 优先匹配纯聊天、问候、身份咨询与元问题
-  if (
-    /(?:自我介绍|介绍(?:一下|下)?(?:自己)?|你是谁|你是[？\?]|你能做(?:什么|啥)|有什么功能|功能介绍|使用说明)/i.test(
-      trimmed
-    ) ||
-    /^(?:你好|您好|hi|hello|hey|help|帮助)[\s!！?？~]*$/i.test(trimmed)
-  ) {
-    return 'CHAT';
-  }
-
-  // 2. 匹配对刚才操作/步骤/代码的解释与复盘要求
-  if (
-    /(?:解释|说明|介绍|复盘|讲讲|说说|请教|了解|分析)(?:一下|下)?(?:刚才|刚刚|上一[步次]|前面)?.*(?:做了什么|执行了什么|干了什么|代码|操作|步骤|原因|原理|逻辑)/i.test(
-      trimmed
-    ) ||
-    /(?:刚才|刚刚|上一[步次]|前面).*(?:做了什么|执行了什么|干了什么|代码|是什么意思|是干嘛的|原理)/i.test(trimmed)
-  ) {
-    return 'CHAT';
-  }
-
-  // 3. 匹配用户粘贴代码或提及代码询问含义（必须只解释、不执行）
-  const asksCodeMeaningRegex =
-    /(?:这段代码|这个宏|这几行代码|这段VBA|以下代码|这段宏|Sub\s+[\s\S]+End\s+Sub)[\s\S]*(?:什么意思|含义|解释|怎么理解|干嘛|干什么|作用|读懂|请教|为什么|如何理解)/i;
-  if (asksCodeMeaningRegex.test(trimmed)) {
-    return 'CHAT';
-  }
-
-  // 4. 用户若以“这段代码什么意思”、“帮我看看这段代码”等提问，且文本中包含过程结构
-  if (
-    /(?:什么意思|怎么理解|是干什么的|有何作用)[\?？]*$/.test(trimmed) &&
-    (trimmed.includes('Sub') || trimmed.includes('Range') || trimmed.includes('Dim'))
-  ) {
-    return 'CHAT';
-  }
-
-  // 5. 纯知识性疑问句（如“什么是数据透视表”、“如何使用VLOOKUP”、“怎么计算均值”），未要求直接在工作簿操作
-  const generalKnowledgeRegex =
-    /^(?:什么是|如何理解|为什么|怎么用|怎么使用|函数用法|公式怎么写|区别是什么|有什么区别)/i;
-  if (generalKnowledgeRegex.test(trimmed)) {
-    return 'CHAT';
-  }
-
-  // 6. 明确的工作簿修改/自动化指令判定
-  const hasActionVerb =
-    /(?:新建|创建|生成|制作|写入|填充|输入|添加|插入|删除|清除|清空|修改|替换|设置|调整|美化|排版|对齐|边框|底色|颜色|格式化|计算|求和|统计|汇总|排序|筛选|做个|画个|建立|构建)/i.test(
-      trimmed
-    );
-  const hasTargetNoun =
-    /(?:表|表格|数据|列|行|单元格|矩阵|图表|柱状图|折线图|饼图|公式|看板|乘法表|清单|明细|工作表|sheet)/i.test(
-      trimmed
-    );
-  const hasCoordinateSpec = /(?:在|从)\s*[A-Za-z]+[0-9]+(?:\s*:\s*[A-Za-z]+[0-9]+)?/i.test(trimmed);
-  const hasDirectImperative = /(?:把|将)\s*.+\s*(?:改|设|调|删|变|换|排序|求和|汇总|居中|加粗)/i.test(trimmed);
-
-  if ((hasActionVerb && hasTargetNoun) || hasCoordinateSpec || hasDirectImperative) {
-    return 'AUTOMATION';
-  }
-
-  // 7. 模糊无明确谓语动词的简短词组（如仅输入“乘法表”、“表格”、“VBA”）
-  if (trimmed.length <= 4 || (!hasActionVerb && !trimmed.includes('？') && !trimmed.includes('?'))) {
-    return 'AMBIGUOUS';
-  }
-
-  // 兜底为问答咨询通道，防止未知文本被误当自动化执行
-  return 'CHAT';
+export function getCurrentDateTimeInfo(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1;
+  const date = now.getDate();
+  const days = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
+  const dayOfWeek = days[now.getDay()];
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  const seconds = String(now.getSeconds()).padStart(2, '0');
+  return `${year}年${month}月${date}日 ${dayOfWeek} ${hours}:${minutes}:${seconds}`;
 }
 
 /**
  * 构建纯自然语言对话通道系统提示词
  */
 export function buildChatSystemPrompt(): string {
+  const timeInfo = getCurrentDateTimeInfo();
   return `你是一名精通 Microsoft Excel 和 VBA 的专业顾问。
+当前用户设备的本地系统真实时间: 【${timeInfo}】。
 当前处于【问答咨询与解释通道】。请用专业、亲切、通俗易懂的中文直接解答用户的问题、解释代码含义或进行日常交流。
+若用户咨询当前日期、今天几号、明天星期几、节假日或与时间相关的推算，请严格基于上述系统真实时间准确回答。
 【核心边界规则】：
-1. 本通道只进行纯文本自然语言解答，绝对不要输出任何可被执行的自动化代码块，严禁输出任何 \`\`\`vba 代码块。
-2. 若用户询问代码含义，请用文字清晰分步剖析，不要诱导执行。`;
+1. 本通道为问答与咨询通道，不会自动在 Excel 中执行宏代码。若用户要求编写、展示或提供 VBA 代码供参考，可以用 Markdown 代码块（如 \`\`\`vba）清晰展示，无需引导执行。
+2. 若用户询问代码含义，请用文字清晰分步剖析。
+3. 若用户需要直接在当前工作簿中自动化修改或生成数据，请提示用户直接下达操作指令（例如“直接在表格中操作”、“帮我拆分D列”等），系统会自动切换至自动化执行通道直接在工作表中完成操作。`;
+}
+
+/**
+ * 提示词规则与限制结构化编目（供界面呈现、审计日志与合规校验使用）
+ */
+export interface PromptRuleItem {
+  name: string;
+  category: '运行入口协议' | '输出格式协议' | '执行交互边界' | '模型能力限制';
+  description: string;
+  isHostCapabilityLimitation: boolean;
+  limitationReason?: string;
+}
+
+export function getPromptConstraintsCatalog(): PromptRuleItem[] {
+  return [
+    {
+      name: '运行宿主环境',
+      category: '运行入口协议',
+      description: '代码在 Windows 桌面 Excel 进程中编译并执行。',
+      isHostCapabilityLimitation: false,
+    },
+    {
+      name: '主入口过程规范',
+      category: '运行入口协议',
+      description: '建议声明为 Sub Main(targetWb As Workbook) 或 Sub Main()，显式操作目标工作簿。',
+      isHostCapabilityLimitation: false,
+    },
+    {
+      name: '过程与算法自由度',
+      category: '运行入口协议',
+      description: '允许自由声明辅助 Sub、Function、常量、自定义类型或选择最优算法，无范式限制。',
+      isHostCapabilityLimitation: false,
+    },
+    {
+      name: '纯源码输出',
+      category: '输出格式协议',
+      description: '直接输出完整、可执行的纯 VBA 源码，严禁输出对话前言或后记。',
+      isHostCapabilityLimitation: false,
+    },
+    {
+      name: '免 Markdown 代码围栏',
+      category: '输出格式协议',
+      description: '自动化通道不要包裹在 ```vba 围栏中，直接输出代码本身以利解析。',
+      isHostCapabilityLimitation: false,
+    },
+    {
+      name: '严禁伪代码与占位符',
+      category: '输出格式协议',
+      description: '严禁输出 \'TODO、未实现的占位符代码。',
+      isHostCapabilityLimitation: false,
+    },
+    {
+      name: '语法控制流严格闭合',
+      category: '执行交互边界',
+      description: '变量声明需规范，控制块必须严格闭合配对（For/Next、If/End If 等）。',
+      isHostCapabilityLimitation: false,
+    },
+    {
+      name: '无法完成时单行说明',
+      category: '执行交互边界',
+      description: '现有上下文确实无法完成时，直接单行说明原因，严禁生成伪造代码。',
+      isHostCapabilityLimitation: false,
+    },
+    {
+      name: '严禁调用 MsgBox / InputBox 阻塞式交互弹窗',
+      category: '模型能力限制',
+      description: '严禁调用 MsgBox、InputBox 等会导致流程挂起的阻塞式交互对话框。',
+      isHostCapabilityLimitation: true,
+      limitationReason: '【宿主能力限制说明】当前宿主自动化执行内核运行在非交互式后台调用管道中，阻塞式 UI 弹窗会导致 Excel 主线程永久挂死，属于宿主执行器施加的安全能力边界，并非中性协议，亦非模型自然选择。',
+    },
+  ];
 }
 
 /**
  * 构建自动化执行通道系统提示词
- * 彻底移除 D1:L9、35行上限、严禁逐格操作等带有偏置和惩罚性的误导提示词
+ * 严格按照【运行入口协议】、【输出格式协议】、【执行交互边界】与【模型能力限制】四类组织
  */
 export function buildAutomationSystemPrompt(
   targetWorkbookName: string,
@@ -124,21 +142,34 @@ export function buildAutomationSystemPrompt(
   activeSheet: string = '',
   usedRange: string = ''
 ): string {
+  const timeInfo = getCurrentDateTimeInfo();
   return `你是一名精通 Microsoft Windows 桌面 Excel 和 VBA 自动化的专业 AI 助手。
+当前用户设备的本地系统真实时间: 【${timeInfo}】。
 当前任务目标工作簿: "${targetWorkbookName || '当前活动工作簿'}"。
 目标工作簿包含的工作表: [${sheets.join(', ')}]。
 当前活动工作表: "${activeSheet || '默认'}"，使用区域: "${usedRange || '空'}"。
 
-【核心执行协议与规范】：
-1. 根据用户的自然语言需求，自主决定最合适的高效实现方案（可自由使用循环、数组、公式、格式、图表、筛选、数据透视表及辅助过程等，不受限固定模板与行数）。
-2. 主过程可以声明接收目标工作簿参数（如 Sub Main(targetWb As Workbook)），也可以编写无参主过程（如 Sub Main()）；允许定义多个辅助过程与函数。
-3. 代码必须是完整可编译运行的标准 VBA，语法严格遵循 VB6/VBA 规范（仔细检查括号与属性调用的位置如 ws.Columns(1).ColumnWidth，提前退出请使用 Exit Sub/Function，禁止书写非法的自定义 End 标签 如 End CleanExit 等），包裹在单个 \`\`\`vba ... \`\`\` 代码块中，以 End Sub 正常闭合。
-4. 【安全约束】：严禁调用 MsgBox、Application.Quit 或弹出阻塞式交互确认框。
-5. 【结构与输出】：直接输出完整可执行的标准 VBA 代码，包裹在 \`\`\`vba ... \`\`\` 代码块中，在代码块前后仅提供简明扼要的说明，避免冗长说明以确保代码完整不被截断。`;
+【运行入口协议】：
+1. 运行环境：你的代码将在 Windows 桌面 Excel 进程中编译并执行。
+2. 主入口声明：主执行过程建议声明为 Sub Main(targetWb As Workbook)，通过 targetWb 显式操作目标工作簿中的工作表（如 targetWb.Worksheets("${activeSheet || '默认'}") 或 targetWb.ActiveSheet）；亦可使用标准无参入口 Sub Main()，此时宏执行器将在激活目标工作簿后调用该过程，通过 ActiveSheet 或 ActiveWorkbook 操作。
+3. 算法与辅助过程自由度：除主过程入口外，你可以根据任务需求自由定义任何辅助 Sub、Function、常量、自定义类型或选择最佳算法，无任何固定范式限制。
+
+【输出格式协议】：
+1. 直接输出完整、可执行的纯 VBA 源码，严禁输出任何解释说明文字、对话前言或后记；
+2. 严禁输出 Markdown 代码围栏（例如不要包裹在 \`\`\`vba 或 \`\`\` 中，直接输出 VBA 代码本身）；
+3. 严禁输出伪代码、未完成的占位符（如 'TODO、'此处补充代码）。
+
+【执行交互边界】：
+1. 控制流与语法严格闭合：如需声明变量，请完整规范声明；代码逻辑必须完整闭合（For 与 Next、If 与 End If 等严格配对）；
+2. 无法完成时单行拒绝：如果根据现有上下文确实无法完成任务，请不要生成伪造代码，直接输出单行说明原因。
+
+【模型能力限制（宿主环境安全约束）】：
+1. 严禁调用 MsgBox、InputBox 等会导致自动化流程挂起的阻塞式交互对话框（说明：由于插件执行内核处于后台自动化链路，此类弹窗会阻塞 Excel UI 线程并导致自动化执行永久挂死，属于宿主执行器施加的能力限制，并非中性协议或模型自然选择）。`;
 }
 
 /**
- * 实时解析大模型流式输出
+ * 实时解析大模型流式输出：
+ * 支持两种协议：纯 VBA 源码优先，同时向下兼容单层 Markdown ```vba ... ``` 围栏
  */
 export function parseStreamOutput(raw: string): ParsedStreamOutput {
   if (!raw) {
@@ -148,98 +179,148 @@ export function parseStreamOutput(raw: string): ParsedStreamOutput {
   const fenceRegex = /```(?:vba|vb)?\s*/i;
   const match = raw.match(fenceRegex);
 
-  if (!match || match.index === undefined) {
-    return { explanation: raw.trim(), vbaCode: '', hasCode: false, isTruncated: false };
+  if (match && match.index !== undefined) {
+    // 包含代码围栏
+    const explanation = raw.slice(0, match.index).trim();
+    const codeStartIndex = match.index + match[0].length;
+    const remaining = raw.slice(codeStartIndex);
+    const endFenceIndex = remaining.indexOf('```');
+
+    if (endFenceIndex !== -1) {
+      return {
+        explanation,
+        vbaCode: remaining.slice(0, endFenceIndex),
+        hasCode: true,
+        isTruncated: false,
+      };
+    } else {
+      return {
+        explanation,
+        vbaCode: remaining,
+        hasCode: true,
+        isTruncated: true,
+      };
+    }
   }
 
-  const explanation = raw.slice(0, match.index).trim();
-  const codeStartIndex = match.index + match[0].length;
-  const remaining = raw.slice(codeStartIndex);
-
-  const endFenceIndex = remaining.indexOf('```');
-  let vbaCode = '';
-  let isTruncated = false;
-
-  if (endFenceIndex !== -1) {
-    vbaCode = remaining.slice(0, endFenceIndex).trim();
-  } else {
-    vbaCode = remaining.trim();
-    isTruncated = true; // 尚未闭合
+  // 纯文本输出模式：检查是否本身就是纯 VBA 代码
+  const isPureVba = /^\s*(?:Option\s+Explicit|Attribute\s+|'(?:[^\r\n]*)|(?:\b(?:Public\s+|Private\s+)?(?:Sub|Function)\b))/im.test(raw);
+  if (isPureVba) {
+    return {
+      explanation: '',
+      vbaCode: raw,
+      hasCode: true,
+      isTruncated: false,
+    };
   }
 
-  return { explanation, vbaCode, hasCode: true, isTruncated };
+  return {
+    explanation: raw.trim(),
+    vbaCode: '',
+    hasCode: false,
+    isTruncated: false,
+  };
 }
 
 /**
- * 严格提取并校验 VBA 代码
- * 绝不允许从聊天文字中凭借 includes('Sub') 乱猜宏
+ * 严格提取并校验 VBA 代码：
+ * 1. 优先按纯代码协议提取，向下兼容单层 Markdown 代码围栏（仅剥除最外层标记）；
+ * 2. 严禁静默删除、替换、补全或重写模型生成的 VBA（保留所有引号、注释、声明与换行）；
+ * 3. 严格识别截断、未闭合过程与已知范围失控风险。
  */
-export function extractVbaCode(content: string): ExtractedVbaResult {
-  if (!content) {
-    return { code: '', isTruncated: false, error: '响应内容为空' };
+export function extractVbaCode(content: string, finishReason?: string): ExtractedVbaResult {
+  if (!content || typeof content !== 'string') {
+    return { code: '', isTruncated: false, status: 'no_code', error: '模型响应内容为空' };
   }
 
-  const openFenceMatch = content.match(/```(?:vba|vb)?\s*/i);
-  if (!openFenceMatch || openFenceMatch.index === undefined) {
-    return { code: '', isTruncated: false, error: '模型响应未包含规范的 VBA 代码块' };
-  }
-
-  const codeStart = openFenceMatch.index + openFenceMatch[0].length;
-  const rest = content.slice(codeStart);
-  const closeFenceIndex = rest.indexOf('```');
-
-  if (closeFenceIndex === -1) {
+  // 1. API 级别截断判定
+  if (finishReason === 'length') {
     return {
-      code: rest.trim(),
+      code: content,
       isTruncated: true,
-      error: '模型响应被截断 (代码块未闭合 ```)，已安全停止执行。',
+      status: 'truncated',
+      error: '模型响应达到最大 Token 长度上限被硬截断，输出代码不完整，已安全停止执行。',
     };
   }
 
-  const rawCode = rest.slice(0, closeFenceIndex).trim();
+  const trimmed = content.trim();
 
-  // 严格结构校验：必须具备过程声明，且 Sub/Function 与 End Sub/End Function 数量必须严格配对
-  const subMatches = rawCode.match(/(?:^|\n)\s*(?:Public\s+|Private\s+)?Sub\s+[a-zA-Z0-9_\u4e00-\u9fa5]+\s*\(/gi) || [];
-  const endSubMatches = rawCode.match(/(?:^|\n)\s*End\s+Sub\b/gi) || [];
-  const fnMatches = rawCode.match(/(?:^|\n)\s*(?:Public\s+|Private\s+)?Function\s+[a-zA-Z0-9_\u4e00-\u9fa5]+\s*\(/gi) || [];
-  const endFnMatches = rawCode.match(/(?:^|\n)\s*End\s+Function\b/gi) || [];
+  let extractedCode = '';
+  const fenceRegex = /```(?:vba|vb)?\s*([\s\S]*?)(?:```|$)/i;
+  const fenceMatch = trimmed.match(fenceRegex);
 
-  if (subMatches.length === 0) {
+  if (fenceMatch && fenceMatch.index !== undefined) {
+    // 检查是否具备闭合的 ```
+    const codePart = trimmed.slice(fenceMatch.index + 3);
+    if (!codePart.includes('```')) {
+      return {
+        code: fenceMatch[1],
+        isTruncated: true,
+        status: 'truncated',
+        error: '模型响应被截断 (代码围栏未闭合 ```)，已安全停止执行。',
+      };
+    }
+    // 仅剥除外层一层围栏，内部所有字符 100% 原样保留，绝不篡改
+    extractedCode = fenceMatch[1];
+  } else {
+    // 纯文本形态：检查是否以典型的 VBA 过程或语句开始
+    const isVbaText = /^\s*(?:Option\s+Explicit|Attribute\s+|'(?:[^\r\n]*)|(?:\b(?:Public\s+|Private\s+)?(?:Sub|Function)\b))/im.test(trimmed);
+    if (isVbaText) {
+      extractedCode = trimmed;
+    } else {
+      return {
+        code: '',
+        isTruncated: false,
+        status: 'no_code',
+        error: '模型回复未包含可执行的 VBA 过程源码（普通文字回答）。',
+      };
+    }
+  }
+
+  // 2. 检查基本过程完整性
+  const hasSubOrFunction = /(?:^|\n)\s*(?:Public\s+|Private\s+)?(?:Sub|Function)\s+[a-zA-Z0-9_\u4e00-\u9fa5]+/i.test(extractedCode);
+  if (!hasSubOrFunction) {
     return {
-      code: rawCode,
+      code: extractedCode,
       isTruncated: false,
-      error: '代码块中未包含有效的 Sub 过程声明。',
+      status: 'invalid_structure',
+      error: '提取出的代码中未包含有效的 Sub 或 Function 过程定义。',
     };
   }
 
-  if (subMatches.length > endSubMatches.length || fnMatches.length > endFnMatches.length) {
+  // 3. 检查未闭合的 Sub / Function
+  const hasSubStart = /(?:^|\n)\s*(?:Public\s+|Private\s+)?Sub\s+/i.test(extractedCode);
+  const hasSubEnd = /(?:^|\n)\s*End\s+Sub\b/i.test(extractedCode);
+  const hasFnStart = /(?:^|\n)\s*(?:Public\s+|Private\s+)?Function\s+/i.test(extractedCode);
+  const hasFnEnd = /(?:^|\n)\s*End\s+Function\b/i.test(extractedCode);
+
+  if ((hasSubStart && !hasSubEnd) || (hasFnStart && !hasFnEnd)) {
     return {
-      code: rawCode,
+      code: extractedCode,
       isTruncated: true,
-      error: `代码结构不完整 (检测到 ${subMatches.length} 个 Sub、${endSubMatches.length} 个 End Sub；${fnMatches.length} 个 Function、${endFnMatches.length} 个 End Function)，可能由于模型生成被截断引起，已安全拦截未执行。`,
+      status: 'truncated',
+      error: '代码过程未闭合 (缺少配对的 End Sub 或 End Function)，可能模型生成被中途截断，已安全拦截未执行。',
     };
   }
 
-  // 检查非法的 End 语句 (如 End CleanExit, End Try)
-  const invalidEndMatch = rawCode.match(/^\s*End\s+(?!Sub\b|Function\b|Property\b|If\b|With\b|Select\b|Type\b|Enum\b)([A-Za-z0-9_]+)/im);
-  if (invalidEndMatch) {
+  // 4. 执行前高危范围检查
+  const scopeRisk = checkVbaScopeRisk(extractedCode);
+  if (scopeRisk.hasRisk) {
     return {
-      code: rawCode,
+      code: extractedCode,
       isTruncated: false,
-      error: `代码包含非标准 VBA 语法语句 '${invalidEndMatch[0].trim()}'（跳出请使用 Exit Sub/Function），已安全拦截未注入。`,
+      status: 'scope_risk',
+      scopeRisk,
+      error: `影响范围失控警告: ${scopeRisk.matchedSnippet}。${scopeRisk.advice}`,
     };
   }
 
-  // 清理行前可能的 markdown 符号
-  const cleanedCode = rawCode.replace(/^[ \t]*[*\-•][ \t]+/gm, '');
-
-  const scopeRisk = checkVbaScopeRisk(cleanedCode);
-
+  // 100% 原始代码返回，不得为了编译通过而静默改写任何字符
   return {
-    code: cleanedCode,
+    code: extractedCode,
     isTruncated: false,
+    status: 'valid',
     scopeRisk,
-    error: scopeRisk.hasRisk ? `影响范围失控警告: ${scopeRisk.matchedSnippet}` : undefined,
   };
 }
 
@@ -303,14 +384,14 @@ export function verifyExecutionResult(
   if (!readback) {
     return {
       status: 'unconfirmed',
-      note: '未能读回目标工作簿实际变更状态，效果待确认。',
+      note: '未能读回目标工作簿实际变更状态，具体效果请在工作表中核对。',
     };
   }
 
   if (!readback.targetVerified) {
     return {
       status: 'failed',
-      note: `目标工作簿身份核验失败（预期: ${readback.targetWorkbookName}）。`,
+      note: `目标工作簿身份核验失败（预期目标: ${readback.targetWorkbookName}）。`,
     };
   }
 
@@ -335,42 +416,80 @@ export function verifyExecutionResult(
   // 2. 公式核验
   const wantsFormula = /(?:公式|求和|sum|计算|平均|average|vlookup|xlookup)/i.test(prompt);
   if (wantsFormula && !readback.hasFormulas) {
-    notes.push('指令包含公式计算诉求，实际区域内未检测到标准 Excel 公式（可能直接写入了数值）');
+    notes.push('指令包含公式诉求，实际检测区域未发现标准 Excel 公式（可能已直接写入数值）');
   }
 
-  // 3. 主观美观排版与图表提示（如实标为待人工确认，不冒充万能语义验收器）
-  const wantsBeautyOrChart = /(?:美化|商务|好看|排版|样式|颜色|边框|图表|柱状图|折线图|饼图)/i.test(prompt);
-  if (wantsBeautyOrChart) {
-    const styleFeatures: string[] = [];
-    if (readback.hasBorders) styleFeatures.push('检测到边框');
-    if (readback.hasInteriorColor) styleFeatures.push('检测到背景填充');
-    notes.push(`视觉样式(${styleFeatures.join('、') || '已渲染'})，视觉与版式呈现需人工确认`);
+  // 3. 具体单元格写入核验 (如：在C3，输入文字“错误” 或 在A1写入测试)
+  const cellWriteMatch = prompt.match(/(?:在|向)\s*([A-Za-z]+[0-9]+)[，,\s]*(?:写入|输入|填写|填入|置入)(?:内容|文字|数值)?\s*[“"']?([^”"'\s，。！!]+)[”"']?/i);
+  if (cellWriteMatch) {
+    const targetCell = cellWriteMatch[1].toUpperCase();
+    const expectedVal = cellWriteMatch[2];
+    if (readback.sampleValues && readback.sampleValues.length > 0) {
+      const found = readback.sampleValues.some((v) => v.includes(expectedVal));
+      if (found) {
+        return {
+          status: 'verified',
+          note: `已成功在目标区域 (${readback.usedRangeAddress || targetCell}) 写入【${expectedVal}】，数据核验一致。`,
+        };
+      }
+    }
   }
 
-  if (notes.some((n) => n.includes('实际检测起始于') || n.includes('未检测到标准 Excel 公式'))) {
+  // 4. 开放式业务任务（分列、图表、美化、排版等）：客观描述当前区域，诚实标为待人工核验，绝不单凭 rowCount > 0 冒充验证通过
+  const wantsTransformOrStyle = /(?:美化|商务|好看|排版|样式|颜色|边框|图表|柱状图|折线图|饼图|分列|拆分|排序|筛选|整理)/i.test(prompt);
+  if (wantsTransformOrStyle) {
+    const features: string[] = [];
+    if (readback.hasBorders) features.push('已包含边框');
+    if (readback.hasInteriorColor) features.push('已包含单元格填充');
+    const featureDesc = features.length > 0 ? `（${features.join('、')}）` : '';
     return {
       status: 'unconfirmed',
-      note: `宏已运行，但与指令存在客观差异：${notes.join('；')}`,
+      note: `宏已执行完成，工作表使用区域为 ${readback.usedRangeAddress || '已更新'}${featureDesc}。视觉与业务呈现效果待人工确认。`,
     };
   }
 
-  if (wantsBeautyOrChart || notes.length > 0) {
+  if (notes.length > 0) {
     return {
       status: 'unconfirmed',
-      note: `宏已运行（更新区域: ${readback.usedRangeAddress || '已更新'}），${notes.join('；')}。`,
+      note: `宏已执行完成，但与指令存在客观核验差异：${notes.join('；')}，请在工作表中核对。`,
     };
   }
 
-  // 对无法建立确定性断言的常规开放式任务，诚实显示“宏已运行，效果待确认”
   return {
     status: 'unconfirmed',
-    note: `宏已运行（更新区域: ${readback.usedRangeAddress || ''}，共 ${readback.rowCount || 0} 行 ${readback.columnCount || 0} 列），具体效果请在工作表中人工核验确认。`,
+    note: `宏已执行完成（当前使用区域: ${readback.usedRangeAddress || ''}，共 ${readback.rowCount || 0} 行 ${readback.columnCount || 0} 列），具体效果请在工作表中核对确认。`,
   };
 }
 
 export interface ChatHistoryItem {
   role: 'user' | 'assistant';
   content: string;
+}
+
+export interface ApiAuditInfo {
+  maxTokensStatus: string;
+  thinkingBudgetStatus: string;
+  historyCountSent: number;
+  totalHistoryAvailable: number;
+  historyStrategy: string;
+  isHistoryCompressedOrStripped: boolean;
+  actualPayloadSummary: {
+    model: string;
+    temperatureSent: boolean;
+    temperatureVal?: number;
+    maxTokensSent: boolean;
+    maxTokensVal?: number;
+    thinkingMode?: string;
+    thinkingBudgetSent: boolean;
+    thinkingBudgetVal?: number;
+    messagesCount: number;
+  };
+}
+
+export interface LlmStreamResponse {
+  fullText: string;
+  finishReason?: string;
+  audit: ApiAuditInfo;
 }
 
 export async function callLlmStream(
@@ -382,7 +501,7 @@ export async function callLlmStream(
   intent: UserIntent,
   onChunk: (text: string) => void,
   history: ChatHistoryItem[] = []
-): Promise<string> {
+): Promise<LlmStreamResponse> {
   const config: LlmConfig = loadLlmConfig();
 
   if (!config.apiKey && config.provider !== 'ollama') {
@@ -400,41 +519,85 @@ export async function callLlmStream(
       ? buildChatSystemPrompt()
       : buildAutomationSystemPrompt(targetWorkbookName, sheets, activeSheet, usedRange);
 
-  // 整理历史上下文（排除残留的巨幅代码块）
-  const cleanHistory = history
-    .slice(-4)
+  // 历史上下文策略：
+  // 1. 保留最近对话完整原文（含 VBA 代码块与文字说明，严禁静默正则剔除代码块）；
+  // 2. 确保模型能基于上一轮生成的宏进行修改、调整、补充或排错；
+  // 3. 保留最近 6 条有效对话历史，不暗改、不压缩、不摘要
+  const MAX_HISTORY_TURNS = 6;
+  const actualHistory = history
+    .slice(-MAX_HISTORY_TURNS)
+    .filter((h) => h && h.content && h.content.trim().length > 0)
     .map((h) => ({
       role: h.role,
-      content: h.content.replace(/```(?:vba|vb)?[\s\S]*?```/gi, '').trim(),
-    }))
-    .filter((h) => !!h.content);
+      content: h.content, // 100% 原始文本保留，含任何 ```vba 宏代码
+    }));
 
-  const maxTokens = config.maxTokens && config.maxTokens > 0 ? config.maxTokens : 16384;
   const payload: Record<string, any> = {
     model: config.model,
     messages: [
       { role: 'system', content: systemPrompt },
-      ...cleanHistory,
+      ...actualHistory,
       { role: 'user', content: prompt },
     ],
-    max_tokens: maxTokens,
     stream: true,
   };
 
-  // 支持思考模式配置：disabled (关闭深度思考，全速输出代码) / budget (设定思考预算) / auto (默认)
+  // 输出预算策略：用户明确配置 maxTokens 时才发送；未配置时不发送，交由模型服务端采用其默认限制
+  let maxTokensStatus = '未发送（采用服务端模型默认限制）';
+  let maxTokensVal: number | undefined = undefined;
+  if (typeof config.maxTokens === 'number' && config.maxTokens > 0) {
+    payload.max_tokens = config.maxTokens;
+    maxTokensVal = config.maxTokens;
+    maxTokensStatus = `用户配置值: ${config.maxTokens}`;
+  }
+
+  // 思考模式预算策略：
+  // 1. disabled 时发送 type: disabled；
+  // 2. budget 时仅当用户明确配置 thinkingBudget > 0 才发送 budget_tokens，绝不暗设 2048；
+  // 3. auto 时不发送 thinking 字段，完全交给模型服务端决定
+  let thinkingBudgetStatus = '未发送';
+  let thinkingBudgetVal: number | undefined = undefined;
   if (config.thinkingMode === 'disabled') {
     payload.thinking = { type: 'disabled' };
+    thinkingBudgetStatus = '已关闭思考链 (type: disabled)';
   } else if (config.thinkingMode === 'budget') {
-    payload.thinking = {
-      type: 'enabled',
-      budget_tokens: config.thinkingBudget && config.thinkingBudget > 0 ? config.thinkingBudget : 2048,
-    };
+    const thinkingObj: Record<string, any> = { type: 'enabled' };
+    if (typeof config.thinkingBudget === 'number' && config.thinkingBudget > 0) {
+      thinkingObj.budget_tokens = config.thinkingBudget;
+      thinkingBudgetVal = config.thinkingBudget;
+      thinkingBudgetStatus = `用户配置值: ${config.thinkingBudget}`;
+    } else {
+      thinkingBudgetStatus = '未发送 budget_tokens（仅发送 type: enabled，采用服务端默认限制）';
+    }
+    payload.thinking = thinkingObj;
   }
 
   // 用户有配置温度才传入，未配置则不传，使用模型默认行为
+  let temperatureVal: number | undefined = undefined;
   if (typeof config.temperature === 'number' && !isNaN(config.temperature)) {
     payload.temperature = config.temperature;
+    temperatureVal = config.temperature;
   }
+
+  const apiAudit: ApiAuditInfo = {
+    maxTokensStatus,
+    thinkingBudgetStatus,
+    historyCountSent: actualHistory.length,
+    totalHistoryAvailable: history.length,
+    historyStrategy: `保留最近 ${MAX_HISTORY_TURNS} 条完整对话原文（含 VBA 代码块，无暗改、无截断剥离）`,
+    isHistoryCompressedOrStripped: false,
+    actualPayloadSummary: {
+      model: config.model,
+      temperatureSent: temperatureVal !== undefined,
+      temperatureVal,
+      maxTokensSent: maxTokensVal !== undefined,
+      maxTokensVal,
+      thinkingMode: config.thinkingMode || 'auto',
+      thinkingBudgetSent: thinkingBudgetVal !== undefined,
+      thinkingBudgetVal,
+      messagesCount: payload.messages.length,
+    },
+  };
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -487,6 +650,7 @@ export async function callLlmStream(
   const reader = response.body.getReader();
   const decoder = new TextDecoder('utf-8');
   let fullText = '';
+  let finishReason: string | undefined = undefined;
   let buffer = '';
 
   try {
@@ -509,6 +673,8 @@ export async function callLlmStream(
           try {
             const data = JSON.parse(jsonStr);
             const delta = data.choices?.[0]?.delta?.content || '';
+            const fr = data.choices?.[0]?.finish_reason;
+            if (fr) finishReason = fr;
             if (delta) {
               fullText += delta;
               onChunk(fullText);
@@ -517,14 +683,31 @@ export async function callLlmStream(
         }
       }
     }
+
+    // 处理流结束后缓冲区中可能残留的最后一行 SSE 数据
+    if (buffer.trim()) {
+      const lastLine = buffer.trim();
+      if (lastLine.startsWith('data: ') && lastLine !== 'data: [DONE]') {
+        try {
+          const data = JSON.parse(lastLine.slice(6));
+          const delta = data.choices?.[0]?.delta?.content || '';
+          const fr = data.choices?.[0]?.finish_reason;
+          if (fr) finishReason = fr;
+          if (delta) {
+            fullText += delta;
+            onChunk(fullText);
+          }
+        } catch {}
+      }
+    }
   } catch (streamErr: any) {
     if (streamErr.name === 'AbortError' || streamErr.message?.includes('TIMEOUT')) {
-      throw new Error('流式生成传输中断（15秒未收到新响应），请点击重试。');
+      throw new Error('流式生成传输中断（60秒未收到新响应），请点击重试。');
     }
     throw streamErr;
   } finally {
     if (chunkTimer) clearTimeout(chunkTimer);
   }
 
-  return fullText;
+  return { fullText, finishReason, audit: apiAudit };
 }
