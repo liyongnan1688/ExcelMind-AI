@@ -31,6 +31,54 @@ namespace LeeExcel
         {
             try
             {
+                // 1. 安全获取插件基础目录 (Excel-DNA 下 Assembly.Location 可能为空，优先使用 XllPath)
+                string baseDir = null;
+                try
+                {
+                    string xllPath = ExcelDna.Integration.ExcelDnaUtil.XllPath;
+                    if (!string.IsNullOrEmpty(xllPath))
+                    {
+                        baseDir = Path.GetDirectoryName(xllPath);
+                    }
+                }
+                catch { }
+
+                if (string.IsNullOrEmpty(baseDir))
+                {
+                    try
+                    {
+                        string loc = Assembly.GetExecutingAssembly().Location;
+                        if (!string.IsNullOrEmpty(loc))
+                        {
+                            baseDir = Path.GetDirectoryName(loc);
+                        }
+                    }
+                    catch { }
+                }
+
+                if (string.IsNullOrEmpty(baseDir))
+                {
+                    baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                }
+
+                // 2. 双架构 WebView2Loader.dll 动态适配 (x86 与 x64)
+                if (!string.IsNullOrEmpty(baseDir))
+                {
+                    try
+                    {
+                        string archFolder = (IntPtr.Size == 8) ? "win-x64" : "win-x86";
+                        string nativeLoaderDir = Path.Combine(baseDir, "runtimes", archFolder, "native");
+                        if (Directory.Exists(nativeLoaderDir) && File.Exists(Path.Combine(nativeLoaderDir, "WebView2Loader.dll")))
+                        {
+                            CoreWebView2Environment.SetLoaderDllFolderPath(nativeLoaderDir);
+                        }
+                    }
+                    catch (Exception loaderEx)
+                    {
+                        System.Diagnostics.Debug.WriteLine("SetLoaderDllFolderPath notice: " + loaderEx.Message);
+                    }
+                }
+
                 string userDataFolder = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                     "LeeExcel",
@@ -61,36 +109,6 @@ namespace LeeExcel
                         _pendingAction = null;
                     }
                 };
-
-                // 1. 安全获取插件基础目录 (Excel-DNA 下 Assembly.Location 可能为空，优先使用 XllPath)
-                string baseDir = null;
-                try
-                {
-                    string xllPath = ExcelDna.Integration.ExcelDnaUtil.XllPath;
-                    if (!string.IsNullOrEmpty(xllPath))
-                    {
-                        baseDir = Path.GetDirectoryName(xllPath);
-                    }
-                }
-                catch { }
-
-                if (string.IsNullOrEmpty(baseDir))
-                {
-                    try
-                    {
-                        string loc = Assembly.GetExecutingAssembly().Location;
-                        if (!string.IsNullOrEmpty(loc))
-                        {
-                            baseDir = Path.GetDirectoryName(loc);
-                        }
-                    }
-                    catch { }
-                }
-
-                if (string.IsNullOrEmpty(baseDir))
-                {
-                    baseDir = AppDomain.CurrentDomain.BaseDirectory;
-                }
 
                 // 2. 查找前端打包目录并使用虚拟域名映射 (彻底解决 file:// 下 ES Module CORS 限制)
                 string distFolder = Path.Combine(baseDir, "dist");
