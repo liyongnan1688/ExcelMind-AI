@@ -151,7 +151,7 @@
   }
 
   .modal-content {
-    width: min(420px, calc(100vw - 28px));
+    width: min(400px, calc(100vw - 24px));
     max-height: calc(100vh - 36px);
     background: #ffffff;
     border-radius: var(--office-radius-lg);

@@ -56,11 +56,15 @@ export const PRESET_PROVIDERS: PresetProvider[] = [
   },
 ];
 
-const CONFIG_STORAGE_KEY = 'lee_excel_llm_config';
+const CONFIG_STORAGE_KEY = 'excelmind_ai_llm_config';
+const LEGACY_STORAGE_KEY = 'lee_excel_llm_config';
 
 export function loadLlmConfig(): LlmConfig {
   try {
-    const raw = localStorage.getItem(CONFIG_STORAGE_KEY);
+    let raw = localStorage.getItem(CONFIG_STORAGE_KEY);
+    if (!raw) {
+      raw = localStorage.getItem(LEGACY_STORAGE_KEY);
+    }
     if (raw) {
       return JSON.parse(raw);
     }

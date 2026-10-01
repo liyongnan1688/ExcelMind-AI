@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-title Lee-Excel AI 插件 - 免安装便携启动
+title ExcelMind AI - 免安装便携启动
 echo 正在检测系统架构并启动 Excel，请稍候...
 echo.
 

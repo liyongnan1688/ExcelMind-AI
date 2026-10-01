@@ -1,10 +1,10 @@
-﻿# Lee-Excel 自动化安装与环境配置脚本
+# ExcelMind AI 自动化安装与环境配置脚本
 # 适用：Office 2010 / 2013 / 2016 / 2019 / 2021 / Microsoft 365 (32位与64位)
 
 $ErrorActionPreference = "Continue"
 
 Write-Host "==========================================================" -ForegroundColor Cyan
-Write-Host "           Lee-Excel AI 原生插件 - 自动化安装向导           " -ForegroundColor Cyan
+Write-Host "           ExcelMind AI 原生插件 - 自动化安装向导           " -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 
 # 1. 定位插件发布目录 (即 core/ 的父目录)
@@ -155,7 +155,7 @@ foreach ($ver in $officeVersions) {
 
         foreach ($propName in ($props.PSObject.Properties.Name | Where-Object { $_ -match "^OPEN\d*$" })) {
             $val = $props.$propName
-            if ($val -like "*LeeExcel*") {
+            if ($val -like "*LeeExcel*" -or $val -like "*ExcelMind*") {
                 $alreadyRegisteredKey = $propName
                 break
             }
@@ -196,10 +196,10 @@ if ($regSuccessCount -eq 0) {
 
 # 5. 完成提示
 Write-Host "==========================================================" -ForegroundColor Green
-Write-Host "               Lee-Excel AI 插件安装完成！               " -ForegroundColor Green
+Write-Host "               ExcelMind AI 插件安装完成！               " -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Green
 Write-Host "使用指引：" -ForegroundColor Cyan
 Write-Host "1. 打开任意 Excel 工作簿；"
-Write-Host "2. 顶部功能区将自动出现【AI 助手】专属选项卡；"
-Write-Host "3. 点击【打开 AI 任务窗格】即可享受全功能数据助手体验！"
+Write-Host "2. 顶部功能区将自动出现【ExcelMind AI】专属选项卡；"
+Write-Host "3. 点击【打开 ExcelMind AI】即可享受全功能数据助手体验！"
 Write-Host ""

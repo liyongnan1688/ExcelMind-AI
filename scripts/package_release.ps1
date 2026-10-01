@@ -1,4 +1,4 @@
-﻿# Lee-Excel 跨机器发布包全自动打包流水线
+# ExcelMind AI 跨机器发布包全自动打包流水线
 # 职责：编译前端与后端、组织双架构依赖、生成安装卸载套件、打包为独立 ZIP
 
 param(
@@ -9,7 +9,7 @@ $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 
 Write-Host "==========================================================" -ForegroundColor Cyan
-Write-Host "         Lee-Excel 跨平台/跨版本 发布包自动化打包流水线      " -ForegroundColor Cyan
+Write-Host "         ExcelMind AI 跨平台/跨版本 发布包自动化打包流水线      " -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host "版本: $Version"
 Write-Host "项目根路径: $projectRoot"
@@ -27,7 +27,7 @@ if (Test-Path $tmpStageDir) {
 }
 New-Item -ItemType Directory -Path $tmpStageDir -Force | Out-Null
 
-$packRoot = Join-Path $tmpStageDir "LeeExcel_Release"
+$packRoot = Join-Path $tmpStageDir "ExcelMind_AI_Release"
 New-Item -ItemType Directory -Path $packRoot -Force | Out-Null
 
 # 2. 构建前端生产包 (Svelte 5 + Vite 6)
@@ -131,7 +131,7 @@ Copy-Item -LiteralPath (Join-Path $projectRoot "scripts\core\README_template.txt
 Write-Host "      发布目录树组装完成: $packRoot" -ForegroundColor Green
 
 # 5. 压缩为发布 ZIP 包
-$zipName = "LeeExcel_Release_${Version}.zip"
+$zipName = "ExcelMind_AI_Release_${Version}.zip"
 $zipPath = Join-Path $releaseDir $zipName
 
 Write-Host "`n[4/5] 正在打包压缩发布文件包: $zipName ..." -ForegroundColor Yellow

@@ -21,7 +21,7 @@ namespace LeeExcel
     {
         private static readonly string BaseBackupDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "LeeExcel",
+            "ExcelMindAI",
             "Backups"
         );
 
@@ -42,7 +42,30 @@ namespace LeeExcel
             string folder = Path.Combine(BaseBackupDir, hash);
             if (!Directory.Exists(folder))
             {
-                Directory.CreateDirectory(folder);
+                try
+                {
+                    string oldFolder = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                        "LeeExcel",
+                        "Backups",
+                        hash
+                    );
+                    if (Directory.Exists(oldFolder))
+                    {
+                        Directory.CreateDirectory(folder);
+                        foreach (var f in Directory.GetFiles(oldFolder))
+                        {
+                            string dest = Path.Combine(folder, Path.GetFileName(f));
+                            if (!File.Exists(dest)) File.Copy(f, dest);
+                        }
+                    }
+                }
+                catch { }
+
+                if (!Directory.Exists(folder))
+                {
+                    Directory.CreateDirectory(folder);
+                }
             }
             return folder;
         }

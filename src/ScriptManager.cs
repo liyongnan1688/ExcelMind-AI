@@ -20,7 +20,7 @@ namespace LeeExcel
     {
         public static readonly string ScriptsDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "LeeExcel",
+            "ExcelMindAI",
             "Scripts"
         );
 
@@ -29,6 +29,23 @@ namespace LeeExcel
             if (!Directory.Exists(ScriptsDir))
             {
                 Directory.CreateDirectory(ScriptsDir);
+                try
+                {
+                    string oldDir = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                        "LeeExcel",
+                        "Scripts"
+                    );
+                    if (Directory.Exists(oldDir))
+                    {
+                        foreach (var file in Directory.GetFiles(oldDir, "*.bas"))
+                        {
+                            string dest = Path.Combine(ScriptsDir, Path.GetFileName(file));
+                            if (!File.Exists(dest)) File.Copy(file, dest);
+                        }
+                    }
+                }
+                catch { }
             }
         }
 

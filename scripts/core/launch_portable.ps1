@@ -1,10 +1,10 @@
-﻿# Lee-Excel 便携式免安装启动器 (Portable Launcher)
+# ExcelMind AI 便携式免安装启动器 (Portable Launcher)
 # 自动检测当前 Excel 架构并挂载对应 XLL 启动，不修改注册表
 
 $ErrorActionPreference = "Continue"
 
 Write-Host "==========================================================" -ForegroundColor Cyan
-Write-Host "           Lee-Excel AI 原生插件 - 便携启动向导           " -ForegroundColor Cyan
+Write-Host "           ExcelMind AI 原生插件 - 便携启动向导           " -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 
 # 1. 定位插件发布目录 (即 core/ 的父目录)

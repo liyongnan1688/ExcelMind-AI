@@ -13,9 +13,9 @@ namespace LeeExcel
             return @"<customUI xmlns='http://schemas.microsoft.com/office/2009/07/customui'>
   <ribbon>
     <tabs>
-      <tab id='LeeExcelTab' label='AI 助手'>
+      <tab id='LeeExcelTab' label='ExcelMind AI'>
         <group id='LeeExcelGroup' label='智能操作'>
-          <button id='btnTogglePane' label='打开 AI 任务窗格' size='large' onAction='OnTogglePane' imageMso='FunctionWizard' />
+          <button id='btnTogglePane' label='ExcelMind AI' size='large' onAction='OnTogglePane' getImage='GetButtonImage' />
           <button id='btnOpenScripts' label='自动化脚本' size='large' onAction='OnOpenScripts' imageMso='VisualBasic' />
           <button id='btnOpenSettings' label='API配置' size='large' onAction='OnOpenSettings' imageMso='ServerConnection' />
         </group>
@@ -23,6 +23,18 @@ namespace LeeExcel
     </tabs>
   </ribbon>
 </customUI>";
+        }
+
+        public System.Drawing.Bitmap GetButtonImage(IRibbonControl control)
+        {
+            try
+            {
+                return BrandIconHelper.GetExcelMindIcon(32);
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         public void OnTogglePane(IRibbonControl control)
@@ -53,9 +65,9 @@ namespace LeeExcel
                 dynamic app = ExcelDnaUtil.Application;
                 _taskPaneControl = new TaskPaneControl(app);
 
-                _customTaskPane = CustomTaskPaneFactory.CreateCustomTaskPane(_taskPaneControl, "Lee-Excel AI 助手");
+                _customTaskPane = CustomTaskPaneFactory.CreateCustomTaskPane(_taskPaneControl, "ExcelMind AI");
                 _customTaskPane.DockPosition = MsoCTPDockPosition.msoCTPDockPositionRight;
-                _customTaskPane.Width = 480;
+                _customTaskPane.Width = 440;
                 _customTaskPane.Visible = true;
 
                 // 监听工作簿切换、新建、打开
@@ -77,7 +89,7 @@ namespace LeeExcel
             }
             catch (Exception ex)
             {
-                System.Windows.Forms.MessageBox.Show("LeeExcel 启动异常: " + ex.Message);
+                System.Windows.Forms.MessageBox.Show("ExcelMind AI 启动异常: " + ex.Message);
             }
         }
 
@@ -99,6 +111,7 @@ namespace LeeExcel
                 {
                     _customTaskPane.Visible = true;
                 }
+                _customTaskPane.Width = 440;
                 if (_taskPaneControl != null) _taskPaneControl.NotifyWorkbookChanged();
             }
         }
@@ -110,6 +123,7 @@ namespace LeeExcel
                 _customTaskPane.Visible = !_customTaskPane.Visible;
                 if (_customTaskPane.Visible)
                 {
+                    _customTaskPane.Width = 440;
                     if (_taskPaneControl != null) _taskPaneControl.NotifyWorkbookChanged();
                 }
             }

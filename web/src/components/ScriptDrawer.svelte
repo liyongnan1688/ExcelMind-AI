@@ -47,7 +47,7 @@
       </div>
 
       <div class="drawer-subtitle">
-        保存在本地目录: <code>%AppData%\LeeExcel\Scripts\</code>
+        保存在本地目录: <code>%AppData%\ExcelMindAI\Scripts\</code>
       </div>
 
       <div class="drawer-body">
@@ -133,7 +133,7 @@
   }
 
   .drawer-content {
-    width: min(380px, 100vw);
+    width: 100%;
     height: 100vh;
     background: #ffffff;
     box-shadow: -4px 0 20px rgba(0, 0, 0, 0.15);

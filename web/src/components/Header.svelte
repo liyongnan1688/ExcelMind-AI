@@ -10,11 +10,11 @@
 
 <header class="office-header">
   <div class="header-left">
-    <div class="app-icon" title="Lee-Excel AI 助手">
+    <div class="app-icon" title="ExcelMind AI">
       <FileSpreadsheet size={18} color="#107C41" />
     </div>
     <div class="title-container">
-      <div class="app-title">Excel AI 助手</div>
+      <div class="app-title">ExcelMind AI</div>
       <div class="workbook-subtitle" title={workbook?.fullName || '等待 Excel 宿主连接...'}>
         {#if workbook && workbook.name && workbook.name !== '未检测到活动工作簿'}
           <span class="dot" title="已连接到工作簿"></span>

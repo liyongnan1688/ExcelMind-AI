@@ -1,10 +1,10 @@
-﻿# Lee-Excel 卸载与清理脚本
+# ExcelMind AI 卸载与清理脚本
 # 适用：Office 2010 / 2013 / 2016 / 2019 / 2021 / Microsoft 365
 
 $ErrorActionPreference = "Continue"
 
 Write-Host "==========================================================" -ForegroundColor Cyan
-Write-Host "           Lee-Excel AI 原生插件 - 卸载与清理向导           " -ForegroundColor Cyan
+Write-Host "           ExcelMind AI 原生插件 - 卸载与清理向导           " -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 
 $officeVersions = @("16.0", "15.0", "14.0")
@@ -17,15 +17,15 @@ foreach ($ver in $officeVersions) {
         $openKeys = $props.PSObject.Properties | Where-Object { $_.Name -match "^OPEN\d*$" }
         
         $cleanedItems = @()
-        $foundLee = $false
+        $foundTarget = $false
 
         foreach ($p in $openKeys) {
             $val = [string]$p.Value
-            if ($val -like "*LeeExcel*") {
+            if ($val -like "*LeeExcel*" -or $val -like "*ExcelMind*") {
                 Remove-ItemProperty -Path $optionsPath -Name $p.Name -ErrorAction SilentlyContinue
                 Write-Host "      已从 Office $ver 移除加载项: $($p.Name) -> $val" -ForegroundColor Yellow
                 $removedTotal++
-                $foundLee = $true
+                $foundTarget = $true
             } else {
                 $cleanedItems += [PSCustomObject]@{
                     OriginalName = $p.Name
@@ -35,7 +35,7 @@ foreach ($ver in $officeVersions) {
         }
 
         # 如果移除了项，对剩余的 OPEN 项进行紧凑重排，避免序号断号
-        if ($foundLee) {
+        if ($foundTarget) {
             # 先清除所有剩余的旧 OPEN 项
             foreach ($item in $cleanedItems) {
                 Remove-ItemProperty -Path $optionsPath -Name $item.OriginalName -ErrorAction SilentlyContinue
@@ -53,9 +53,9 @@ foreach ($ver in $officeVersions) {
 
 Write-Host "==========================================================" -ForegroundColor Green
 if ($removedTotal -gt 0) {
-    Write-Host "       Lee-Excel 加载项已成功从系统注册表中完全注销！     " -ForegroundColor Green
+    Write-Host "       ExcelMind AI 加载项已成功从系统注册表中完全注销！     " -ForegroundColor Green
 } else {
-    Write-Host "       未在系统中检测到残留的 Lee-Excel 注册项。         " -ForegroundColor Green
+    Write-Host "       未在系统中检测到残留的 ExcelMind AI 注册项。         " -ForegroundColor Green
 }
 Write-Host "==========================================================" -ForegroundColor Green
 Write-Host "说明：卸载仅注销自启动项，不会影响您已保存的 Excel 工作簿。" -ForegroundColor Cyan

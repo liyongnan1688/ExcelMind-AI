@@ -163,7 +163,7 @@ namespace LeeExcel
 </head>
 <body>
     <div class='card'>
-        <h2>Lee-Excel AI 助手</h2>
+        <h2>ExcelMind AI</h2>
         <span class='status'>原生加载项 C# 与 WebView2 就绪</span>
         <p>WebView2 引擎与 Excel COM 宿主连接成功。<br/>正在编译加载前端 Office 经典绿界面...</p>
     </div>
@@ -174,7 +174,7 @@ namespace LeeExcel
             }
             catch (Exception ex)
             {
-                MessageBox.Show("WebView2 初始化异常: " + ex.Message, "LeeExcel 错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show("WebView2 初始化异常: " + ex.Message, "ExcelMind AI 错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
