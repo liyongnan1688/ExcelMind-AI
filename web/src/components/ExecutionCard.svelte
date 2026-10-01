@@ -16,10 +16,13 @@
     ShieldAlert,
     AlertCircle,
     Download,
+    Maximize2,
+    Minimize2,
+    X,
   } from 'lucide-svelte';
   import { bridge, type SnapshotItem, type VbaExecutionData } from '../services/bridge';
   import { getPromptConstraintsCatalog } from '../services/llm';
-  import { createEventDispatcher } from 'svelte';
+  import { createEventDispatcher, tick } from 'svelte';
 
   const dispatch = createEventDispatcher();
   const promptConstraints = getPromptConstraintsCatalog();
@@ -32,8 +35,11 @@
   export let allSnapshots: SnapshotItem[] = [];
   export let onSaveScriptSuccess: () => void;
 
+  let cardElement: HTMLElement;
+
   // 严格默认折叠，绝不主动展开，保证对话界面清爽
   let isExpanded = false;
+  let isFullscreen = false;
   let activeTab: 'code' | 'readback' | 'audit' = 'readback';
   let codeViewMode: 'executed' | 'original' | 'wrapper' = 'executed';
 
@@ -59,6 +65,18 @@
 
   $: if (execution?.snapshot?.id) {
     selectedSnapshotId = execution.snapshot.id;
+  }
+
+  // 折叠/展开切换：展开时自动平滑滚动对齐，彻底解决“点开显示不全”
+  async function toggleExpand() {
+    isExpanded = !isExpanded;
+    if (isExpanded) {
+      await tick();
+      dispatch('expand');
+      if (cardElement) {
+        cardElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
   }
 
   // 双重稳健复制逻辑 (支持 Clipboard API + execCommand 降级兜底)
@@ -102,8 +120,6 @@
       }, 1800);
     }
   }
-
-  const handleCopy = handleCopyCurrent;
 
   function handleCopyCurrent() {
     const label = codeViewMode === 'original' ? '原始提取源码' : (codeViewMode === 'wrapper' ? '入口包装器' : '校验执行源码');
@@ -202,6 +218,7 @@
 </script>
 
 <div
+  bind:this={cardElement}
   class="execution-card {isExecuting
     ? 'card-running'
     : execution?.error
@@ -210,15 +227,15 @@
     ? 'card-success'
     : 'card-unconfirmed'}"
 >
-  <!-- 默认折叠状态栏 (简洁一两句话，客观如实呈现，不伪称满分完成) -->
+  <!-- 默认折叠状态栏 (简洁呈现，客观如实呈现，不伪称满分完成) -->
   <div
     class="summary-bar"
     role="button"
     tabindex="0"
-    on:click={() => (isExpanded = !isExpanded)}
+    on:click={toggleExpand}
     on:keydown={(e) => {
       if (e.key === 'Enter' || e.key === ' ') {
-        isExpanded = !isExpanded;
+        toggleExpand();
         e.preventDefault();
       }
     }}
@@ -228,7 +245,7 @@
         <Loader2 size={16} class="spinner" color="#0078D4" />
         <span class="summary-text font-running">正在生成并执行 Excel VBA...</span>
       {:else if execution?.error}
-        <XCircle size={16} color="#A80000" />
+        <XCircle size={16} color="#C42B1C" />
         <span class="summary-text font-error" title={execution.summary}>
           {execution.summary || '执行遇到错误'}
         </span>
@@ -245,7 +262,7 @@
         {/if}
       {:else}
         <!-- 待确认或有差异状态 (显示中性/提示色，不伪装绿色的“任务完成”) -->
-        <AlertCircle size={16} color="#D83B01" />
+        <AlertCircle size={16} color="#B25900" />
         <span class="summary-text font-unconfirmed" title={execution?.summary}>
           {execution?.summary || '宏已运行，效果待确认'}
         </span>
@@ -256,25 +273,38 @@
       {/if}
     </div>
 
-    <button class="expand-btn" type="button">
-      <span>{isExpanded ? '收起详情' : '展开核验与记录'}</span>
-      {#if isExpanded}
-        <ChevronUp size={14} />
-      {:else}
-        <ChevronDown size={14} />
+    <div class="summary-right-actions">
+      <!-- 双模态查看：未展开时也可直接全屏放大查看源码与核验 -->
+      {#if execution || displayCode}
+        <button
+          class="btn-icon-subtle"
+          type="button"
+          title="全屏放大查看源码与核验报告"
+          on:click|stopPropagation={() => (isFullscreen = true)}
+        >
+          <Maximize2 size={13} />
+        </button>
       {/if}
-    </button>
+      <button class="expand-btn" type="button" aria-expanded={isExpanded}>
+        <span>{isExpanded ? '收起详情' : '展开核验与记录'}</span>
+        {#if isExpanded}
+          <ChevronUp size={14} />
+        {:else}
+          <ChevronDown size={14} />
+        {/if}
+      </button>
+    </div>
   </div>
 
   <!-- 部分修改常驻告警栏 (显式告知部分成功及已影响区域，并提供一键整本恢复) -->
   {#if execution?.isPartiallyModified}
     <div class="partial-mod-banner">
       <div class="partial-mod-left">
-        <AlertCircle size={16} color="#d97706" />
+        <AlertCircle size={16} color="#B25900" />
         <div class="partial-mod-text">
           <span class="partial-mod-title">宏运行失败，工作簿可能已部分修改</span>
           <span class="partial-mod-desc">
-            执行后读回区域: <strong>{execution?.readback?.usedRangeAddress || '见读回'}</strong>；宏可能已部分修改工作簿。执行前快照已就绪（唯一备份未被删除），可随时按现有保护流程整本恢复。
+            执行后读回区域: <strong>{execution?.readback?.usedRangeAddress || '见读回'}</strong>；宏可能已部分修改工作簿。执行前快照已就绪，可随时整本恢复。
           </span>
         </div>
       </div>
@@ -293,7 +323,7 @@
   <!-- 展开后的详情面板 (默认完全折叠，点击才展开) -->
   {#if isExpanded && (execution || displayCode)}
     <div class="expanded-panel">
-      <!-- 选项卡头部 -->
+      <!-- 选项卡头部与自适应工具栏 -->
       <div class="panel-tabs">
         <div class="tabs-left">
           <button
@@ -313,23 +343,28 @@
           </button>
         </div>
 
-        {#if activeTab === 'code'}
-          <div class="tabs-actions">
-            <button class="btn btn-sm" on:click={handleCopyCurrent} title="一键复制当前窗口展示的代码">
+        <div class="tabs-actions">
+          {#if activeTab === 'code'}
+            <button class="btn btn-sm" on:click={handleCopyCurrent} title="一键复制当前展示代码">
               {#if copyActiveType === 'current' || (copySuccess && !copyActiveType)}
                 <Check size={12} color="#107C41" />
-                <span style="color: #107C41; font-weight: 600;">{copyFeedbackText || '已复制代码'}</span>
+                <span class="copy-success-text">{copyFeedbackText || '已复制'}</span>
               {:else}
                 <Copy size={12} />
-                <span>复制当前</span>
+                <span class="btn-label-text">复制当前</span>
               {/if}
             </button>
             <button class="btn btn-sm" on:click={() => (showSaveDialog = !showSaveDialog)} title="存入本地脚本目录">
               <Save size={12} />
-              <span>保存到我的脚本</span>
+              <span class="btn-label-text">存入脚本库</span>
             </button>
-          </div>
-        {/if}
+          {/if}
+          <!-- 双模态查看全屏放大按钮 -->
+          <button class="btn btn-sm btn-maximize" on:click={() => (isFullscreen = true)} title="全屏放大查看完整详情">
+            <Maximize2 size={12} />
+            <span class="btn-label-text">放大查看</span>
+          </button>
+        </div>
       </div>
 
       <!-- Tab 1: 写后核验详情 (从 Excel 真实读回的数据) -->
@@ -455,7 +490,7 @@
                   <span class="action-text-copied">已复制原始</span>
                 {:else}
                   <Copy size={11} />
-                  <span>复制原始提取</span>
+                  <span>复制原始</span>
                 {/if}
               </button>
 
@@ -470,7 +505,7 @@
                   <span class="action-text-copied">已复制执行</span>
                 {:else}
                   <Copy size={11} />
-                  <span>复制校验执行</span>
+                  <span>复制执行</span>
                 {/if}
               </button>
 
@@ -486,9 +521,9 @@
 
               <div class="code-integrity-badge">
                 {#if execution?.isSourceIdentical}
-                  <span class="pill pill-green">正文与执行代码 100% 一致 (零暗改)</span>
+                  <span class="pill pill-green">代码 100% 直跑一致</span>
                 {:else if wrapperCode}
-                  <span class="pill pill-blue">正文零修改 + 追加透明包装器</span>
+                  <span class="pill pill-blue">正文零修改 + 透明包装器</span>
                 {/if}
               </div>
             </div>
@@ -529,40 +564,39 @@
             <span class="log-val">{execution?.elapsedMs || 0} ms</span>
           </div>
 
-          <!-- API 请求与预算审计 (客观记录 max_tokens / budget_tokens / history 策略) -->
-          <div class="log-row flex-col" style="background: #f8fafc; padding: 8px 10px; border-radius: 4px; border: 1px solid #e2e8f0; margin: 4px 0;">
-            <div style="font-weight: 600; color: #334155; font-size: 12px; margin-bottom: 4px;">API 传输与输出预算审计:</div>
-            <div style="font-size: 11px; line-height: 1.6; color: #475569;">
+          <!-- API 请求与预算审计 -->
+          <div class="log-row flex-col audit-box">
+            <div class="audit-box-title">API 传输与输出预算审计:</div>
+            <div class="audit-box-content">
               <div>• <strong>输出预算 (max_tokens):</strong> <code>{execution?.apiAudit?.maxTokensStatus || '未发送（采用服务端默认限制）'}</code></div>
               <div>• <strong>思考预算 (budget_tokens):</strong> <code>{execution?.apiAudit?.thinkingBudgetStatus || '未发送'}</code></div>
               <div>• <strong>发送历史条数:</strong> <code>{execution?.apiAudit?.historyCountSent ?? 'N/A'} 条</code>（可用总数: {execution?.apiAudit?.totalHistoryAvailable ?? 'N/A'} 条）</div>
-              <div>• <strong>历史剥离/截断:</strong> <span class="pill pill-green" style="font-size: 10px; padding: 1px 5px;">否（100% 完整保留含 VBA 的对话原文）</span></div>
+              <div>• <strong>历史剥离/截断:</strong> <span class="pill pill-green">否（100% 完整保留含 VBA 的对话原文）</span></div>
               <div>• <strong>上下文策略:</strong> {execution?.apiAudit?.historyStrategy || '保留完整原文供模型接续调试'}</div>
             </div>
           </div>
 
-          <!-- 系统提示词规则分类清单与宿主限制显式说明 -->
-          <div class="log-row flex-col" style="background: #f8fafc; padding: 8px 10px; border-radius: 4px; border: 1px solid #e2e8f0; margin: 4px 0;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span style="font-weight: 600; color: #334155; font-size: 12px;">系统提示词约束分类清单:</span>
+          <!-- 系统提示词规则分类清单 -->
+          <div class="log-row flex-col audit-box">
+            <div class="audit-box-header">
+              <span class="audit-box-title">系统提示词约束分类清单:</span>
               <button
                 class="btn btn-sm"
                 on:click={() => (showConstraints = !showConstraints)}
-                style="padding: 1px 6px; font-size: 10px;"
               >
                 {showConstraints ? '收起清单' : '查看完整规则 (4类)'}
               </button>
             </div>
             {#if showConstraints}
-              <div style="font-size: 11px; line-height: 1.6; color: #475569; margin-top: 6px;">
+              <div class="audit-constraints-list">
                 {#each promptConstraints as rule}
-                  <div style="margin-bottom: 4px;">
-                    <span class="pill {rule.category === '模型能力限制' ? 'pill-red' : (rule.category === '运行入口协议' ? 'pill-blue' : 'pill-gray')}" style="font-size: 10px; padding: 1px 4px;">
+                  <div class="constraint-item">
+                    <span class="pill {rule.category === '模型能力限制' ? 'pill-red' : (rule.category === '运行入口协议' ? 'pill-blue' : 'pill-gray')}">
                       {rule.category}
                     </span>
                     <strong> {rule.name}:</strong> {rule.description}
                     {#if rule.isHostCapabilityLimitation}
-                      <div style="color: #b91c1c; margin-left: 12px; font-style: italic;">
+                      <div class="constraint-warning">
                         ⚠️ {rule.limitationReason}
                       </div>
                     {/if}
@@ -635,7 +669,7 @@
                 <span class="pill pill-red">入口调度失败</span>
               {:else if execution?.executionPhase === 'runtime_error'}
                 {#if execution?.isPartiallyModified}
-                  <span class="pill pill-amber" style="background:#fff3e0; color:#d97706; border-color:#fbbf24;">运行异常 (工作簿已部分修改)</span>
+                  <span class="pill pill-amber">运行异常 (工作簿已部分修改)</span>
                 {:else}
                   <span class="pill pill-red">运行期异常抛出 ({execution?.vbaErrNumber ? 'Err ' + execution.vbaErrNumber : (execution?.rawErrorCode || '1004')})</span>
                 {/if}
@@ -655,11 +689,11 @@
 
           <!-- 完整错误链详细审计 -->
           {#if execution?.vbaErrNumber || execution?.vbaErrDescription || execution?.comHResult}
-            <div class="log-row flex-col" style="background: #fff8f8; padding: 8px 10px; border-radius: 4px; border: 1px solid #fed7d7; margin: 4px 0;">
-              <span class="log-label" style="color: #c53929; font-weight: 600;">完整错误链审计:</span>
-              <div style="font-size: 12px; line-height: 1.6; color: #4a5568; margin-top: 3px;">
+            <div class="log-row flex-col error-chain-box">
+              <span class="log-label error-chain-label">完整错误链审计:</span>
+              <div class="error-chain-content">
                 {#if execution.vbaErrNumber}
-                  <div>• <strong>VBA 运行时错误号:</strong> <code style="color: #c53929;">Err.Number = {execution.vbaErrNumber}</code></div>
+                  <div>• <strong>VBA 运行时错误号:</strong> <code class="error-code">Err.Number = {execution.vbaErrNumber}</code></div>
                 {/if}
                 {#if execution.vbaErrDescription}
                   <div>• <strong>VBE 弹窗错误文本:</strong> <code>{execution.vbaErrDescription}</code></div>
@@ -668,7 +702,7 @@
                   <div>• <strong>COM 宿主接口 HResult:</strong> <code>{execution.comHResult}</code> (由 app.Run 终止返回)</div>
                 {/if}
                 {#if execution.hostExecutionPhase}
-                  <div>• <strong>宿主记录阶段:</strong> <span class="pill pill-red" style="font-size: 11px; padding: 1px 6px;">{execution.hostExecutionPhase}</span></div>
+                  <div>• <strong>宿主记录阶段:</strong> <span class="pill pill-red">{execution.hostExecutionPhase}</span></div>
                 {/if}
               </div>
             </div>
@@ -676,21 +710,20 @@
 
           <!-- 工作簿部分修改与快照回滚提示 -->
           {#if execution?.isPartiallyModified}
-            <div class="log-row flex-col" style="background: #fffbe6; padding: 8px 10px; border-radius: 4px; border: 1px solid #ffe58f; margin: 4px 0;">
-              <div style="display: flex; align-items: center; justify-content: space-between;">
-                <span class="log-label" style="color: #d46b08; font-weight: 600;">⚠️ 宏运行异常中断：工作簿已发生部分修改！</span>
+            <div class="log-row flex-col partial-warning-box">
+              <div class="partial-warning-header">
+                <span class="partial-warning-title">⚠️ 宏运行异常中断：工作簿已发生部分修改！</span>
                 {#if selectedSnapshotId || execution?.snapshot?.id}
                   <button
                     class="btn btn-sm btn-danger"
                     on:click={() => openRestoreConfirm(selectedSnapshotId || execution?.snapshot?.id || '')}
-                    style="background: #e53e3e; color: #fff; padding: 2px 10px; font-weight: 600;"
                   >
                     一键整本回滚
                   </button>
                 {/if}
               </div>
-              <div style="font-size: 12px; color: #873800; margin-top: 4px;">
-                执行后读回区域: <strong>{execution?.readback?.usedRangeAddress || '见读回'}</strong>；宏可能已部分修改工作簿。为保证数据纯净，可点击上方按钮一键恢复至执行前初始快照。
+              <div class="partial-warning-desc">
+                执行后读回区域: <strong>{execution?.readback?.usedRangeAddress || '见读回'}</strong>；宏可能已部分修改工作簿。可点击上方按钮一键恢复至初始快照。
               </div>
             </div>
           {/if}
@@ -698,11 +731,11 @@
           {#if execution?.errorTriggerPoint}
             <div class="log-row">
               <span class="log-label">触发排查:</span>
-              <span class="log-val" style="color: #c53929; font-weight: 500;">{execution.errorTriggerPoint}</span>
+              <span class="log-val trigger-point-val">{execution.errorTriggerPoint}</span>
             </div>
           {/if}
 
-          <!-- 生成重试与 Token 成本明细 (纠正标签数学逻辑) -->
+          <!-- 生成开销明细 -->
           {#if execution?.retryCount !== undefined || execution?.llmCost}
             <div class="log-row">
               <span class="log-label">生成开销:</span>
@@ -710,7 +743,7 @@
                 <span class="cost-item">
                   重试: <strong>{execution?.retryCount || 0} 次</strong>
                   {#if (execution?.retryCount || 0) > 0}
-                    <span class="dim-text">(安全纠偏/重试，绝不拼装半截代码)</span>
+                    <span class="dim-text">(安全纠偏/重试)</span>
                   {/if}
                 </span>
                 {#if execution?.llmCost?.totalTokens}
@@ -718,7 +751,7 @@
                   {@const compTokens = execution.llmCost.completionTokens || 0}
                   {@const contentTokens = execution.llmCost.contentTokens ?? (compTokens >= reasoningTokens ? compTokens - reasoningTokens : compTokens)}
                   <span class="cost-item">
-                    Token 累计: <strong>{execution.llmCost.totalTokens}</strong>
+                    Token: <strong>{execution.llmCost.totalTokens}</strong>
                     {#if reasoningTokens > 0}
                       <span class="dim-text">(生成={compTokens}: 思考={reasoningTokens} + 正文={contentTokens})</span>
                     {:else if contentTokens > 0}
@@ -726,7 +759,7 @@
                     {/if}
                   </span>
                   {#if execution.llmCost.promptTokens}
-                    <span class="cost-item dim-text">提示词: {execution.llmCost.promptTokens}</span>
+                    <span class="cost-item dim-text">提示: {execution.llmCost.promptTokens}</span>
                   {/if}
                 {/if}
               </div>
@@ -748,7 +781,7 @@
                 ⚠️ 检测到其他打开的工作簿受到影响：{execution.readback.affectedWorkbooksWarning}
               </span>
             {:else}
-              <span class="log-val" style="color: #107C41;">未影响其他已打开工作簿</span>
+              <span class="log-val status-green">未影响其他已打开工作簿</span>
             {/if}
           </div>
 
@@ -760,18 +793,18 @@
           {:else}
             <div class="log-row">
               <span class="log-label">模块清理:</span>
-              <span class="log-val" style="color: #107C41;">COM 宏调用完成，临时模块已瞬时销毁清理</span>
+              <span class="log-val status-green">COM 宏调用完成，临时模块已瞬时销毁清理</span>
             </div>
           {/if}
 
           <!-- 开放式 VBA 安全与回滚边界警示 -->
           <div class="boundary-warning-card">
             <div class="bw-header">
-              <ShieldAlert size={14} color="#D83B01" />
+              <ShieldAlert size={14} color="#B25900" />
               <span class="bw-title">开放式 VBA 安全与回滚边界声明</span>
             </div>
             <p class="bw-body">
-              工作簿快照仅保障目标工作簿本身的数据与格式原位回滚。若模型生成的开放式 VBA 包含外部文件读写、修改了其他工作簿、调用系统 API 或执行外部进程等副作用，快照无法自动撤回。宿主负责核验目标并确保单点执行，宏的系统级行为仍需人工把关。
+              工作簿快照仅保障目标工作簿本身的数据与格式原位回滚。若模型生成的开放式 VBA 包含外部文件读写、修改了其他工作簿、调用系统 API 或执行外部进程等副作用，快照无法自动撤回。宏的系统级行为仍需人工把关。
             </p>
           </div>
         </div>
@@ -802,11 +835,11 @@
         </div>
       {/if}
 
-      <!-- 核心功能：多版本时间轴整本恢复控制栏 -->
+      <!-- 核心功能：多版本时间轴整本恢复控制栏 (自适应弹性排布) -->
       <div class="snapshot-footer">
         <div class="snap-info">
           <History size={14} color="#605E5C" />
-          <span class="snap-label">整本版本回滚:</span>
+          <span class="snap-label">版本回滚:</span>
           {#if allSnapshots.length > 0}
             <select class="snap-select" bind:value={selectedSnapshotId}>
               {#each allSnapshots as s}
@@ -830,7 +863,7 @@
           >
             {#if restoreSuccess}
               <Check size={13} color="#107C41" />
-              <span style="color: #107C41; font-weight: 600;">已恢复整本工作簿！</span>
+              <span class="restore-success-text">已恢复整本！</span>
             {:else if isRestoring}
               <Loader2 size={13} class="spinner" /> 恢复中...
             {:else}
@@ -844,7 +877,7 @@
       {#if showRestoreConfirm}
         <div class="rollback-confirm-panel">
           <div class="rcp-header">
-            <ShieldAlert size={14} color="#D83B01" />
+            <ShieldAlert size={14} color="#C42B1C" />
             <span class="rcp-title">确认回滚整本工作簿？</span>
           </div>
           <p class="rcp-desc">
@@ -863,27 +896,197 @@
 
       {#if restoreErrorMsg}
         <div class="restore-error-bar">
-          <AlertCircle size={14} color="#A80000" />
+          <AlertCircle size={14} color="#C42B1C" />
           <span>恢复失败: {restoreErrorMsg}</span>
         </div>
       {/if}
 
-      <!-- 快照保护边界明确声明，不夸大快照覆盖范围 -->
+      <!-- 快照保护边界明确声明 -->
       <div class="snapshot-boundary-note">
-        <span>ℹ️ 快照保护边界：快照完整备份和回滚目标工作簿本身的数据与结构；VBA 宏若涉及外部工作簿、本地磁盘或网络操作等外部副作用，快照无法自动回滚。</span>
+        <span>ℹ️ 快照保护边界：快照完整备份和回滚目标工作簿本身的数据与结构；VBA 宏若涉及外部磁盘或网络操作，快照无法自动回滚。</span>
       </div>
     </div>
   {/if}
 </div>
 
+<!-- 双模态查看：独立全屏放大查看弹层 (用户明确要求的模态增强) -->
+{#if isFullscreen}
+  <div
+    class="fullscreen-overlay"
+    on:click|self={() => (isFullscreen = false)}
+    on:keydown={(e) => e.key === 'Escape' && (isFullscreen = false)}
+    role="presentation"
+  >
+    <div class="fullscreen-dialog" role="dialog" aria-modal="true" aria-label="执行详情与源码全屏查看">
+      <div class="fs-header">
+        <div class="fs-title-area">
+          <span class="fs-title">执行详情与源码放大查看</span>
+          <span class="badge {execution?.verificationStatus === 'verified' ? 'badge-green' : (execution?.error ? 'badge-red' : 'badge-amber')}">
+            {execution?.verificationStatus === 'verified' ? '核验通过' : (execution?.error ? '执行异常' : '待确认')}
+          </span>
+          <span class="fs-subtitle">{execution?.targetWorkbookName || '当前工作簿'}</span>
+        </div>
+
+        <div class="fs-actions">
+          <div class="fs-tab-group">
+            <button
+              class="fs-tab-btn {activeTab === 'code' ? 'active' : ''}"
+              on:click={() => (activeTab = 'code')}
+            >
+              <Code size={13} />
+              <span>VBA 源码</span>
+            </button>
+            <button
+              class="fs-tab-btn {activeTab === 'readback' ? 'active' : ''}"
+              on:click={() => (activeTab = 'readback')}
+            >
+              <SearchCheck size={13} />
+              <span>写后核验</span>
+            </button>
+            <button
+              class="fs-tab-btn {activeTab === 'audit' ? 'active' : ''}"
+              on:click={() => (activeTab = 'audit')}
+            >
+              <FileText size={13} />
+              <span>审计日志</span>
+            </button>
+          </div>
+
+          <button class="btn btn-sm" on:click={handleCopyCurrent} title="复制当前展示代码">
+            <Copy size={12} />
+            <span>复制代码</span>
+          </button>
+          <button class="btn btn-sm" on:click={() => handleExportVba(codeViewMode)} title="导出为 .vba 文件">
+            <Download size={12} />
+            <span>导出.vba</span>
+          </button>
+          <button class="btn-icon" on:click={() => (isFullscreen = false)} title="还原/关闭全屏" aria-label="关闭">
+            <Minimize2 size={16} />
+          </button>
+        </div>
+      </div>
+
+      <div class="fs-body">
+        {#if activeTab === 'code'}
+          <div class="fs-code-panel">
+            <div class="fs-code-subbar">
+              <div class="code-sub-tabs">
+                <button
+                  class="sub-tab-btn {codeViewMode === 'executed' ? 'active' : ''}"
+                  on:click={() => (codeViewMode = 'executed')}
+                >
+                  实际执行源码
+                  {#if execution?.executedCodeHash}
+                    <span class="hash-tag">SHA:{execution.executedCodeHash.slice(0, 8)}</span>
+                  {/if}
+                </button>
+                <button
+                  class="sub-tab-btn {codeViewMode === 'original' ? 'active' : ''}"
+                  on:click={() => (codeViewMode = 'original')}
+                >
+                  模型原始提取
+                  {#if execution?.originalCodeHash}
+                    <span class="hash-tag">SHA:{execution.originalCodeHash.slice(0, 8)}</span>
+                  {/if}
+                </button>
+                {#if wrapperCode}
+                  <button
+                    class="sub-tab-btn {codeViewMode === 'wrapper' ? 'active' : ''}"
+                    on:click={() => (codeViewMode = 'wrapper')}
+                  >
+                    入口包装器
+                  </button>
+                {/if}
+              </div>
+              <div class="code-sub-actions">
+                <button class="sub-action-btn" on:click={handleCopyOriginal}>复制原始</button>
+                <button class="sub-action-btn" on:click={handleCopyExecuted}>复制执行</button>
+              </div>
+            </div>
+            <pre class="fs-vba-pre"><code>{displayCode || '暂无可展示源码'}</code></pre>
+          </div>
+        {:else if activeTab === 'readback'}
+          <div class="fs-readback-panel">
+            {#if execution?.readback}
+              <div class="fs-grid">
+                <div class="fs-card">
+                  <div class="fs-card-title">基本信息</div>
+                  <div class="fs-card-row"><span>目标文件:</span> <strong>{execution.readback.targetWorkbookName}</strong></div>
+                  <div class="fs-card-row"><span>目标表格:</span> <strong>{execution.readback.targetSheetName || '活动表'}</strong></div>
+                  <div class="fs-card-row"><span>一致性:</span> <span class="pill {execution.readback.targetVerified ? 'pill-green' : 'pill-red'}">{execution.readback.targetVerified ? '核验通过' : '身份异常'}</span></div>
+                </div>
+                <div class="fs-card">
+                  <div class="fs-card-title">写入区域读回</div>
+                  <div class="fs-card-row"><span>使用区域:</span> <strong style="color: #107C41;">{execution.readback.usedRangeAddress || '未检测到'}</strong></div>
+                  <div class="fs-card-row"><span>矩阵维度:</span> <span>{execution.readback.rowCount} 行 × {execution.readback.columnCount} 列</span></div>
+                  <div class="fs-card-row"><span>起笔坐标:</span> <span>{execution.readback.startCell || 'N/A'}</span></div>
+                </div>
+                <div class="fs-card">
+                  <div class="fs-card-title">特征分析</div>
+                  <div class="fs-card-row"><span>公式计算:</span> <span>{execution.readback.hasFormulas ? '包含公式' : '纯静态值'}</span></div>
+                  <div class="fs-card-row"><span>网格边框:</span> <span>{execution.readback.hasBorders ? '包含格式边框' : '无特殊边框'}</span></div>
+                  <div class="fs-card-row"><span>单元格底色:</span> <span>{execution.readback.hasInteriorColor ? '包含背景填充色' : '默认无底色'}</span></div>
+                </div>
+              </div>
+              {#if execution.readback.sampleValues && execution.readback.sampleValues.length > 0}
+                <div class="fs-samples-section">
+                  <div class="fs-card-title">读回单元格抽样值</div>
+                  <div class="sample-tags">
+                    {#each execution.readback.sampleValues as sample}
+                      <code class="sample-code">{sample}</code>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+              {#if execution.verificationNote}
+                <div class="verification-box" style="margin-top: 14px;">
+                  <span class="ver-label">核验综合结论:</span>
+                  <span class="ver-text">{execution.verificationNote}</span>
+                </div>
+              {/if}
+            {:else}
+              <div class="dim-empty">尚未取得写后读回数据</div>
+            {/if}
+          </div>
+        {:else if activeTab === 'audit'}
+          <div class="fs-audit-panel">
+            <div class="log-row">
+              <span class="log-label">用户指令:</span>
+              <span class="log-val"><strong>{prompt}</strong></span>
+            </div>
+            <div class="log-row">
+              <span class="log-label">执行耗时:</span>
+              <span class="log-val">{execution?.elapsedMs || 0} ms</span>
+            </div>
+            <div class="audit-box" style="margin: 12px 0;">
+              <div class="audit-box-title">API 预算与模型审计:</div>
+              <div class="audit-box-content">
+                <div>• 最大输出 Token: <code>{execution?.apiAudit?.maxTokensStatus || '默认'}</code></div>
+                <div>• 深度思考预算: <code>{execution?.apiAudit?.thinkingBudgetStatus || '默认'}</code></div>
+                <div>• 发送历史消息: <code>{execution?.apiAudit?.historyCountSent ?? 'N/A'} 条</code></div>
+              </div>
+            </div>
+            {#if execution?.error}
+              <div class="error-block" style="margin-top: 12px;">
+                <span class="log-label">完整错误堆栈:</span>
+                <pre class="error-text">{execution.error}</pre>
+              </div>
+            {/if}
+          </div>
+        {/if}
+      </div>
+    </div>
+  </div>
+{/if}
+
 <style>
   .execution-card {
     background: #ffffff;
-    border-radius: 6px;
+    border-radius: var(--office-radius);
     border: 1px solid var(--office-border);
-    margin: 8px 0;
+    margin: 6px 0;
     overflow: hidden;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    box-shadow: var(--office-shadow-sm);
     transition: all 0.15s ease;
   }
 
@@ -892,7 +1095,7 @@
   }
 
   .card-unconfirmed {
-    border-left: 3px solid #d83b01;
+    border-left: 3px solid var(--office-amber);
   }
 
   .card-error {
@@ -911,105 +1114,135 @@
     gap: 8px;
     cursor: pointer;
     background: #ffffff;
+    transition: background 0.15s ease;
   }
 
   .summary-bar:hover {
-    background: #faf9f8;
+    background: var(--office-card-subtle);
   }
 
   .status-left {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 7px;
     min-width: 0;
     flex: 1;
   }
 
   .summary-text {
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 500;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    line-height: 1.35;
   }
 
   .font-success {
-    color: #107c41;
+    color: var(--excel-green);
   }
 
   .font-unconfirmed {
-    color: #d83b01;
+    color: var(--office-amber);
   }
 
   .font-error {
-    color: #a80000;
+    color: var(--office-danger);
   }
 
   .font-running {
-    color: #0078d4;
+    color: var(--office-blue);
   }
 
-  .badge-amber {
-    background: #fdf3eb;
-    color: #d83b01;
-    border: 1px solid #fed9cc;
-    font-size: 10px;
-    padding: 1px 5px;
-    border-radius: 3px;
+  .summary-right-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+
+  .btn-icon-subtle {
+    padding: 4px;
+    background: transparent;
+    border: none;
+    border-radius: var(--office-radius-xs);
+    color: var(--office-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s ease;
+  }
+
+  .btn-icon-subtle:hover {
+    background: var(--office-hover);
+    color: var(--office-text);
   }
 
   .expand-btn {
     display: flex;
     align-items: center;
     gap: 3px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--office-muted);
     background: none;
     border: none;
     cursor: pointer;
-    padding: 2px 4px;
-    border-radius: 3px;
+    padding: 3px 6px;
+    border-radius: var(--office-radius-xs);
     flex-shrink: 0;
+    font-weight: 500;
+    transition: all 0.15s ease;
   }
 
   .expand-btn:hover {
-    background: #edebe9;
+    background: var(--office-hover);
     color: var(--office-text);
   }
 
   .expanded-panel {
     border-top: 1px solid var(--office-border);
-    background: #fbfbfb;
+    background: var(--office-card-subtle);
   }
 
+  /* 自适应选项卡头部与响应式工具栏 */
   .panel-tabs {
-    height: 32px;
-    padding: 0 12px;
+    min-height: 34px;
+    padding: 2px 10px;
     display: flex;
     align-items: center;
     justify-content: space-between;
     border-bottom: 1px solid var(--office-border);
-    background: #f3f2f1;
+    background: #f0f2f5;
+    flex-wrap: wrap;
+    gap: 4px;
   }
 
   .tabs-left {
     display: flex;
     height: 100%;
+    gap: 2px;
   }
 
   .tab-btn {
     display: flex;
     align-items: center;
     gap: 4px;
-    padding: 0 10px;
-    font-size: 11px;
+    padding: 5px 8px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     color: var(--office-muted);
     background: transparent;
     border: none;
     border-bottom: 2px solid transparent;
     cursor: pointer;
-    height: 100%;
+    transition: all 0.15s ease;
+    border-radius: var(--office-radius-xs) var(--office-radius-xs) 0 0;
+  }
+
+  .tab-btn:hover {
+    color: var(--office-text);
+    background: rgba(0, 0, 0, 0.03);
   }
 
   .tab-btn.active {
@@ -1021,18 +1254,37 @@
 
   .tabs-actions {
     display: flex;
-    gap: 6px;
+    align-items: center;
+    gap: 5px;
   }
 
   .btn-sm {
-    padding: 2px 8px;
-    font-size: 11px;
+    padding: 2px 7px;
+    font-size: var(--font-size-xs);
+  }
+
+  .copy-success-text {
+    color: var(--excel-green);
+    font-weight: 600;
+  }
+
+  /* 响应式自适应防截断：小于 440px 时按钮文字优雅缩略，纯图标+Tooltip，绝不换行错乱 */
+  @media (max-width: 440px) {
+    .btn-label-text {
+      display: none;
+    }
+    .panel-tabs {
+      padding: 2px 6px;
+    }
+    .tab-btn {
+      padding: 5px 6px;
+    }
   }
 
   /* 写后核验面板样式 */
   .readback-container {
     padding: 10px 12px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -1043,12 +1295,14 @@
     display: flex;
     align-items: baseline;
     gap: 8px;
+    overflow-wrap: anywhere;
   }
 
   .rb-label {
     color: var(--office-muted);
-    min-width: 80px;
+    min-width: 76px;
     flex-shrink: 0;
+    font-weight: 500;
   }
 
   .rb-val {
@@ -1057,64 +1311,57 @@
     display: flex;
     align-items: center;
     gap: 6px;
+    flex-wrap: wrap;
   }
 
   .highlight-val {
     font-weight: 600;
-    color: #107c41;
+    color: var(--excel-green);
   }
 
   .dim-text {
     font-weight: normal;
     color: var(--office-muted);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
 
   .pill {
     padding: 1px 6px;
-    border-radius: 3px;
-    font-size: 10px;
+    border-radius: var(--office-radius-xs);
+    font-size: 10.5px;
     font-weight: 500;
+    line-height: 1.35;
+    white-space: nowrap;
   }
 
   .pill-green {
-    background: #e7f3ec;
-    color: #107c41;
+    background: var(--excel-light);
+    color: var(--excel-dark);
+    border: 1px solid var(--excel-light-border);
   }
 
   .pill-blue {
-    background: #eff6fc;
-    color: #0078d4;
+    background: var(--office-blue-light);
+    color: var(--office-blue-dark);
+    border: 1px solid var(--office-blue-border);
   }
 
   .pill-red {
-    background: #fdf3f4;
-    color: #a80000;
+    background: var(--office-danger-light);
+    color: var(--office-danger);
+    border: 1px solid var(--office-danger-border);
   }
 
   .pill-gray {
-    background: #f3f2f1;
-    color: #605e5c;
+    background: #edebe9;
+    color: var(--office-muted);
+    border: 1px solid #e1dfdd;
   }
 
   .pill-amber {
-    background: #fff4ce;
-    color: #797673;
-  }
-
-  .cost-info {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-    font-size: 11px;
-    color: var(--office-text);
-  }
-
-  .cost-item {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
+    background: var(--office-amber-light);
+    color: var(--office-amber);
+    border: 1px solid var(--office-amber-border);
   }
 
   .sample-tags {
@@ -1125,26 +1372,28 @@
 
   .sample-code {
     background: #f3f2f1;
-    padding: 2px 5px;
-    border-radius: 3px;
-    font-family: Consolas, monospace;
+    padding: 2px 6px;
+    border-radius: var(--office-radius-xs);
+    font-family: var(--font-family-code);
     font-size: 10px;
     color: #201f1e;
+    border: 1px solid #e1dfdd;
   }
 
   .verification-box {
     margin-top: 4px;
-    padding: 6px 8px;
-    background: #fcf9f5;
-    border: 1px solid #fae8d4;
-    border-radius: 4px;
+    padding: 6px 9px;
+    background: var(--office-amber-light);
+    border: 1px solid var(--office-amber-border);
+    border-radius: var(--office-radius-sm);
     display: flex;
     gap: 6px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
+    line-height: var(--line-height-normal);
   }
 
   .ver-label {
-    color: #d83b01;
+    color: var(--office-amber);
     font-weight: 600;
     flex-shrink: 0;
   }
@@ -1153,6 +1402,7 @@
     color: #323130;
   }
 
+  /* 代码区展示 */
   .code-view-wrapper {
     display: flex;
     flex-direction: column;
@@ -1165,7 +1415,7 @@
     background: #252526;
     padding: 5px 10px;
     border-bottom: 1px solid #333333;
-    gap: 8px;
+    gap: 6px;
     flex-wrap: wrap;
   }
 
@@ -1173,6 +1423,7 @@
     display: flex;
     gap: 4px;
     align-items: center;
+    flex-wrap: wrap;
   }
 
   .sub-tab-btn {
@@ -1204,7 +1455,7 @@
   .code-sub-actions {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 5px;
     flex-wrap: wrap;
   }
 
@@ -1245,15 +1496,10 @@
   }
 
   .hash-tag {
-    font-family: Consolas, monospace;
+    font-family: var(--font-family-code);
     font-size: 9px;
     color: #4ec9b0;
-    opacity: 0.85;
-  }
-
-  .code-integrity-badge {
-    display: flex;
-    align-items: center;
+    opacity: 0.9;
   }
 
   .code-container {
@@ -1261,7 +1507,7 @@
     padding: 10px 12px;
     background: #1e1e1e;
     color: #d4d4d4;
-    max-height: 260px;
+    max-height: min(360px, 48vh);
     overflow-y: auto;
   }
 
@@ -1269,7 +1515,7 @@
     position: absolute;
     top: 8px;
     right: 12px;
-    background: rgba(45, 45, 48, 0.88);
+    background: rgba(45, 45, 48, 0.9);
     backdrop-filter: blur(4px);
     border: 1px solid #3e3e42;
     color: #cccccc;
@@ -1281,14 +1527,13 @@
     align-items: center;
     gap: 4px;
     transition: all 0.2s ease;
-    z-index: 10;
+    z-index: 5;
   }
 
   .floating-copy-btn:hover {
     background: #3e3e42;
     color: #ffffff;
     border-color: #007acc;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
   }
 
   .floating-copy-btn.copied {
@@ -1298,27 +1543,29 @@
   }
 
   .vba-code {
-    font-family: Consolas, "Courier New", monospace;
-    font-size: 11px;
-    line-height: 1.5;
+    font-family: var(--font-family-code);
+    font-size: var(--font-size-xs);
+    line-height: var(--line-height-normal);
     white-space: pre-wrap;
     word-break: break-all;
     margin: 0;
   }
 
+  /* 审计日志容器 */
   .log-container {
     padding: 10px 12px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     display: flex;
     flex-direction: column;
     gap: 6px;
-    max-height: 220px;
+    max-height: min(320px, 42vh);
     overflow-y: auto;
   }
 
   .log-row {
     display: flex;
     gap: 8px;
+    overflow-wrap: anywhere;
   }
 
   .flex-col {
@@ -1328,12 +1575,122 @@
 
   .log-label {
     color: var(--office-muted);
-    min-width: 80px;
+    min-width: 76px;
+    font-weight: 500;
+    flex-shrink: 0;
   }
 
   .log-val {
     color: var(--office-text);
     word-break: break-all;
+  }
+
+  .status-green {
+    color: var(--excel-green);
+    font-weight: 500;
+  }
+
+  .audit-box {
+    background: #f8fafc;
+    padding: 8px 10px;
+    border-radius: var(--office-radius-sm);
+    border: 1px solid #e2e8f0;
+    margin: 4px 0;
+  }
+
+  .audit-box-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .audit-box-title {
+    font-weight: 600;
+    color: #334155;
+    font-size: var(--font-size-xs);
+    margin-bottom: 2px;
+  }
+
+  .audit-box-content {
+    font-size: 10.5px;
+    line-height: 1.6;
+    color: #475569;
+  }
+
+  .audit-constraints-list {
+    font-size: 10.5px;
+    line-height: 1.5;
+    color: #475569;
+    margin-top: 6px;
+  }
+
+  .constraint-item {
+    margin-bottom: 4px;
+  }
+
+  .constraint-warning {
+    color: var(--office-danger);
+    margin-left: 12px;
+    font-style: italic;
+  }
+
+  .error-chain-box {
+    background: #fff8f8;
+    padding: 8px 10px;
+    border-radius: var(--office-radius-sm);
+    border: 1px solid #fed7d7;
+    margin: 4px 0;
+  }
+
+  .error-chain-label {
+    color: var(--office-danger);
+    font-weight: 600;
+  }
+
+  .error-chain-content {
+    font-size: var(--font-size-xs);
+    line-height: 1.55;
+    color: #4a5568;
+    margin-top: 2px;
+  }
+
+  .error-code {
+    color: var(--office-danger);
+    font-family: var(--font-family-code);
+  }
+
+  .partial-warning-box {
+    background: #fffbe6;
+    padding: 8px 10px;
+    border-radius: var(--office-radius-sm);
+    border: 1px solid #ffe58f;
+    margin: 4px 0;
+  }
+
+  .partial-warning-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .partial-warning-title {
+    color: #d46b08;
+    font-weight: 600;
+    font-size: var(--font-size-xs);
+  }
+
+  .partial-warning-desc {
+    font-size: var(--font-size-xs);
+    color: #873800;
+    margin-top: 4px;
+    line-height: 1.4;
+  }
+
+  .trigger-point-val {
+    color: var(--office-danger);
+    font-weight: 500;
   }
 
   .hash-table {
@@ -1342,7 +1699,7 @@
     gap: 4px;
     background: #f3f2f1;
     padding: 6px 8px;
-    border-radius: 4px;
+    border-radius: var(--office-radius-xs);
     flex: 1;
   }
 
@@ -1351,22 +1708,19 @@
     align-items: center;
     gap: 6px;
     font-size: 10px;
+    flex-wrap: wrap;
   }
 
   .hash-name {
     color: var(--office-muted);
-    min-width: 60px;
+    min-width: 55px;
   }
 
   .hash-item code {
-    font-family: Consolas, monospace;
+    font-family: var(--font-family-code);
     font-size: 10px;
     color: #004e8c;
     word-break: break-all;
-  }
-
-  .hash-status {
-    margin-top: 2px;
   }
 
   .boundary-warning-card {
@@ -1374,37 +1728,33 @@
     padding: 8px 10px;
     background: #fff8f5;
     border: 1px solid #fed9cc;
-    border-radius: 4px;
+    border-radius: var(--office-radius-sm);
   }
 
   .bw-header {
     display: flex;
     align-items: center;
     gap: 5px;
-    margin-bottom: 4px;
+    margin-bottom: 3px;
   }
 
   .bw-title {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
-    color: #d83b01;
+    color: var(--office-amber);
   }
 
   .bw-body {
     margin: 0;
     font-size: 10.5px;
     line-height: 1.45;
-    color: #605e5c;
+    color: var(--office-muted);
   }
 
   .step-list {
     margin: 2px 0 0 16px;
     padding: 0;
     color: #323130;
-  }
-
-  .step-list li {
-    margin-bottom: 2px;
   }
 
   .error-block {
@@ -1416,10 +1766,11 @@
     background: var(--office-danger-light);
     color: var(--office-danger);
     padding: 6px 8px;
-    border-radius: 4px;
-    font-family: Consolas, monospace;
-    font-size: 11px;
+    border-radius: var(--office-radius-xs);
+    font-family: var(--font-family-code);
+    font-size: var(--font-size-xs);
     white-space: pre-wrap;
+    border: 1px solid var(--office-danger-border);
   }
 
   .save-dialog-inline {
@@ -1432,7 +1783,7 @@
   }
 
   .save-title {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--excel-green);
   }
@@ -1446,20 +1797,23 @@
     flex: 1;
     height: 26px;
     padding: 0 8px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     border: 1px solid #c2e2cc;
-    border-radius: 3px;
+    border-radius: var(--office-radius-xs);
     outline: none;
+    background: #ffffff;
   }
 
   .desc-input {
     height: 24px;
     padding: 0 8px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     border: 1px solid #e1e1e1;
-    border-radius: 3px;
+    border-radius: var(--office-radius-xs);
+    background: #ffffff;
   }
 
+  /* 版本回滚底部控制栏 */
   .snapshot-footer {
     padding: 8px 12px;
     background: #ffffff;
@@ -1468,26 +1822,29 @@
     align-items: center;
     justify-content: space-between;
     gap: 8px;
+    flex-wrap: wrap;
   }
 
   .snap-info {
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--office-muted);
     min-width: 0;
     flex: 1;
+    flex-wrap: wrap;
   }
 
   .snap-select {
     height: 24px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     border: 1px solid var(--office-border);
-    border-radius: 3px;
+    border-radius: var(--office-radius-xs);
     padding: 0 4px;
-    background: white;
-    max-width: 170px;
+    background: #ffffff;
+    max-width: min(200px, 100%);
+    color: var(--office-text);
   }
 
   .snap-tag {
@@ -1495,16 +1852,26 @@
     color: var(--office-text);
   }
 
+  .snap-none {
+    color: var(--office-dim);
+    font-style: italic;
+  }
+
   .btn-rollback {
-    color: #795b00;
-    background: #fff8e5;
-    border-color: #f7e6b5;
+    color: var(--office-amber);
+    background: var(--office-amber-light);
+    border-color: var(--office-amber-border);
     font-weight: 600;
     flex-shrink: 0;
   }
 
-  .btn-rollback:hover {
-    background: #ffefc4;
+  .btn-rollback:hover:not(:disabled) {
+    background: #ffeedb;
+  }
+
+  .restore-success-text {
+    color: var(--excel-green);
+    font-weight: 600;
   }
 
   /* 部分修改常驻横幅样式 */
@@ -1517,6 +1884,7 @@
     background: #fffbe6;
     border-top: 1px solid #ffe58f;
     border-bottom: 1px solid #ffe58f;
+    flex-wrap: wrap;
   }
 
   .partial-mod-left {
@@ -1524,6 +1892,7 @@
     align-items: flex-start;
     gap: 8px;
     flex: 1;
+    min-width: 200px;
   }
 
   .partial-mod-text {
@@ -1533,13 +1902,13 @@
   }
 
   .partial-mod-title {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     color: #d46b08;
   }
 
   .partial-mod-desc {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: #873800;
     line-height: 1.4;
   }
@@ -1561,7 +1930,7 @@
   .rollback-confirm-panel {
     background: #fff8f5;
     border: 1px solid #f8d0c0;
-    border-radius: 4px;
+    border-radius: var(--office-radius-sm);
     padding: 10px 12px;
     margin: 8px 12px;
   }
@@ -1574,15 +1943,15 @@
   }
 
   .rcp-title {
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
-    color: #a80000;
+    color: var(--office-danger);
   }
 
   .rcp-desc {
-    font-size: 11px;
-    color: #605e5c;
-    line-height: 1.5;
+    font-size: var(--font-size-xs);
+    color: var(--office-muted);
+    line-height: var(--line-height-normal);
     margin: 0 0 8px 0;
   }
 
@@ -1592,43 +1961,225 @@
     gap: 8px;
   }
 
-  .btn-danger {
-    background: #a80000;
-    color: white;
-    border: none;
-  }
-
-  .btn-danger:hover {
-    background: #8e0000;
-  }
-
   .restore-error-bar {
     display: flex;
     align-items: center;
     gap: 6px;
     padding: 6px 12px;
-    background: #fde7e9;
-    color: #a80000;
-    font-size: 11px;
+    background: var(--office-danger-light);
+    color: var(--office-danger);
+    font-size: var(--font-size-xs);
     margin: 4px 12px;
-    border-radius: 4px;
+    border-radius: var(--office-radius-xs);
+    border: 1px solid var(--office-danger-border);
   }
 
   @keyframes spin {
-    from {
-      transform: rotate(0deg);
-    }
-    to {
-      transform: rotate(360deg);
-    }
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
   }
 
   .snapshot-boundary-note {
-    font-size: 11px;
+    font-size: 10.5px;
     color: var(--office-muted);
     padding: 6px 12px;
     background: #fbfbfb;
     border-top: 1px dashed var(--office-border);
     line-height: 1.4;
+  }
+
+  /* 双模态查看：独立全屏放大遮罩与弹层 */
+  .fullscreen-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(3px);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+
+  .fullscreen-dialog {
+    width: min(94vw, 900px);
+    height: min(92vh, 800px);
+    background: #ffffff;
+    border-radius: var(--office-radius-lg);
+    box-shadow: var(--office-shadow-lg);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid var(--office-border);
+    animation: modalPop 0.18s ease-out;
+  }
+
+  .fs-header {
+    height: 48px;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--office-border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #ffffff;
+    flex-shrink: 0;
+    gap: 12px;
+  }
+
+  .fs-title-area {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .fs-title {
+    font-size: var(--font-size-md);
+    font-weight: 600;
+    color: var(--office-text);
+  }
+
+  .fs-subtitle {
+    font-size: var(--font-size-xs);
+    color: var(--office-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .fs-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .fs-tab-group {
+    display: inline-flex;
+    background: #f0f2f5;
+    border: 1px solid var(--office-border);
+    border-radius: var(--office-radius-sm);
+    padding: 2px;
+    gap: 2px;
+  }
+
+  .fs-tab-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    font-size: var(--font-size-xs);
+    border: none;
+    border-radius: 3px;
+    background: transparent;
+    color: var(--office-muted);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .fs-tab-btn.active {
+    background: #ffffff;
+    color: var(--excel-green);
+    font-weight: 600;
+    box-shadow: var(--office-shadow-sm);
+  }
+
+  .fs-body {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    background: #fcfcfc;
+  }
+
+  .fs-code-panel {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+
+  .fs-code-subbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 16px;
+    background: #252526;
+    border-bottom: 1px solid #333;
+    gap: 8px;
+  }
+
+  .fs-vba-pre {
+    flex: 1;
+    margin: 0;
+    padding: 16px 20px;
+    background: #1e1e1e;
+    color: #d4d4d4;
+    font-family: var(--font-family-code);
+    font-size: var(--font-size-sm);
+    line-height: 1.55;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  .fs-readback-panel {
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .fs-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+  }
+
+  .fs-card {
+    background: #ffffff;
+    border: 1px solid var(--office-border);
+    border-radius: var(--office-radius);
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    box-shadow: var(--office-shadow-sm);
+  }
+
+  .fs-card-title {
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--office-text);
+    border-bottom: 1px solid var(--office-border-subtle);
+    padding-bottom: 6px;
+  }
+
+  .fs-card-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: var(--font-size-xs);
+    color: var(--office-muted);
+  }
+
+  .fs-card-row strong {
+    color: var(--office-text);
+  }
+
+  .fs-samples-section {
+    background: #ffffff;
+    border: 1px solid var(--office-border);
+    border-radius: var(--office-radius);
+    padding: 14px;
+  }
+
+  .fs-audit-panel {
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    font-size: var(--font-size-sm);
   }
 </style>

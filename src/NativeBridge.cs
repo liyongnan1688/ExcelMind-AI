@@ -147,6 +147,12 @@ namespace LeeExcel
         {
             if (app == null) return null;
 
+            if (string.Equals(targetName, "未检测到活动工作簿", StringComparison.OrdinalIgnoreCase))
+            {
+                targetName = "";
+                targetFullName = "";
+            }
+
             // 1. 优先按 FullName 匹配
             if (!string.IsNullOrEmpty(targetFullName))
             {
@@ -179,15 +185,26 @@ namespace LeeExcel
                 catch { }
             }
 
-            // 3. 若均未传参且存在活动工作簿，作为保底
-            if (string.IsNullOrEmpty(targetFullName) && string.IsNullOrEmpty(targetName))
+            // 3. 保底：若目标未找到（例如被另存为改名、或原本为空），自动采用当前活动工作簿
+            try
             {
-                try
+                dynamic activeWb = app.ActiveWorkbook;
+                if (activeWb != null)
                 {
-                    return app.ActiveWorkbook;
+                    return activeWb;
                 }
-                catch { }
             }
+            catch { }
+
+            // 4. 若 ActiveWorkbook 为空但存在打开的工作簿，取首个工作簿
+            try
+            {
+                if (app.Workbooks != null && app.Workbooks.Count > 0)
+                {
+                    return app.Workbooks[1];
+                }
+            }
+            catch { }
 
             return null;
         }
@@ -199,7 +216,42 @@ namespace LeeExcel
                 string targetFullName = req.ContainsKey("targetWorkbookFullName") ? req["targetWorkbookFullName"] : "";
                 string targetName = req.ContainsKey("targetWorkbookName") ? req["targetWorkbookName"] : "";
 
-                dynamic wb = FindTargetWorkbook(app, targetFullName, targetName);
+                if (string.Equals(targetName, "未检测到活动工作簿", StringComparison.OrdinalIgnoreCase))
+                {
+                    targetName = "";
+                    targetFullName = "";
+                }
+
+                dynamic wb = null;
+
+                // 优先直接获取当前前台活动的 ActiveWorkbook（实时感知另存为重命名、新建、切换窗口）
+                try
+                {
+                    if (app != null)
+                    {
+                        wb = app.ActiveWorkbook;
+                    }
+                }
+                catch { }
+
+                // 若 ActiveWorkbook 为空（例如失去焦点），按参数查找特定工作簿
+                if (wb == null)
+                {
+                    wb = FindTargetWorkbook(app, targetFullName, targetName);
+                }
+
+                // 再次保底：如果依然为空，取首个打开的工作簿
+                if (wb == null && app != null)
+                {
+                    try
+                    {
+                        if (app.Workbooks != null && app.Workbooks.Count > 0)
+                        {
+                            wb = app.Workbooks[1];
+                        }
+                    }
+                    catch { }
+                }
 
                 if (wb == null)
                 {

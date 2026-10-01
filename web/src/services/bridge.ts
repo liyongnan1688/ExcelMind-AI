@@ -122,6 +122,7 @@ type MessageHandler = (res: BridgeResponse) => void;
 class NativeBridgeClient {
   private handlers = new Map<string, MessageHandler>();
   private workbookChangeListeners: ((info: WorkbookInfo) => void)[] = [];
+  private actionListeners = new Map<string, (() => void)[]>();
   private requestCounter = 0;
 
   constructor() {
@@ -133,6 +134,17 @@ class NativeBridgeClient {
           // 若为 C# 宿主主动推送的工作簿变更（无特定 requestId），通知全局监听器
           if (raw.action === 'get_workbook_info' && !raw.requestId && raw.ok && raw.data) {
             this.workbookChangeListeners.forEach((fn) => fn(raw.data));
+          }
+
+          // 处理宿主主动触发的界面指令（如 open_scripts, open_settings）
+          if (raw.action && this.actionListeners.has(raw.action)) {
+            this.actionListeners.get(raw.action)?.forEach((fn) => {
+              try {
+                fn();
+              } catch (err) {
+                console.error('[NativeBridgeClient] Error in action listener:', err);
+              }
+            });
           }
 
           // 1. 优先按唯一 requestId 寻址并立即清理
@@ -165,6 +177,20 @@ class NativeBridgeClient {
     return () => {
       const idx = this.workbookChangeListeners.indexOf(fn);
       if (idx !== -1) this.workbookChangeListeners.splice(idx, 1);
+    };
+  }
+
+  public onAction(action: string, fn: () => void): () => void {
+    if (!this.actionListeners.has(action)) {
+      this.actionListeners.set(action, []);
+    }
+    this.actionListeners.get(action)!.push(fn);
+    return () => {
+      const list = this.actionListeners.get(action);
+      if (list) {
+        const idx = list.indexOf(fn);
+        if (idx !== -1) list.splice(idx, 1);
+      }
     };
   }
 

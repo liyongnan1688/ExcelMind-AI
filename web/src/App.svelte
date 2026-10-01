@@ -36,11 +36,25 @@
 
   let pollTimer: any = null;
   let unbindWorkbookChange: (() => void) | null = null;
+  let unbindOpenScripts: (() => void) | null = null;
+  let unbindOpenSettings: (() => void) | null = null;
 
   onMount(() => {
     // 监听 C# 宿主推送的工作簿激活变更
     unbindWorkbookChange = bridge.onWorkbookChange((info) => {
       workbook = info;
+    });
+
+    // 监听 Ribbon 菜单打开“我的脚本”抽屉
+    unbindOpenScripts = bridge.onAction('open_scripts', () => {
+      showScripts = true;
+      showSettings = false;
+    });
+
+    // 监听 Ribbon 菜单打开“API配置”弹窗
+    unbindOpenSettings = bridge.onAction('open_settings', () => {
+      showSettings = true;
+      showScripts = false;
     });
 
     // 初次获取工作簿信息
@@ -62,6 +76,15 @@
     ];
 
     if (typeof window !== 'undefined') {
+      (window as any).__openScripts = () => {
+        showScripts = true;
+        showSettings = false;
+      };
+      (window as any).__openSettings = () => {
+        showSettings = true;
+        showScripts = false;
+      };
+
       (window as any).__addTestExecutionMessage = (promptText: string, executionData: any) => {
         messages = [
           ...messages,
@@ -82,13 +105,12 @@
   onDestroy(() => {
     if (pollTimer) clearInterval(pollTimer);
     if (unbindWorkbookChange) unbindWorkbookChange();
+    if (unbindOpenScripts) unbindOpenScripts();
+    if (unbindOpenSettings) unbindOpenSettings();
   });
 
   async function refreshWorkbookInfo() {
-    const res = await bridge.send<WorkbookInfo>('get_workbook_info', {
-      targetWorkbookName: workbook?.name || '',
-      targetWorkbookFullName: workbook?.fullName || '',
-    });
+    const res = await bridge.send<WorkbookInfo>('get_workbook_info');
     if (res.ok && res.data) {
       workbook = res.data;
     }
@@ -489,6 +511,7 @@
               allSnapshots={workbook?.snapshots || []}
               onSaveScriptSuccess={() => scriptDrawerRef?.refreshScripts()}
               on:restored={refreshWorkbookInfo}
+              on:expand={scrollToBottom}
             />
           {/if}
         </div>
@@ -530,6 +553,7 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
+    scroll-behavior: smooth;
   }
 
   .message-row {
@@ -546,42 +570,43 @@
     display: flex;
     flex-direction: column;
     align-items: flex-end;
-    max-width: 85%;
-    gap: 3px;
+    max-width: 86%;
+    gap: 4px;
   }
 
   .user-mode-tag {
     display: inline-flex;
     align-items: center;
-    gap: 3px;
-    font-size: 10px;
+    gap: 4px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
-    padding: 1px 6px;
-    border-radius: 10px;
-    line-height: 1.3;
+    padding: 1px 7px;
+    border-radius: var(--office-radius-full);
+    line-height: var(--line-height-tight);
   }
 
   .user-mode-tag.tag-auto {
-    background: #e7f3ec;
-    color: #107c41;
-    border: 1px solid #c2e2cc;
+    background: var(--excel-light);
+    color: var(--excel-dark);
+    border: 1px solid var(--excel-light-border);
   }
 
   .user-mode-tag.tag-chat {
-    background: #e8f3fb;
-    color: #0078d4;
-    border: 1px solid #c7e0f4;
+    background: var(--office-blue-light);
+    color: var(--office-blue-dark);
+    border: 1px solid var(--office-blue-border);
   }
 
   .user-bubble {
-    color: white;
-    padding: 7px 12px;
-    border-radius: 6px 6px 1px 6px;
-    font-size: 12px;
-    line-height: 1.4;
+    color: #ffffff;
+    padding: 8px 12px;
+    border-radius: var(--office-radius) var(--office-radius) 2px var(--office-radius);
+    font-size: var(--font-size-base);
+    font-family: var(--font-family-ui);
+    line-height: var(--line-height-normal);
     width: fit-content;
     word-break: break-all;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+    box-shadow: var(--office-shadow-sm);
   }
 
   .user-bubble.bubble-auto {
@@ -589,7 +614,7 @@
   }
 
   .user-bubble.bubble-chat {
-    background: #0078d4;
+    background: var(--office-blue);
   }
 
   .ai-row {
@@ -597,15 +622,17 @@
   }
 
   .ai-text {
-    background: white;
-    padding: 8px 12px;
-    border-radius: 6px 6px 6px 1px;
-    font-size: 12px;
-    line-height: 1.5;
+    background: #ffffff;
+    padding: 9px 13px;
+    border-radius: var(--office-radius) var(--office-radius) var(--office-radius) 2px;
+    font-size: var(--font-size-base);
+    font-family: var(--font-family-ui);
+    line-height: var(--line-height-normal);
+    color: var(--office-text);
     border: 1px solid var(--office-border);
     max-width: 95%;
     white-space: pre-wrap;
     word-break: break-all;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    box-shadow: var(--office-shadow-sm);
   }
 </style>

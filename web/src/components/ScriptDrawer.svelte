@@ -43,7 +43,7 @@
           <span>我的脚本库</span>
           <span class="script-count">({scripts.length})</span>
         </div>
-        <button class="btn-icon" on:click={onClose}><X size={16} /></button>
+        <button class="btn-icon" on:click={onClose} aria-label="关闭"><X size={16} /></button>
       </div>
 
       <div class="drawer-subtitle">
@@ -90,7 +90,7 @@
                     <button
                       class="btn-icon btn-sm-icon"
                       on:click={() => (expandedIndex = expandedIndex === idx ? null : idx)}
-                      title="查看代码"
+                      title={expandedIndex === idx ? '收起源码' : '查看源码'}
                     >
                       {#if expandedIndex === idx}
                         <ChevronUp size={14} />
@@ -98,8 +98,8 @@
                         <ChevronDown size={14} />
                       {/if}
                     </button>
-                    <button class="btn-icon btn-sm-icon" on:click={() => handleDelete(s.fileName)} title="删除">
-                      <Trash2 size={14} color="#A80000" />
+                    <button class="btn-icon btn-sm-icon" on:click={() => handleDelete(s.fileName)} title="删除脚本">
+                      <Trash2 size={14} color="#C42B1C" />
                     </button>
                   </div>
                 </div>
@@ -125,20 +125,21 @@
     left: 0;
     width: 100vw;
     height: 100vh;
-    background: rgba(0, 0, 0, 0.35);
+    background: rgba(0, 0, 0, 0.38);
+    backdrop-filter: blur(2px);
     z-index: 90;
     display: flex;
     justify-content: flex-end;
   }
 
   .drawer-content {
-    width: 360px;
+    width: min(380px, 100vw);
     height: 100vh;
-    background: white;
-    box-shadow: -4px 0 16px rgba(0, 0, 0, 0.12);
+    background: #ffffff;
+    box-shadow: -4px 0 20px rgba(0, 0, 0, 0.15);
     display: flex;
     flex-direction: column;
-    animation: slideIn 0.2s ease-out;
+    animation: slideIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   @keyframes slideIn {
@@ -157,39 +158,45 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-shrink: 0;
   }
 
   .drawer-title {
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 13px;
+    font-size: var(--font-size-md);
     font-weight: 600;
+    color: var(--office-text);
   }
 
   .script-count {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--office-muted);
     font-weight: normal;
   }
 
   .drawer-subtitle {
     padding: 6px 14px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--office-muted);
-    background: #f8f8f8;
+    background: var(--office-card-subtle);
     border-bottom: 1px solid var(--office-border);
+    flex-shrink: 0;
   }
 
   .drawer-subtitle code {
-    font-family: Consolas, monospace;
+    font-family: var(--font-family-code);
     color: var(--office-text);
+    background: #edebe9;
+    padding: 1px 4px;
+    border-radius: var(--office-radius-xs);
   }
 
   .drawer-body {
     flex: 1;
     overflow-y: auto;
-    padding: 10px;
+    padding: 12px;
   }
 
   .empty-state {
@@ -200,12 +207,14 @@
     flex-direction: column;
     align-items: center;
     gap: 8px;
+    font-size: var(--font-size-sm);
   }
 
   .empty-hint {
-    font-size: 11px;
-    line-height: 1.4;
+    font-size: var(--font-size-xs);
+    line-height: var(--line-height-normal);
     max-width: 240px;
+    color: var(--office-dim);
   }
 
   .script-list {
@@ -216,18 +225,19 @@
 
   .script-item {
     border: 1px solid var(--office-border);
-    border-radius: 4px;
-    background: white;
+    border-radius: var(--office-radius);
+    background: #ffffff;
     overflow: hidden;
-    transition: border-color 0.15s;
+    transition: all 0.15s ease;
   }
 
   .script-item:hover {
-    border-color: #c8c6c4;
+    border-color: var(--office-border-strong);
+    box-shadow: var(--office-shadow-sm);
   }
 
   .item-header {
-    padding: 10px 12px;
+    padding: 9px 12px;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -240,28 +250,30 @@
   }
 
   .item-name {
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     color: var(--office-text);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    line-height: 1.3;
   }
 
   .item-meta {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--office-muted);
     display: flex;
     align-items: center;
     gap: 4px;
     margin-top: 2px;
+    line-height: 1.3;
   }
 
   .item-desc {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    max-width: 130px;
+    max-width: 140px;
   }
 
   .meta-dot {
@@ -277,21 +289,23 @@
 
   .btn-sm-icon {
     padding: 4px;
+    border-radius: var(--office-radius-xs);
   }
 
   .code-preview {
-    padding: 8px 10px;
+    padding: 8px 12px;
     background: #1e1e1e;
     color: #d4d4d4;
-    border-top: 1px solid #333;
-    max-height: 180px;
+    border-top: 1px solid #333333;
+    max-height: 200px;
     overflow-y: auto;
   }
 
   .code-preview pre {
-    font-family: Consolas, monospace;
-    font-size: 11px;
-    line-height: 1.4;
+    font-family: var(--font-family-code);
+    font-size: var(--font-size-xs);
+    line-height: var(--line-height-normal);
     white-space: pre-wrap;
+    word-break: break-all;
   }
 </style>

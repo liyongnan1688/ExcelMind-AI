@@ -1,18 +1,70 @@
 :root {
+  /* 品牌与主题色 (Microsoft Excel & Fluent 2) */
   --excel-green: #107c41;
   --excel-dark: #0b5a2f;
   --excel-light: #e7f3ec;
-  --office-bg: #f3f2f1;
+  --excel-light-border: #c2e2cc;
+  --excel-hover-bg: #0e6c38;
+
+  /* 背景色与面板层级 */
+  --office-bg: #f5f5f5;
   --office-card: #ffffff;
-  --office-border: #edebe9;
-  --office-border-subtle: #f3f2f1;
-  --office-text: #201f1e;
-  --office-muted: #605e5c;
-  --office-danger: #a80000;
-  --office-danger-light: #fdf3f2;
+  --office-card-subtle: #faf9f8;
+  --office-hover: #f0f0f0;
+  --office-active: #ebebeb;
+
+  /* 边框色系统 */
+  --office-border: #e0e0e0;
+  --office-border-subtle: #edebe9;
+  --office-border-strong: #c8c6c4;
+
+  /* 文本色与层次 (满足 4.5:1+ 对比度标准) */
+  --office-text: #242424;
+  --office-text-secondary: #424242;
+  --office-muted: #616161;
+  --office-dim: #8a8886;
+
+  /* 语义反馈色 */
   --office-blue: #0078d4;
-  --office-shadow: 0 1.6px 3.6px 0 rgba(0, 0, 0, 0.13), 0 0.3px 0.9px 0 rgba(0, 0, 0, 0.11);
-  --office-radius: 4px;
+  --office-blue-dark: #005a9e;
+  --office-blue-light: #eff6fc;
+  --office-blue-border: #c7e0f4;
+
+  --office-danger: #c42b1c;
+  --office-danger-dark: #a80000;
+  --office-danger-light: #fdf3f4;
+  --office-danger-border: #f8d0c0;
+
+  --office-amber: #b25900;
+  --office-amber-light: #fff8f0;
+  --office-amber-border: #fed9cc;
+
+  /* 微软 Fluent 2 标准字体家族体系 */
+  --font-family-ui: "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-family-code: "Cascadia Code", "Fira Code", Consolas, "Courier New", monospace;
+
+  /* 统一字号阶梯规范 */
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-base: 13px;
+  --font-size-md: 14px;
+  --font-size-lg: 16px;
+
+  /* 统一行高阶梯 */
+  --line-height-tight: 1.25;
+  --line-height-normal: 1.5;
+  --line-height-loose: 1.6;
+
+  /* 投影与圆角 */
+  --office-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --office-shadow: 0 2px 4px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --office-shadow-lg: 0 8px 20px rgba(0, 0, 0, 0.14), 0 2px 6px rgba(0, 0, 0, 0.08);
+
+  --office-radius-xs: 2px;
+  --office-radius-sm: 4px;
+  --office-radius: 6px;
+  --office-radius-lg: 8px;
+  --office-radius-full: 9999px;
 }
 
 * {
@@ -22,56 +74,71 @@
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-  font-size: 13px;
+  font-family: var(--font-family-ui);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-normal);
   color: var(--office-text);
   background-color: var(--office-bg);
   height: 100vh;
   width: 100vw;
   overflow: hidden;
   user-select: none;
+  -webkit-font-smoothing: antialiased;
 }
 
-/* 按钮通用风格 */
+/* 按钮通用风格 (Fluent 2 标准按钮) */
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 6px 12px;
-  font-size: 12px;
+  gap: 5px;
+  padding: 5px 12px;
+  font-family: inherit;
+  font-size: var(--font-size-sm);
   font-weight: 500;
-  border-radius: var(--office-radius);
+  line-height: 1.3;
+  border-radius: var(--office-radius-sm);
   border: 1px solid var(--office-border);
-  background: white;
+  background: #ffffff;
   color: var(--office-text);
   cursor: pointer;
   transition: all 0.15s ease;
+  white-space: nowrap;
 }
 
-.btn:hover {
-  background: #f8f8f8;
-  border-color: #c8c6c4;
+.btn:hover:not(:disabled) {
+  background: var(--office-hover);
+  border-color: var(--office-border-strong);
 }
 
-.btn:active {
-  background: #edebe9;
+.btn:active:not(:disabled) {
+  background: var(--office-active);
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .btn-primary {
   background: var(--excel-green);
   border-color: var(--excel-green);
-  color: white;
+  color: #ffffff;
 }
 
-.btn-primary:hover {
+.btn-primary:hover:not(:disabled) {
+  background: var(--excel-hover-bg);
+  border-color: var(--excel-hover-bg);
+}
+
+.btn-primary:active:not(:disabled) {
   background: var(--excel-dark);
   border-color: var(--excel-dark);
 }
 
 .btn-icon {
-  padding: 5px;
-  border-radius: var(--office-radius);
+  padding: 6px;
+  border-radius: var(--office-radius-sm);
   border: none;
   background: transparent;
   color: var(--office-muted);
@@ -79,55 +146,89 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
 }
 
-.btn-icon:hover {
-  background: rgba(0, 0, 0, 0.05);
+.btn-icon:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.06);
   color: var(--office-text);
+}
+
+.btn-icon:active:not(:disabled) {
+  background: rgba(0, 0, 0, 0.1);
 }
 
 .btn-danger {
   color: var(--office-danger);
-  border-color: #f3d6d8;
+  border-color: var(--office-danger-border);
   background: var(--office-danger-light);
 }
 
-.btn-danger:hover {
+.btn-danger:hover:not(:disabled) {
   background: #fde7e9;
+  border-color: #f7b2b7;
 }
 
-/* 徽标 */
+/* 徽标体系 */
 .badge {
   display: inline-flex;
   align-items: center;
-  padding: 2px 6px;
-  font-size: 11px;
-  border-radius: 3px;
+  gap: 3px;
+  padding: 1px 6px;
+  font-size: var(--font-size-xs);
+  border-radius: var(--office-radius-xs);
   font-weight: 500;
+  line-height: 1.4;
+  white-space: nowrap;
 }
 
 .badge-green {
   background: var(--excel-light);
-  color: var(--excel-green);
+  color: var(--excel-dark);
+  border: 1px solid var(--excel-light-border);
 }
 
 .badge-gray {
   background: #edebe9;
   color: var(--office-muted);
+  border: 1px solid #e1dfdd;
 }
 
-/* 滚动条 */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+.badge-amber {
+  background: var(--office-amber-light);
+  color: var(--office-amber);
+  border: 1px solid var(--office-amber-border);
 }
+
+.badge-red {
+  background: var(--office-danger-light);
+  color: var(--office-danger);
+  border: 1px solid var(--office-danger-border);
+}
+
+.badge-blue {
+  background: var(--office-blue-light);
+  color: var(--office-blue-dark);
+  border: 1px solid var(--office-blue-border);
+}
+
+/* 现代纤细平滑滚动条 */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
 ::-webkit-scrollbar-thumb {
-  background: #c8c6c4;
-  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: var(--office-radius-full);
+  transition: background 0.15s ease;
 }
+
 ::-webkit-scrollbar-thumb:hover {
-  background: #a19f9d;
+  background: rgba(0, 0, 0, 0.32);
 }

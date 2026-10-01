@@ -41,6 +41,7 @@
             <button
               class="preset-btn {config.provider === p.id ? 'active' : ''}"
               on:click={() => handleSelectPreset(p.id)}
+              type="button"
             >
               {p.name}
             </button>
@@ -88,7 +89,7 @@
           min="512"
           max="65536"
           bind:value={config.maxTokens}
-          placeholder="留空表示不限制（不发送此字段，采用服务端模型默认限制）"
+          placeholder="留空表示不限制（采用服务端默认限制）"
         />
         <span class="hint">留空时不发送 max_tokens 字段；用户填写则作为客户端输出上限发送</span>
       </div>
@@ -112,9 +113,9 @@
             min="512"
             max="16384"
             bind:value={config.thinkingBudget}
-            placeholder="留空表示不限制（不发送 budget_tokens，采用服务端默认）"
+            placeholder="留空表示不限制（采用服务端默认）"
           />
-          <span class="hint">留空时不发送 budget_tokens；用户填写时才发送具体预算数值，插件不预设硬编码</span>
+          <span class="hint">留空时不发送 budget_tokens；用户填写时才发送具体预算数值</span>
         </div>
       {/if}
     </div>
@@ -140,34 +141,52 @@
     left: 0;
     width: 100vw;
     height: 100vh;
-    background: rgba(0, 0, 0, 0.4);
+    background: rgba(0, 0, 0, 0.42);
+    backdrop-filter: blur(2px);
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 100;
+    padding: 14px;
   }
 
   .modal-content {
-    width: 380px;
-    background: white;
-    border-radius: 6px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+    width: min(420px, calc(100vw - 28px));
+    max-height: calc(100vh - 36px);
+    background: #ffffff;
+    border-radius: var(--office-radius-lg);
+    box-shadow: var(--office-shadow-lg);
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    border: 1px solid var(--office-border);
+    animation: modalPop 0.15s ease-out;
+  }
+
+  @keyframes modalPop {
+    from {
+      opacity: 0;
+      transform: scale(0.96);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
   }
 
   .modal-header {
-    height: 44px;
+    height: 46px;
     padding: 0 16px;
     display: flex;
     align-items: center;
     justify-content: space-between;
     border-bottom: 1px solid var(--office-border);
+    flex-shrink: 0;
+    background: #ffffff;
   }
 
   .modal-title {
-    font-size: 14px;
+    font-size: var(--font-size-md);
     font-weight: 600;
     color: var(--office-text);
   }
@@ -176,7 +195,9 @@
     padding: 16px;
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 13px;
+    overflow-y: auto;
+    flex: 1;
   }
 
   .form-group {
@@ -186,7 +207,7 @@
   }
 
   label, .form-label {
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     color: var(--office-text);
   }
@@ -194,22 +215,25 @@
   input, .select-input {
     height: 32px;
     padding: 0 10px;
-    font-size: 12px;
+    font-size: var(--font-size-sm);
+    font-family: inherit;
     border: 1px solid var(--office-border);
-    border-radius: 4px;
+    border-radius: var(--office-radius-sm);
     outline: none;
-    transition: border-color 0.15s;
-    background: #fff;
+    transition: all 0.15s ease;
+    background: #ffffff;
+    color: var(--office-text);
   }
 
-  input:focus {
+  input:focus, .select-input:focus {
     border-color: var(--excel-green);
-    box-shadow: 0 0 0 1px var(--excel-green);
+    box-shadow: 0 0 0 2px rgba(16, 124, 65, 0.15);
   }
 
   .hint {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--office-muted);
+    line-height: 1.35;
   }
 
   .preset-grid {
@@ -219,18 +243,21 @@
   }
 
   .preset-btn {
-    padding: 6px 8px;
-    font-size: 11px;
+    padding: 6px 10px;
+    font-size: var(--font-size-xs);
+    font-family: inherit;
     text-align: left;
-    background: #f8f8f8;
+    background: var(--office-card-subtle);
     border: 1px solid var(--office-border);
-    border-radius: 4px;
+    border-radius: var(--office-radius-sm);
     cursor: pointer;
-    transition: all 0.15s;
+    transition: all 0.15s ease;
+    color: var(--office-text-secondary);
   }
 
   .preset-btn:hover {
-    background: #edebe9;
+    background: var(--office-hover);
+    border-color: var(--office-border-strong);
   }
 
   .preset-btn.active {
@@ -241,16 +268,17 @@
   }
 
   .modal-footer {
-    padding: 12px 16px;
-    background: #faf9f8;
+    padding: 10px 16px;
+    background: var(--office-card-subtle);
     border-top: 1px solid var(--office-border);
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-shrink: 0;
   }
 
   .save-tip {
-    font-size: 12px;
+    font-size: var(--font-size-sm);
     color: var(--excel-green);
     display: flex;
     align-items: center;

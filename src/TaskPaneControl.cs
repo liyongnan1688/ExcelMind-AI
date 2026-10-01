@@ -11,6 +11,7 @@ namespace LeeExcel
     {
         private WebView2 _webView;
         private dynamic _app;
+        private string _pendingAction = null;
 
         public TaskPaneControl(dynamic excelApp)
         {
@@ -48,6 +49,18 @@ namespace LeeExcel
                 _webView.CoreWebView2.Settings.IsStatusBarEnabled = false;
 
                 _webView.CoreWebView2.WebMessageReceived += OnWebMessageReceived;
+                _webView.CoreWebView2.NavigationCompleted += (s, e) =>
+                {
+                    if (!string.IsNullOrEmpty(_pendingAction))
+                    {
+                        try
+                        {
+                            _webView.CoreWebView2.PostWebMessageAsString("{\"action\":\"" + _pendingAction + "\"}");
+                        }
+                        catch { }
+                        _pendingAction = null;
+                    }
+                };
 
                 // 1. 安全获取插件基础目录 (Excel-DNA 下 Assembly.Location 可能为空，优先使用 XllPath)
                 string baseDir = null;
@@ -190,6 +203,50 @@ namespace LeeExcel
             {
                 string info = NativeBridge.Dispatch("{\"action\":\"get_workbook_info\"}", _app);
                 _webView.CoreWebView2.PostWebMessageAsString(info);
+            }
+        }
+
+        public void OpenScripts()
+        {
+            if (this.InvokeRequired)
+            {
+                try
+                {
+                    this.BeginInvoke(new Action(OpenScripts));
+                }
+                catch { }
+                return;
+            }
+
+            if (_webView != null && _webView.CoreWebView2 != null)
+            {
+                _webView.CoreWebView2.PostWebMessageAsString("{\"action\":\"open_scripts\"}");
+            }
+            else
+            {
+                _pendingAction = "open_scripts";
+            }
+        }
+
+        public void OpenSettings()
+        {
+            if (this.InvokeRequired)
+            {
+                try
+                {
+                    this.BeginInvoke(new Action(OpenSettings));
+                }
+                catch { }
+                return;
+            }
+
+            if (_webView != null && _webView.CoreWebView2 != null)
+            {
+                _webView.CoreWebView2.PostWebMessageAsString("{\"action\":\"open_settings\"}");
+            }
+            else
+            {
+                _pendingAction = "open_settings";
             }
         }
     }

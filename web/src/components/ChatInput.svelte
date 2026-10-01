@@ -1,29 +1,11 @@
 <script lang="ts">
-  import { Sparkles, Zap, MessageSquare } from 'lucide-svelte';
+  import { Zap, MessageSquare } from 'lucide-svelte';
 
   export let disabled = false;
   export let onSend: (text: string, mode?: 'AUTOMATION' | 'CHAT') => void;
 
   let inputText = '';
   let currentMode: 'AUTOMATION' | 'CHAT' = 'AUTOMATION';
-
-  const AUTO_PROMPTS = [
-    '用_分裂D列的名称，不要覆盖后面的列，新增。',
-    '为首行表头添加浅绿底色并加粗居中',
-    '在数据末尾添加汇总行并计算求和公式',
-    '将选区所有负数单元格填充为浅红标注',
-    '自动调整所有列宽以适应文字长度',
-  ];
-
-  const CHAT_PROMPTS = [
-    'TEXTSPLIT函数怎么拆分文本？',
-    'VLOOKUP与XLOOKUP有哪些区别？',
-    '分列时如何避免覆盖右侧已有数据？',
-    '如何用INDEX+MATCH实现多条件查找？',
-    '解释数据透视表的计算原理与技巧',
-  ];
-
-  $: activePrompts = currentMode === 'AUTOMATION' ? AUTO_PROMPTS : CHAT_PROMPTS;
 
   function handleSubmit(overrideMode?: 'AUTOMATION' | 'CHAT') {
     if (!inputText.trim() || disabled) return;
@@ -46,11 +28,6 @@
   function setMode(mode: 'AUTOMATION' | 'CHAT') {
     currentMode = mode;
   }
-
-  function handleSelectQuickPrompt(p: string) {
-    if (disabled) return;
-    inputText = p;
-  }
 </script>
 
 <div class="input-container">
@@ -64,6 +41,7 @@
         type="button"
         role="tab"
         aria-selected={currentMode === 'AUTOMATION'}
+        title="操作模式：生成代码并执行，直接修改表格"
       >
         <Zap size={13} class="mode-icon" />
         <span class="mode-title">操作</span>
@@ -75,6 +53,7 @@
         type="button"
         role="tab"
         aria-selected={currentMode === 'CHAT'}
+        title="对话模式：纯文本咨询指导，不改动表格"
       >
         <MessageSquare size={13} class="mode-icon" />
         <span class="mode-title">对话</span>
@@ -83,31 +62,14 @@
 
     <div class="mode-tip-text">
       {#if currentMode === 'AUTOMATION'}
-        <span class="tip-badge auto-badge">⚡ 操作模式：生成代码并执行，直接修改表格</span>
+        <span class="tip-badge auto-badge">⚡ 操作模式：生成代码直接修改表格</span>
       {:else}
-        <span class="tip-badge chat-badge">💬 对话模式：纯文本咨询指导，不改动表格</span>
+        <span class="tip-badge chat-badge">💬 对话模式：纯文本咨询，不改动表格</span>
       {/if}
     </div>
   </div>
 
-  <!-- 快捷提示气泡 -->
-  <div class="quick-prompts">
-    <div class="prompts-scroll">
-      {#each activePrompts as p}
-        <button
-          class="prompt-chip {currentMode === 'AUTOMATION' ? 'chip-auto' : 'chip-chat'}"
-          on:click={() => handleSelectQuickPrompt(p)}
-          disabled={disabled}
-          type="button"
-        >
-          <Sparkles size={11} color={currentMode === 'AUTOMATION' ? '#107C41' : '#0078D4'} />
-          <span>{p}</span>
-        </button>
-      {/each}
-    </div>
-  </div>
-
-  <!-- 输入主框 -->
+  <!-- 输入主框 (加高输入区域，提供更充足的书写空间) -->
   <div class="input-box {currentMode === 'AUTOMATION' ? 'focus-auto' : 'focus-chat'}">
     <textarea
       placeholder={currentMode === 'AUTOMATION'
@@ -116,12 +78,12 @@
       bind:value={inputText}
       on:keydown={handleKeyDown}
       disabled={disabled}
-      rows="2"
+      rows="3"
     ></textarea>
 
     <div class="input-actions">
       <div class="shortcut-tip">
-        <span class="key-pill">Enter</span> 发送 ({currentMode === 'AUTOMATION' ? '操作' : '对话'})
+        <span class="key-pill">Enter</span> 发送
         <span class="key-sep">/</span>
         <span class="key-pill">Shift+Enter</span> 换行
       </div>
@@ -158,11 +120,12 @@
   .input-container {
     background: #ffffff;
     border-top: 1px solid var(--office-border);
-    padding: 8px 12px;
+    padding: 10px 12px;
     display: flex;
     flex-direction: column;
     gap: 8px;
     box-shadow: 0 -1px 3px rgba(0, 0, 0, 0.03);
+    flex-shrink: 0;
   }
 
   /* 顶部模式切换栏 */
@@ -171,15 +134,17 @@
     align-items: center;
     justify-content: space-between;
     gap: 8px;
+    min-height: 26px;
   }
 
   .mode-segmented {
     display: inline-flex;
     background: #f0f2f5;
-    border: 1px solid #e1dfdd;
-    border-radius: 6px;
+    border: 1px solid var(--office-border);
+    border-radius: var(--office-radius);
     padding: 2px;
     gap: 2px;
+    flex-shrink: 0;
   }
 
   .mode-tab {
@@ -187,14 +152,15 @@
     align-items: center;
     gap: 4px;
     padding: 3px 10px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     border: none;
-    border-radius: 4px;
+    border-radius: var(--office-radius-sm);
     background: transparent;
     color: var(--office-muted);
     cursor: pointer;
     transition: all 0.15s ease;
+    line-height: var(--line-height-tight);
   }
 
   .mode-tab:hover:not(:disabled) {
@@ -205,14 +171,14 @@
     background: var(--excel-green);
     color: #ffffff;
     font-weight: 600;
-    box-shadow: 0 1px 3px rgba(16, 124, 65, 0.3);
+    box-shadow: 0 1px 3px rgba(16, 124, 65, 0.25);
   }
 
   .mode-tab.active-chat {
-    background: #0078d4;
+    background: var(--office-blue);
     color: #ffffff;
     font-weight: 600;
-    box-shadow: 0 1px 3px rgba(0, 120, 212, 0.3);
+    box-shadow: 0 1px 3px rgba(0, 120, 212, 0.25);
   }
 
   .mode-tab:disabled {
@@ -221,84 +187,42 @@
   }
 
   .mode-tip-text {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    min-width: 0;
   }
 
   .tip-badge {
     display: inline-flex;
     align-items: center;
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-size: 10.5px;
+    padding: 2px 7px;
+    border-radius: var(--office-radius-xs);
+    font-size: var(--font-size-xs);
+    line-height: var(--line-height-tight);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .tip-badge.auto-badge {
-    background: #e7f3ec;
-    color: #0b5a2f;
-    border: 1px solid #c2e2cc;
+    background: var(--excel-light);
+    color: var(--excel-dark);
+    border: 1px solid var(--excel-light-border);
   }
 
   .tip-badge.chat-badge {
-    background: #e8f3fb;
-    color: #004e8c;
-    border: 1px solid #c7e0f4;
+    background: var(--office-blue-light);
+    color: var(--office-blue-dark);
+    border: 1px solid var(--office-blue-border);
   }
 
-  /* 快捷提示 */
-  .quick-prompts {
-    overflow-x: auto;
-    white-space: nowrap;
-    scrollbar-width: none;
-  }
-
-  .quick-prompts::-webkit-scrollbar {
-    display: none;
-  }
-
-  .prompts-scroll {
-    display: inline-flex;
-    gap: 6px;
-  }
-
-  .prompt-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 3px 8px;
-    background: #f8f8f8;
-    border: 1px solid var(--office-border);
-    border-radius: 12px;
-    font-size: 11px;
-    color: var(--office-text);
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-
-  .prompt-chip.chip-auto:hover:not(:disabled) {
-    background: var(--excel-light);
-    border-color: #c2e2cc;
-    color: var(--excel-green);
-  }
-
-  .prompt-chip.chip-chat:hover:not(:disabled) {
-    background: #e8f3fb;
-    border-color: #c7e0f4;
-    color: #0078d4;
-  }
-
-  .prompt-chip:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
-  /* 输入框 */
+  /* 输入框 (加高设计与舒适边距) */
   .input-box {
     border: 1px solid var(--office-border);
-    border-radius: 6px;
-    background: white;
+    border-radius: var(--office-radius);
+    background: #ffffff;
     display: flex;
     flex-direction: column;
     transition: all 0.15s ease;
@@ -306,12 +230,12 @@
 
   .input-box.focus-auto:focus-within {
     border-color: var(--excel-green);
-    box-shadow: 0 0 0 1px var(--excel-green);
+    box-shadow: 0 0 0 2px rgba(16, 124, 65, 0.15);
   }
 
   .input-box.focus-chat:focus-within {
-    border-color: #0078d4;
-    box-shadow: 0 0 0 1px #0078d4;
+    border-color: var(--office-blue);
+    box-shadow: 0 0 0 2px rgba(0, 120, 212, 0.15);
   }
 
   textarea {
@@ -319,57 +243,67 @@
     resize: none;
     border: none;
     outline: none;
-    padding: 8px;
-    font-size: 12px;
-    font-family: inherit;
-    line-height: 1.45;
+    padding: 10px 12px;
+    font-size: var(--font-size-base);
+    font-family: var(--font-family-ui);
+    line-height: var(--line-height-normal);
     color: var(--office-text);
+    min-height: 82px;
+    max-height: 180px;
+    background: transparent;
+    overflow-y: auto;
   }
 
   textarea:disabled {
     background: #faf9f8;
+    color: var(--office-muted);
   }
 
   /* 底部操作行 */
   .input-actions {
-    padding: 5px 8px 5px;
+    padding: 6px 10px;
     display: flex;
     align-items: center;
     justify-content: space-between;
     background: #faf9f8;
-    border-top: 1px solid #f3f2f1;
-    border-bottom-left-radius: 6px;
-    border-bottom-right-radius: 6px;
+    border-top: 1px solid var(--office-border-subtle);
+    border-bottom-left-radius: calc(var(--office-radius) - 1px);
+    border-bottom-right-radius: calc(var(--office-radius) - 1px);
     gap: 8px;
   }
 
   .shortcut-tip {
-    font-size: 10.5px;
+    font-size: var(--font-size-xs);
     color: var(--office-muted);
     display: flex;
     align-items: center;
     gap: 3px;
+    white-space: nowrap;
+    overflow: hidden;
   }
 
   .key-pill {
     display: inline-block;
     padding: 1px 4px;
     background: #edebe9;
-    border-radius: 3px;
-    font-size: 9.5px;
+    border-radius: var(--office-radius-xs);
+    font-size: 10px;
     font-weight: 500;
     color: #323130;
+    line-height: 1.2;
+    border: 1px solid #e1dfdd;
   }
 
   .key-sep {
     color: #c8c6c4;
-    margin: 0 2px;
+    margin: 0 1px;
   }
 
   .action-buttons-group {
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    flex-shrink: 0;
   }
 
   .mode-action-btn {
@@ -377,12 +311,14 @@
     align-items: center;
     justify-content: center;
     gap: 4px;
-    padding: 4px 10px;
-    font-size: 11.5px;
+    padding: 4px 12px;
+    font-size: var(--font-size-sm);
     font-weight: 500;
-    border-radius: 4px;
+    border-radius: var(--office-radius-sm);
     cursor: pointer;
     transition: all 0.15s ease;
+    line-height: 1.3;
+    white-space: nowrap;
   }
 
   .mode-action-btn:disabled {
@@ -399,14 +335,14 @@
   }
 
   .primary-auto:hover:not(:disabled) {
-    background: var(--excel-dark);
-    border-color: var(--excel-dark);
+    background: var(--excel-hover-bg);
+    border-color: var(--excel-hover-bg);
   }
 
   /* 操作模式次按钮 (当前是对话时) */
   .secondary-auto {
     background: #ffffff;
-    border: 1px solid #c2e2cc;
+    border: 1px solid var(--excel-light-border);
     color: var(--excel-green);
   }
 
@@ -416,25 +352,25 @@
 
   /* 对话模式主按钮 */
   .primary-chat {
-    background: #0078d4;
-    border: 1px solid #0078d4;
+    background: var(--office-blue);
+    border: 1px solid var(--office-blue);
     color: #ffffff;
     box-shadow: 0 1px 2px rgba(0, 120, 212, 0.2);
   }
 
   .primary-chat:hover:not(:disabled) {
-    background: #005a9e;
-    border-color: #005a9e;
+    background: var(--office-blue-dark);
+    border-color: var(--office-blue-dark);
   }
 
   /* 对话模式次按钮 (当前是操作时) */
   .secondary-chat {
     background: #ffffff;
-    border: 1px solid #c7e0f4;
-    color: #0078d4;
+    border: 1px solid var(--office-blue-border);
+    color: var(--office-blue);
   }
 
   .secondary-chat:hover:not(:disabled) {
-    background: #e8f3fb;
+    background: var(--office-blue-light);
   }
 </style>

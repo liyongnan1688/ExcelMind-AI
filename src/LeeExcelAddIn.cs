@@ -15,7 +15,9 @@ namespace LeeExcel
     <tabs>
       <tab id='LeeExcelTab' label='AI 助手'>
         <group id='LeeExcelGroup' label='智能操作'>
-          <button id='btnTogglePane' label='打开 AI 任务窗格' size='large' onAction='OnTogglePane' imageMso='FileNewBlankDocument' />
+          <button id='btnTogglePane' label='打开 AI 任务窗格' size='large' onAction='OnTogglePane' imageMso='FunctionWizard' />
+          <button id='btnOpenScripts' label='自动化脚本' size='large' onAction='OnOpenScripts' imageMso='VisualBasic' />
+          <button id='btnOpenSettings' label='API配置' size='large' onAction='OnOpenSettings' imageMso='ServerConnection' />
         </group>
       </tab>
     </tabs>
@@ -26,6 +28,16 @@ namespace LeeExcel
         public void OnTogglePane(IRibbonControl control)
         {
             LeeExcelAddIn.ToggleTaskPane();
+        }
+
+        public void OnOpenScripts(IRibbonControl control)
+        {
+            LeeExcelAddIn.OpenScripts();
+        }
+
+        public void OnOpenSettings(IRibbonControl control)
+        {
+            LeeExcelAddIn.OpenSettings();
         }
     }
 
@@ -43,7 +55,7 @@ namespace LeeExcel
 
                 _customTaskPane = CustomTaskPaneFactory.CreateCustomTaskPane(_taskPaneControl, "Lee-Excel AI 助手");
                 _customTaskPane.DockPosition = MsoCTPDockPosition.msoCTPDockPositionRight;
-                _customTaskPane.Width = 430;
+                _customTaskPane.Width = 480;
                 _customTaskPane.Visible = true;
 
                 // 监听工作簿切换、新建、打开
@@ -58,6 +70,8 @@ namespace LeeExcel
                     try { app.WorkbookOpen += notify; } catch { }
                     try { app.NewWorkbook += notify; } catch { }
                     try { app.WindowActivate += new Action<object, object>((wb, wn) => notify(wb)); } catch { }
+                    try { app.WorkbookAfterSave += new Action<object, bool>((wb, success) => notify(wb)); } catch { }
+                    try { app.SheetActivate += new Action<object>((sh) => notify(null)); } catch { }
                 }
                 catch { }
             }
@@ -77,6 +91,18 @@ namespace LeeExcel
             }
         }
 
+        public static void EnsureTaskPaneVisible()
+        {
+            if (_customTaskPane != null)
+            {
+                if (!_customTaskPane.Visible)
+                {
+                    _customTaskPane.Visible = true;
+                }
+                if (_taskPaneControl != null) _taskPaneControl.NotifyWorkbookChanged();
+            }
+        }
+
         public static void ToggleTaskPane()
         {
             if (_customTaskPane != null)
@@ -86,6 +112,24 @@ namespace LeeExcel
                 {
                     if (_taskPaneControl != null) _taskPaneControl.NotifyWorkbookChanged();
                 }
+            }
+        }
+
+        public static void OpenScripts()
+        {
+            EnsureTaskPaneVisible();
+            if (_taskPaneControl != null)
+            {
+                _taskPaneControl.OpenScripts();
+            }
+        }
+
+        public static void OpenSettings()
+        {
+            EnsureTaskPaneVisible();
+            if (_taskPaneControl != null)
+            {
+                _taskPaneControl.OpenSettings();
             }
         }
     }
