@@ -35,8 +35,8 @@
 </script>
 
 {#if isOpen}
-  <div class="drawer-backdrop" on:click|self={onClose}>
-    <div class="drawer-content">
+  <div class="drawer-backdrop" on:click|self={onClose} on:keydown={(e) => e.key === 'Escape' && onClose()} role="presentation">
+    <div class="drawer-content" role="dialog" aria-modal="true" aria-label="我的脚本库">
       <div class="drawer-header">
         <div class="drawer-title">
           <Code2 size={16} color="#107C41" />

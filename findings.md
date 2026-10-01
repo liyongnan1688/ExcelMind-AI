@@ -1,25 +1,21 @@
 # 技术调研与关键发现 (Findings)
 
-## 1. 用户开发环境现状
-- **Node.js**: `v24.21.0`
-- **pnpm**: `12.6.0`
-- **Python**: `3.14.6`
-- **.NET SDK**: 暂未安装现代 .NET SDK，但系统包含 `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe`，且系统支持 `winget`。
-- **Excel 版本**: Office 16.0 (Excel 2016 / 2019 / 2021 / Office 365)
-- **宏安全注册表状态**:
-  - `HKCU:\Software\Microsoft\Office\16.0\Excel\Security\AccessVBOM = 1`（已允许对 VBA 工程对象模型的编程访问！这是最关键的绿灯）。
+## 1. 质量下降根因溯源
+- **意图改写与偏置诱导**：
+  原 `llm.ts` 中直接在 System Prompt 写死 `ws.Range("D1:L9").Interior.Color = ...`、`严禁逐格循环涂色`、`限制35行` 等负向惩罚词。当用户要求阶梯式算式乘法表时，模型为规避 35 行限制并直接套用 D1:L9 样例，退化为了最简单的 9×9 纯数字乘积矩阵并放弃了精细排版。
+- **对话与执行通道混淆**：
+  原代码缺乏通道路由器，所有输入均以“生成 VBA”为前提；甚至在 `llm.ts` 中使用 `raw.match(/(?:Public\s+|Private\s+)?Sub\s+/)`，导致用户询问“你是谁”或“解释刚才代码”时，模型在正文中提及 Sub 就会被误当作宏强行注入执行，导致报错打断。
+- **窗口切换造成的串改隐患**：
+  原方案简单依赖 `ActiveWorkbook`，而在 Windows 桌面操作中，用户点击其他窗口或后台切换时，`ActiveWorkbook` 随时改变，导致宏可能修改非目标工作簿。
+- **虚假完成与零核验**：
+  原 `VbaRunner` 只要 COM `app.Run` 未抛出异常，就直接汇报“执行成功：已按指令完成当前工作簿操作”，完全没有对实际生成的表格形态、起笔位置和内容进行读回与核对。
 
-## 2. 参考项目 (hewliyang/office-agents) 审计发现
-- **许可证**: MIT License。
-- **UI & 架构**: Svelte 5 + TailwindCSS + Vite，属于 Office.js Web Add-in。
-- **模型配置**: `packages/sdk/src/provider-config.ts` 定义了高度成熟的国内主流厂商与自定义 API 配置，完全可直接复用。
-- **折叠交互**: `packages/core/src/chat/compact-execution-block.svelte` 原生支持默认折叠状态条、展开查看详情与日志的交互模式。
-- **Excel 操作真实机制**:
-  - 原项目完全依赖 Office.js 网页沙箱 API（`set_cell_range`, `eval_officejs` 等），根本没有真正执行 VBA 的能力。
-  - 其所谓的 `vba-generator.ts` 仅是将单元格写操作反向拼装为静态字符串供人工复制，并明确注明“禁止假装执行 VBA”。
-  - 其所谓的撤销依赖 IndexedDB 记录单元格差异，无法用于还原 VBA 的全局副作用。
-
-## 3. 底层 VBA 动态执行与工作簿安全
-- **VBIDE 注入机制**: 通过 `wb.VBProject.VBComponents.Add(vbext_ct_StdModule)` 注入字符串，调用 `excelApp.Run` 执行，随后调用 `VBComponents.Remove` 瞬时清理。
-- **.xlsx 纯净策略**: 模块执行完立即销毁，目标 `.xlsx` 永远不保存 VB 项目，彻底杜绝另存为 `.xlsm` 的弹窗骚扰。
-- **物理快照备份与恢复**: 执行前使用 `wb.SaveCopyAs(path)` 毫秒级生成二进制全文件快照；恢复时 `wb.Close(false)` 释放文件锁，覆盖后重新打开。
+## 2. 系统性架构修复方案
+- **双通道架构 (CHAT vs AUTOMATION)**：
+  通过精确意图判定器，问答、代码释义走 CHAT（纯文本对话，零 VBA、零快照）；明确修改操作走 AUTOMATION；意图不明则主动发起澄清。
+- **显式目标工作簿绑定**：
+  任务发起时刻锁定 `targetWorkbookFullName` / `targetWorkbookName`，C# 宿主查找指定 Workbook 对象并对其执行备份；动态宏注入时将 `ThisWorkbook`/`ActiveWorkbook` 显式替换为 `Application.Workbooks("...")`，彻底阻断切换活动窗口导致的串改。
+- **写后读回机制 (Post-execution Readback)**：
+  宏运行后，C# 宿主直接读取目标表格的 `UsedRange`、起笔坐标、单元格抽样文本、公式状态、边框及背景色，返回给前端与用户诉求比对，客观呈现“宏已运行，效果待确认”。
+- **脱敏审计与极简体验**：
+  默认界面保持折叠与一句话简报；审计选项卡提供脱敏参数、规整记录与读回摘要，支持问题精准回溯。

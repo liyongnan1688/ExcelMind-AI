@@ -1,17 +1,24 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
   import Header from './components/Header.svelte';
   import SettingsModal from './components/SettingsModal.svelte';
   import ScriptDrawer from './components/ScriptDrawer.svelte';
   import ExecutionCard from './components/ExecutionCard.svelte';
   import ChatInput from './components/ChatInput.svelte';
+  import { Zap, MessageSquare } from 'lucide-svelte';
   import { bridge, type WorkbookInfo, type ScriptItem, type VbaExecutionData } from './services/bridge';
-  import { callLlmStream, extractVbaCode, parseStreamOutput, hasValidVbaTask } from './services/llm';
+  import {
+    callLlmStream,
+    extractVbaCode,
+    parseStreamOutput,
+    verifyExecutionResult,
+  } from './services/llm';
 
   interface ChatMessage {
     id: string;
     role: 'user' | 'assistant';
     content: string; // 纯文本内容/简述
+    mode?: 'AUTOMATION' | 'CHAT'; // 模式标识
     prompt?: string;
     streamVbaCode?: string; // 流式生成的代码
     execution?: VbaExecutionData | null;
@@ -27,17 +34,20 @@
   let showScripts = false;
   let scriptDrawerRef: any;
 
-  onMount(async () => {
+  let pollTimer: any = null;
+  let unbindWorkbookChange: (() => void) | null = null;
+
+  onMount(() => {
     // 监听 C# 宿主推送的工作簿激活变更
-    bridge.onWorkbookChange((info) => {
+    unbindWorkbookChange = bridge.onWorkbookChange((info) => {
       workbook = info;
     });
 
     // 初次获取工作簿信息
-    await refreshWorkbookInfo();
+    refreshWorkbookInfo();
 
     // 定时轮询，自动感知工作簿新建/打开/切换
-    const timer = setInterval(() => {
+    pollTimer = setInterval(() => {
       refreshWorkbookInfo();
     }, 2500);
 
@@ -46,15 +56,39 @@
       {
         id: 'msg_welcome',
         role: 'assistant',
-        content: '你好！我是你的 Excel AI 助手。已自动连接当前活动工作簿。\n你可以用自然语言向我下达任何数据分析、表格整理或自动化操作指令。每次运行前会自动保存整本物理快照，随时支持一键恢复。',
+        content:
+          '你好！我是你的 Excel AI 助手。已自动绑定当前目标工作簿。\n你可以用自然语言下达表格操作、数据汇总或进行 Excel 技巧咨询。普通问答直接解答；操作指令在每次运行前自动保存整本物理副本，支持一键回滚。',
       },
     ];
 
-    return () => clearInterval(timer);
+    if (typeof window !== 'undefined') {
+      (window as any).__addTestExecutionMessage = (promptText: string, executionData: any) => {
+        messages = [
+          ...messages,
+          {
+            id: 'msg_test_' + Date.now(),
+            role: 'assistant',
+            content: executionData?.summary || '自动化执行结果',
+            prompt: promptText,
+            streamVbaCode: '',
+            isExecuting: false,
+            execution: executionData,
+          },
+        ];
+      };
+    }
+  });
+
+  onDestroy(() => {
+    if (pollTimer) clearInterval(pollTimer);
+    if (unbindWorkbookChange) unbindWorkbookChange();
   });
 
   async function refreshWorkbookInfo() {
-    const res = await bridge.send<WorkbookInfo>('get_workbook_info');
+    const res = await bridge.send<WorkbookInfo>('get_workbook_info', {
+      targetWorkbookName: workbook?.name || '',
+      targetWorkbookFullName: workbook?.fullName || '',
+    });
     if (res.ok && res.data) {
       workbook = res.data;
     }
@@ -67,30 +101,54 @@
     }
   }
 
-  // 核心智能交互与全自动执行闭环
-  async function handleSend(text: string) {
+  // 核心交互：用户显式入口驱动、请求生命周期固定、通道响应分流、目标锁定与写后核验
+  async function handleSend(text: string, userSelectedMode?: 'AUTOMATION' | 'CHAT') {
     if (!text.trim() || isProcessing) return;
 
     isProcessing = true;
 
-    // 1. 添加用户消息
-    const userMsgId = 'user_' + Date.now();
+    // 唯一模式来源：用户显式入口，严禁根据文本内容猜测意图
+    const requestId = 'req_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+    const requestMode: 'AUTOMATION' | 'CHAT' = userSelectedMode || 'AUTOMATION';
+    const userMsgId = 'user_' + requestId;
+    const assistantMsgId = 'ai_' + requestId;
+
+    // 发送瞬间锁定当前目标工作簿上下文
+    const targetWbName = workbook?.name || '';
+    const targetWbFullName = workbook?.fullName || '';
+    const sheets = workbook?.sheets || [];
+    const activeSheet = workbook?.activeSheetName || '';
+    const usedRange = workbook?.usedRangeAddress || '';
+
+    const currentRequest = {
+      requestId,
+      requestMode,
+      userMsgId,
+      assistantMsgId,
+      targetWbName,
+      targetWbFullName,
+      sheets,
+      activeSheet,
+      usedRange,
+    };
+
+    // 1. 添加用户消息（显示发送瞬间锁定的模式标签）
     messages = [
       ...messages,
       {
-        id: userMsgId,
+        id: currentRequest.userMsgId,
         role: 'user',
         content: text,
+        mode: currentRequest.requestMode,
       },
     ];
     await scrollToBottom();
 
-    // 2. 占位助理消息
-    const assistantMsgId = 'ai_' + Date.now();
+    // 2. 添加助手占位消息
     const assistantMsg: ChatMessage = {
-      id: assistantMsgId,
+      id: currentRequest.assistantMsgId,
       role: 'assistant',
-      content: '正在思考...',
+      content: currentRequest.requestMode === 'CHAT' ? '正在思考解答...' : '正在准备自动化方案...',
       prompt: text,
       streamVbaCode: '',
       isExecuting: true,
@@ -100,27 +158,30 @@
     await scrollToBottom();
 
     try {
-      // 3. 构建历史对话上下文 (排除当前消息)
       const chatHistory = messages
-        .filter((m) => m.id !== assistantMsgId && m.id !== userMsgId && m.id !== 'msg_welcome')
+        .filter((m) => m.id !== currentRequest.assistantMsgId && m.id !== currentRequest.userMsgId && m.id !== 'msg_welcome')
         .map((m) => ({ role: m.role, content: m.content }));
 
-      const wbName = workbook?.name || '';
-      const sheets = workbook?.sheets || [];
-
-      // 4. 调用大模型流式生成
-      const rawResponse = await callLlmStream(
+      // 调用大模型流式生成 (严格使用本次请求锁定的 requestMode)
+      const streamRes = await callLlmStream(
         text,
-        wbName,
-        sheets,
+        currentRequest.targetWbName,
+        currentRequest.sheets,
+        currentRequest.activeSheet,
+        currentRequest.usedRange,
+        currentRequest.requestMode,
         (partialText) => {
-          const parsed = parseStreamOutput(partialText);
-          if (parsed.hasCode) {
-            // 操作指令：气泡只展示一两句简报，代码流入折叠卡片
-            assistantMsg.content = parsed.explanation || '正在执行自动化指令...';
-            assistantMsg.streamVbaCode = parsed.vbaCode;
+          if (currentRequest.requestMode === 'AUTOMATION') {
+            const parsed = parseStreamOutput(partialText);
+            if (parsed.hasCode) {
+              assistantMsg.content = parsed.explanation || '正在执行自动化指令...';
+              assistantMsg.streamVbaCode = parsed.vbaCode;
+            } else {
+              assistantMsg.content = partialText;
+              assistantMsg.streamVbaCode = '';
+            }
           } else {
-            // 普通对话/闲聊/问答：气泡直接流式展示自然语言文本
+            // CHAT 通道：流式显示纯文本
             assistantMsg.content = partialText;
             assistantMsg.streamVbaCode = '';
           }
@@ -129,43 +190,174 @@
         chatHistory
       );
 
-      // 5. 严格验证是否包含真实合法的 VBA 任务 (必须同时包含 Sub 和 End Sub)
-      const vbaCode = extractVbaCode(rawResponse);
-      const isTask = hasValidVbaTask(vbaCode);
+      let rawResponse = streamRes.fullText;
+      let finishReason = streamRes.finishReason;
+      let currentApiAudit = streamRes.audit;
 
-      if (isTask) {
-        const finalParsed = parseStreamOutput(rawResponse);
-        assistantMsg.content = finalParsed.explanation || '已生成操作方案并执行';
-        assistantMsg.streamVbaCode = vbaCode;
-
-        // 6. 调用 C# 原生宿主执行 (自动快照 + 注入运行 + 瞬时清理)
-        const execRes = await bridge.send<VbaExecutionData>('execute_vba', {
-          code: vbaCode,
-          prompt: text,
-        });
-
-        if (execRes.ok && execRes.data) {
-          assistantMsg.execution = execRes.data;
-        } else {
-          assistantMsg.execution = {
-            summary: execRes.error || '执行遇到阻断',
-            error: execRes.error || 'COM 调用失败',
-            elapsedMs: 0,
-            vbaCode,
-          };
-        }
-
-        // 刷新工作簿与快照时间轴
-        await refreshWorkbookInfo();
-      } else {
-        // 纯文本回复 (问答/咨询/闲聊/功能解释)
-        // 绝对不调用 execute_vba，绝对不挂起任何报错卡片
-        assistantMsg.content = rawResponse.replace(/```(?:vba|vb)?[\s\S]*?```/gi, '').trim();
+      // 四、处理 CHAT 通道：完整展示模型回答，绝对不进入自动化执行链
+      if (currentRequest.requestMode === 'CHAT') {
+        assistantMsg.content = rawResponse;
         assistantMsg.streamVbaCode = '';
         assistantMsg.execution = null;
+        assistantMsg.isExecuting = false;
+        messages = [...messages];
+        return;
       }
+
+      // 五、处理 AUTOMATION 通道：客观区分未取得代码、代码无效与宏实际失败
+      let extracted = extractVbaCode(rawResponse, finishReason);
+
+      // 分支 1: 模型返回普通文字，未提供 VBA（如输入“你是”返回了自我介绍）
+      if (extracted.status === 'no_code') {
+        assistantMsg.content = rawResponse + '\n\n（本次未执行：模型未返回可执行 VBA）';
+        assistantMsg.streamVbaCode = '';
+        assistantMsg.execution = null; // 绝不创建宏执行失败卡！
+        assistantMsg.isExecuting = false;
+        messages = [...messages];
+        return;
+      }
+
+      // 分支 2: 模型返回疑似 VBA，但输出被截断、未闭合或结构缺失（代码未执行）
+      if (extracted.status !== 'valid' || !extracted.code) {
+        const errorReason = extracted.error || '代码不完整或结构缺失，已安全停止执行';
+        const parsed = parseStreamOutput(rawResponse);
+        assistantMsg.content = parsed.explanation
+          ? `${parsed.explanation}\n\n（代码未执行：${errorReason}）`
+          : `（代码未执行：${errorReason}）`;
+        assistantMsg.streamVbaCode = extracted.code || '';
+        assistantMsg.execution = {
+          summary: `代码未执行：${errorReason}`,
+          error: errorReason,
+          elapsedMs: 0,
+          vbaCode: extracted.code || '',
+          originalVbaCode: extracted.code || '',
+          executedVbaCode: '',
+          precheckStatus: extracted.status === 'scope_risk' ? 'scope_risk_intercepted' : 'failed',
+          executionPhase: 'intercepted_before_run',
+          isSourceIdentical: true,
+          apiAudit: currentApiAudit,
+        };
+        assistantMsg.isExecuting = false;
+        messages = [...messages];
+        return;
+      }
+
+      // 分支 3: 提取成功且结构完整：才进入执行链路 (显式绑定目标工作簿)
+      let parsed = parseStreamOutput(rawResponse);
+      assistantMsg.streamVbaCode = extracted.code;
+
+      let execRes = await bridge.send<VbaExecutionData>('execute_vba', {
+        code: extracted.code,
+        prompt: text,
+        targetWorkbookName: currentRequest.targetWbName,
+        targetWorkbookFullName: currentRequest.targetWbFullName,
+        rawModelResponse: rawResponse,
+      });
+
+      let wasRepaired = false;
+
+      // 智能重新生成：如果初次代码在宿主编译未通过，大模型结合真实拦截原因重新生成全新代码
+      if (!execRes.ok && execRes.data?.precheckStatus === 'failed') {
+        assistantMsg.content = '初次代码在 Excel VBE 编译预检未通过，正在请求 AI 分析真实原因并重新生成...';
+        messages = [...messages];
+        await scrollToBottom();
+
+        const repairPrompt = `此前针对用户指令【${text}】生成的代码在 Excel VBE 静态预编译中未通过，具体诊断信息：【${execRes.data?.error || execRes.error || '存在语法或未定义引用错误'}】。
+请结合上述真实报错原因重新生成完整无误、可执行的纯 VBA 源码：
+1. 主执行过程建议命名为 Sub Main(targetWb As Workbook) 或 Sub Main()；
+2. 确保所有控制结构严格配对闭合（如 For 与 Next、If 与 End If、With 与 End With）；
+3. 直接输出纯 VBA 源码，不要输出多余解释或伪代码。`;
+
+        try {
+          const repairedStreamRes = await callLlmStream(
+            repairPrompt,
+            currentRequest.targetWbName,
+            currentRequest.sheets,
+            currentRequest.activeSheet,
+            currentRequest.usedRange,
+            'AUTOMATION',
+            (partialText) => {
+              const p = parseStreamOutput(partialText);
+              if (p.hasCode) {
+                assistantMsg.content = '正在重新编译并执行新版代码...';
+                assistantMsg.streamVbaCode = p.vbaCode;
+              }
+              messages = [...messages];
+            },
+            []
+          );
+
+          const repairedResponse = repairedStreamRes.fullText;
+          const repairedExtracted = extractVbaCode(repairedResponse, repairedStreamRes.finishReason);
+          if (!repairedExtracted.error && repairedExtracted.code) {
+            rawResponse = repairedResponse;
+            extracted = repairedExtracted;
+            parsed = parseStreamOutput(repairedResponse);
+            assistantMsg.streamVbaCode = repairedExtracted.code;
+
+            const secondExecRes = await bridge.send<VbaExecutionData>('execute_vba', {
+              code: repairedExtracted.code,
+              prompt: text,
+              targetWorkbookName: currentRequest.targetWbName,
+              targetWorkbookFullName: currentRequest.targetWbFullName,
+              rawModelResponse: repairedResponse,
+            });
+
+            if (secondExecRes.ok && secondExecRes.data) {
+              execRes = secondExecRes;
+              wasRepaired = true;
+            } else if (secondExecRes.data) {
+              execRes = secondExecRes;
+            }
+          }
+        } catch {
+          // 修复网络异常时保留首次执行结果供排查
+        }
+      }
+
+      if (execRes.ok && execRes.data) {
+        // 执行后核验：比对写后读回与用户实际诉求
+        const verification = verifyExecutionResult(text, execRes.data.readback);
+        execRes.data.verificationStatus = verification.status;
+        execRes.data.verificationNote = verification.note;
+        execRes.data.apiAudit = currentApiAudit;
+        assistantMsg.execution = execRes.data;
+
+        const repairBadge = wasRepaired ? '（初次代码存在预编译瑕疵，已自动完成自我修复并成功执行）' : '';
+
+        // 对话气泡最终回复保持简短（1句话），不污染聊天界面
+        if (verification.status === 'verified') {
+          assistantMsg.content = parsed.explanation
+            ? `${parsed.explanation}（区域 ${execRes.data.readback?.usedRangeAddress || ''} 验证通过）${repairBadge}`
+            : `已在【${targetWbName}】执行完成，区域 ${execRes.data.readback?.usedRangeAddress || ''} 验证通过。${repairBadge}`;
+        } else {
+          assistantMsg.content = parsed.explanation
+            ? `${parsed.explanation}（${verification.note}）${repairBadge}`
+            : `已在【${targetWbName}】执行宏，${verification.note}${repairBadge}`;
+        }
+      } else {
+        const errMsg = execRes.error || '执行遇到阻断';
+        assistantMsg.content = `执行中断：${errMsg}`;
+        assistantMsg.execution = execRes.data
+          ? {
+              ...execRes.data,
+              apiAudit: currentApiAudit,
+              summary: errMsg,
+              error: errMsg,
+              vbaCode: extracted.code,
+            }
+          : {
+              summary: errMsg,
+              error: errMsg,
+              elapsedMs: 0,
+              vbaCode: extracted.code,
+              apiAudit: currentApiAudit,
+            };
+      }
+
+      // 刷新工作簿与快照时间轴
+      await refreshWorkbookInfo();
     } catch (err: any) {
-      // 网络或接口本身异常
       assistantMsg.content = assistantMsg.content || '处理遇到异常';
       assistantMsg.execution = {
         summary: '操作中断：' + (err.message || '未知异常'),
@@ -196,11 +388,14 @@
       },
     ];
 
+    const targetWbName = workbook?.name || '';
+    const targetWbFullName = workbook?.fullName || '';
+
     const assistantMsgId = 'ai_script_' + Date.now();
     const assistantMsg: ChatMessage = {
       id: assistantMsgId,
       role: 'assistant',
-      content: `准备运行本地脚本: ${script.name}`,
+      content: `正在向【${targetWbName || '当前活动工作簿'}】运行本地脚本: ${script.name}...`,
       prompt: `运行脚本: ${script.name}`,
       isExecuting: true,
       execution: null,
@@ -212,11 +407,18 @@
       const execRes = await bridge.send<VbaExecutionData>('execute_vba', {
         code: script.code,
         prompt: `运行脚本: ${script.name}`,
+        targetWorkbookName: targetWbName,
+        targetWorkbookFullName: targetWbFullName,
       });
 
       if (execRes.ok && execRes.data) {
+        const verification = verifyExecutionResult(`运行脚本: ${script.name}`, execRes.data.readback);
+        execRes.data.verificationStatus = verification.status;
+        execRes.data.verificationNote = verification.note;
         assistantMsg.execution = execRes.data;
+        assistantMsg.content = `脚本【${script.name}】已运行完成。${verification.note}`;
       } else {
+        assistantMsg.content = `脚本执行失败：${execRes.error}`;
         assistantMsg.execution = {
           summary: execRes.error || '脚本执行失败',
           error: execRes.error,
@@ -226,6 +428,7 @@
       }
       await refreshWorkbookInfo();
     } catch (e: any) {
+      assistantMsg.content = `运行失败: ${e.message}`;
       assistantMsg.execution = {
         summary: '运行失败: ' + e.message,
         error: e.message,
@@ -255,7 +458,20 @@
     {#each messages as msg (msg.id)}
       {#if msg.role === 'user'}
         <div class="message-row user-row">
-          <div class="user-bubble">{msg.content}</div>
+          <div class="user-bubble-wrapper">
+            {#if msg.mode}
+              <div class="user-mode-tag {msg.mode === 'AUTOMATION' ? 'tag-auto' : 'tag-chat'}">
+                {#if msg.mode === 'AUTOMATION'}
+                  <Zap size={10} />
+                  <span>操作指令</span>
+                {:else}
+                  <MessageSquare size={10} />
+                  <span>咨询对话</span>
+                {/if}
+              </div>
+            {/if}
+            <div class="user-bubble {msg.mode === 'CHAT' ? 'bubble-chat' : 'bubble-auto'}">{msg.content}</div>
+          </div>
         </div>
       {:else}
         <div class="message-row ai-row">
@@ -272,6 +488,7 @@
               isExecuting={msg.isExecuting || false}
               allSnapshots={workbook?.snapshots || []}
               onSaveScriptSuccess={() => scriptDrawerRef?.refreshScripts()}
+              on:restored={refreshWorkbookInfo}
             />
           {/if}
         </div>
@@ -325,16 +542,54 @@
     align-items: flex-end;
   }
 
+  .user-bubble-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    max-width: 85%;
+    gap: 3px;
+  }
+
+  .user-mode-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 10px;
+    font-weight: 500;
+    padding: 1px 6px;
+    border-radius: 10px;
+    line-height: 1.3;
+  }
+
+  .user-mode-tag.tag-auto {
+    background: #e7f3ec;
+    color: #107c41;
+    border: 1px solid #c2e2cc;
+  }
+
+  .user-mode-tag.tag-chat {
+    background: #e8f3fb;
+    color: #0078d4;
+    border: 1px solid #c7e0f4;
+  }
+
   .user-bubble {
-    background: var(--excel-green);
     color: white;
     padding: 7px 12px;
     border-radius: 6px 6px 1px 6px;
     font-size: 12px;
     line-height: 1.4;
-    max-width: 85%;
+    width: fit-content;
     word-break: break-all;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  }
+
+  .user-bubble.bubble-auto {
+    background: var(--excel-green);
+  }
+
+  .user-bubble.bubble-chat {
+    background: #0078d4;
   }
 
   .ai-row {

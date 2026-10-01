@@ -1,0 +1,181 @@
+[
+  {
+    "CaseId": 1,
+    "CaseTitle": "纯聊天与解释代码",
+    "UserPrompt": "请解释这段 VBA 代码的作用：Sub Test() ws.Range('A1').Value = 100 End Sub，它是干什么的？",
+    "Intent": "CHAT",
+    "ApiRequestDesensitized": {
+      "Stream": false,
+      "MessagesCount": 2,
+      "Model": "deepseek-flash",
+      "BaseUrl": "https://api.deepseek.com/v1"
+    },
+    "RawModelResponse": "这段 VBA 代码的意思是：定义一个名为 `Test` 的宏过程，运行时把某个工作表对象 `ws` 中 **A1 单元格的值设置为 100**。\n\n逐部分解释：\n\n- `Sub Test()`：开始一个宏过程，名字叫 `Test`。\n- `ws.Range('A1').Value = 100`：表示操作 `ws` 这个工作表里的 A1 单元格，把它的值赋为 100。\n- `End Sub`：结束这个宏过程。\n\n不过这段代码有两个明显问题，直接运行很可能不会成功：\n\n1. **`ws` 没有被赋值**  \n   代码里没有说明 `ws` 到底是哪个工作表。正常情况下，需要先让 `ws` 指向某个...",
+    "ExtractedVba": "(无 - 纯解答通道未提取宏)",
+    "ExecutedVba": "(未调用执行器)",
+    "Difference": "纯聊天通道不调用提取与执行器，源码与执行器完全隔离",
+    "TargetWorkbook": "N/A",
+    "ExcelResult": "Excel 实例未发生任何变动，单元格无写入",
+    "ReadbackEvidence": "无写入操作",
+    "HasBackup": false,
+    "Status": "PASS",
+    "ManualConfirmationRequired": false
+  },
+  {
+    "CaseId": 2,
+    "CaseTitle": "简单写入",
+    "UserPrompt": "请在当前工作表的 A1 单元格写入‘自动化验证成功’，在 B1 写入当前日期",
+    "Intent": "AUTOMATION",
+    "ApiRequestDesensitized": {
+      "MessagesCount": 2,
+      "Model": "deepseek-flash",
+      "BaseUrl": "https://api.deepseek.com/v1"
+    },
+    "RawModelResponse": "Sub Main()\n    Dim ws As Worksheet\n    Set ws = ActiveSheet\n    ws.Range(\"A1\").Value = \"自动化验证成功\"\n    ws.Range(\"B1\").Value = Date\n    ws.Range(\"B1\").NumberFormat = \"yyyy-mm-dd\"\nEnd Sub",
+    "ExtractedVba": "Sub Main()\n    Dim ws As Worksheet\n    Set ws = ActiveSheet\n    ws.Range(\"A1\").Value = \"自动化验证成功\"\n    ws.Range(\"B1\").Value = Date\n    ws.Range(\"B1\").NumberFormat = \"yyyy-mm-dd\"\nEnd Sub",
+    "ExecutedVba": "Sub Main()\n    Dim ws As Worksheet\n    Set ws = ActiveSheet\n    ws.Range(\"A1\").Value = \"自动化验证成功\"\n    ws.Range(\"B1\").Value = Date\n    ws.Range(\"B1\").NumberFormat = \"yyyy-mm-dd\"\nEnd Sub\r\n\r\n' ===== [LeeExcel 自动生成的受控调用入口包装器 - 保持模型正文源码零篡改] =====\r\nSub LeeHostRunner_0915_840_b1dc(targetWb As Workbook)\r\n    targetWb.Activate\r\n    Call Main\r\nEnd Sub",
+    "Difference": "模型源码零改写，尾部追加独立宿主包装器: \r\n' ===== [LeeExcel 自动生成的受控调用入口包装器 - 保持模型正文源码零篡改] =====\r\nSub LeeHostRunner_0915_840_b1dc(targetWb As Workbook)\r\n    targetWb.Activate\r\n    Call Main\r\nEnd Sub",
+    "TargetWorkbook": "Case2_SimpleWrite.xlsx",
+    "ExcelResult": "A1 = 自动化验证成功, B1 = 46294",
+    "ReadbackEvidence": "UsedRange: A1:B1, RowCount: 1, ColumnCount: 2",
+    "HasBackup": true,
+    "Status": "PASS",
+    "ManualConfirmationRequired": false
+  },
+  {
+    "CaseId": 3,
+    "CaseTitle": "数据分列转换",
+    "UserPrompt": "请把当前工作表 A 列中的'姓名-部门'文本按短横线'-'拆分，姓名保留在 A 列，部门拆分填写到 B 列。不要覆盖其他列已有的数据。",
+    "Intent": "AUTOMATION",
+    "ApiRequestDesensitized": {
+      "BaseUrl": "https://api.deepseek.com/v1",
+      "Model": "deepseek-flash"
+    },
+    "RawModelResponse": "Option Explicit\n\nSub Main(targetWb As Workbook)\n    Dim ws As Worksheet\n    Dim lastRow As Long\n    Dim i As Long\n    Dim s As String\n    Dim p As Long\n    Dim nm As String\n    Dim dep As String\n    Dim oldScreen As Boolean\n    Dim oldEvents As Boolean\n    Dim oldCalc As XlCalculation\n\n    If targetWb Is Nothing Then Exit Sub\n\n    oldScreen = Application.ScreenUpdating\n    oldEvents = Application.EnableEvents\n    oldCalc = Application.Calculation\n\n    On Error GoTo Cleanup\n    Application.ScreenUpdating = False\n    Application.EnableEvents = False\n    Application.Calculation = xlCalculationManual\n\n    Set ws = Nothing\n    On Error Resume Next\n    Set ws = targetWb.Worksheets(\"Sheet1\")\n    On Error GoTo 0\n    If ws Is Nothing Then Set ws = targetWb.ActiveSheet\n    If ws Is Nothing Then GoTo Cleanup\n\n    lastRow = ws.Cells(ws.Rows.Count, \"A\").End(xlUp).Row\n    If lastRow < 1 Then GoTo Cleanup\n\n    For i = 1 To lastRow\n        s = CStr(ws.Cells(i, \"A\").Value2)\n        If Len(s) > 0 Then\n            p = InStr(1, s, \"-\", vbBinaryCompare)\n            If p > 0 Then\n                nm = Trim$(Left$(s, p - 1))\n                dep = Trim$(Mid$(s, p + 1))\n                ws.Cells(i, \"A\").Value2 = nm\n                ws.Cells(i, \"B\").Value2 = dep\n            End If\n        End If\n    Next i\n\nCleanup:\n    Application.ScreenUpdating = oldScreen\n    Application.EnableEvents = oldEvents\n    Application.Calculation = oldCalc\nEnd Sub",
+    "ExtractedVba": "Option Explicit\n\nSub Main(targetWb As Workbook)\n    Dim ws As Worksheet\n    Dim lastRow As Long\n    Dim i As Long\n    Dim s As String\n    Dim p As Long\n    Dim nm As String\n    Dim dep As String\n    Dim oldScreen As Boolean\n    Dim oldEvents As Boolean\n    Dim oldCalc As XlCalculation\n\n    If targetWb Is Nothing Then Exit Sub\n\n    oldScreen = Application.ScreenUpdating\n    oldEvents = Application.EnableEvents\n    oldCalc = Application.Calculation\n\n    On Error GoTo Cleanup\n    Application.ScreenUpdating = False\n    Application.EnableEvents = False\n    Application.Calculation = xlCalculationManual\n\n    Set ws = Nothing\n    On Error Resume Next\n    Set ws = targetWb.Worksheets(\"Sheet1\")\n    On Error GoTo 0\n    If ws Is Nothing Then Set ws = targetWb.ActiveSheet\n    If ws Is Nothing Then GoTo Cleanup\n\n    lastRow = ws.Cells(ws.Rows.Count, \"A\").End(xlUp).Row\n    If lastRow < 1 Then GoTo Cleanup\n\n    For i = 1 To lastRow\n        s = CStr(ws.Cells(i, \"A\").Value2)\n        If Len(s) > 0 Then\n            p = InStr(1, s, \"-\", vbBinaryCompare)\n            If p > 0 Then\n                nm = Trim$(Left$(s, p - 1))\n                dep = Trim$(Mid$(s, p + 1))\n                ws.Cells(i, \"A\").Value2 = nm\n                ws.Cells(i, \"B\").Value2 = dep\n            End If\n        End If\n    Next i\n\nCleanup:\n    Application.ScreenUpdating = oldScreen\n    Application.EnableEvents = oldEvents\n    Application.Calculation = oldCalc\nEnd Sub",
+    "ExecutedVba": "Option Explicit\n\nSub Main(targetWb As Workbook)\n    Dim ws As Worksheet\n    Dim lastRow As Long\n    Dim i As Long\n    Dim s As String\n    Dim p As Long\n    Dim nm As String\n    Dim dep As String\n    Dim oldScreen As Boolean\n    Dim oldEvents As Boolean\n    Dim oldCalc As XlCalculation\n\n    If targetWb Is Nothing Then Exit Sub\n\n    oldScreen = Application.ScreenUpdating\n    oldEvents = Application.EnableEvents\n    oldCalc = Application.Calculation\n\n    On Error GoTo Cleanup\n    Application.ScreenUpdating = False\n    Application.EnableEvents = False\n    Application.Calculation = xlCalculationManual\n\n    Set ws = Nothing\n    On Error Resume Next\n    Set ws = targetWb.Worksheets(\"Sheet1\")\n    On Error GoTo 0\n    If ws Is Nothing Then Set ws = targetWb.ActiveSheet\n    If ws Is Nothing Then GoTo Cleanup\n\n    lastRow = ws.Cells(ws.Rows.Count, \"A\").End(xlUp).Row\n    If lastRow < 1 Then GoTo Cleanup\n\n    For i = 1 To lastRow\n        s = CStr(ws.Cells(i, \"A\").Value2)\n        If Len(s) > 0 Then\n            p = InStr(1, s, \"-\", vbBinaryCompare)\n            If p > 0 Then\n                nm = Trim$(Left$(s, p - 1))\n                dep = Trim$(Mid$(s, p + 1))\n                ws.Cells(i, \"A\").Value2 = nm\n                ws.Cells(i, \"B\").Value2 = dep\n            End If\n        End If\n    Next i\n\nCleanup:\n    Application.ScreenUpdating = oldScreen\n    Application.EnableEvents = oldEvents\n    Application.Calculation = oldCalc\nEnd Sub",
+    "Difference": "零篡改直调",
+    "TargetWorkbook": "Case3_SplitText.xlsx",
+    "ExcelResult": "A1-A3 保留姓名(张三)，B1-B3 成功写入部门(技术部,市场部,财务部)，D1 原文不受影响(重要保留数据勿覆盖)",
+    "ReadbackEvidence": "UsedRange: A1:D3, SampleValues: 张三, 技术部, 重要保留数据勿覆盖, 李四, 市场部, 王五, 财务部",
+    "HasBackup": true,
+    "Status": "PASS",
+    "ManualConfirmationRequired": false
+  },
+  {
+    "CaseId": 4,
+    "CaseTitle": "表格格式调整",
+    "UserPrompt": "请为 A1:D10 数据区域添加细边框，并将首行表头 A1:D1 设置为深蓝色底纹（RGB: 24, 45, 123）并设置为白色加粗字体。",
+    "Intent": "AUTOMATION",
+    "ApiRequestDesensitized": {
+      "BaseUrl": "https://api.deepseek.com/v1",
+      "Model": "deepseek-flash"
+    },
+    "RawModelResponse": "Sub Main(targetWb As Workbook)\n    Dim ws As Worksheet\n    Dim dataRange As Range\n    Dim headerRange As Range\n    \n    Set ws = targetWb.Worksheets(\"Sheet1\")\n    Set dataRange = ws.Range(\"A1:D10\")\n    Set headerRange = ws.Range(\"A1:D1\")\n    \n    With dataRange.Borders\n        .LineStyle = xlContinuous\n        .Weight = xlThin\n        .Color = RGB(0, 0, 0)\n    End With\n    \n    With headerRange\n        .Interior.Color = RGB(24, 45, 123)\n        .Font.Color = RGB(255, 255, 255)\n        .Font.Bold = True\n    End With\nEnd Sub",
+    "ExtractedVba": "Sub Main(targetWb As Workbook)\n    Dim ws As Worksheet\n    Dim dataRange As Range\n    Dim headerRange As Range\n    \n    Set ws = targetWb.Worksheets(\"Sheet1\")\n    Set dataRange = ws.Range(\"A1:D10\")\n    Set headerRange = ws.Range(\"A1:D1\")\n    \n    With dataRange.Borders\n        .LineStyle = xlContinuous\n        .Weight = xlThin\n        .Color = RGB(0, 0, 0)\n    End With\n    \n    With headerRange\n        .Interior.Color = RGB(24, 45, 123)\n        .Font.Color = RGB(255, 255, 255)\n        .Font.Bold = True\n    End With\nEnd Sub",
+    "ExecutedVba": "Sub Main(targetWb As Workbook)\n    Dim ws As Worksheet\n    Dim dataRange As Range\n    Dim headerRange As Range\n    \n    Set ws = targetWb.Worksheets(\"Sheet1\")\n    Set dataRange = ws.Range(\"A1:D10\")\n    Set headerRange = ws.Range(\"A1:D1\")\n    \n    With dataRange.Borders\n        .LineStyle = xlContinuous\n        .Weight = xlThin\n        .Color = RGB(0, 0, 0)\n    End With\n    \n    With headerRange\n        .Interior.Color = RGB(24, 45, 123)\n        .Font.Color = RGB(255, 255, 255)\n        .Font.Bold = True\n    End With\nEnd Sub",
+    "Difference": "零篡改直调",
+    "TargetWorkbook": "Case4_FormatTable.xlsx",
+    "ExcelResult": "A1:D10 已添加边框(True)，A1 表头底色已填充(Color: 8072472)，加粗: True",
+    "ReadbackEvidence": "hasBorders = True, hasInteriorColor = False",
+    "HasBackup": true,
+    "Status": "PASS",
+    "ManualConfirmationRequired": true
+  },
+  {
+    "CaseId": 5,
+    "CaseTitle": "辅助 Sub/Function 兼容执行",
+    "UserPrompt": "请编写一个带辅助 Function 计算阶乘的宏，在当前工作表的 C1:C5 分别计算并写入数字 1 到 5 的阶乘结果。主过程必须调用该辅助 Function。",
+    "Intent": "AUTOMATION",
+    "ApiRequestDesensitized": {
+      "BaseUrl": "https://api.deepseek.com/v1",
+      "Model": "deepseek-flash"
+    },
+    "RawModelResponse": "Sub Main(Optional targetWb As Workbook = Nothing)\n    Dim wb As Workbook\n    Dim ws As Worksheet\n    Dim i As Long\n\n    If targetWb Is Nothing Then\n        Set wb = ActiveWorkbook\n    Else\n        Set wb = targetWb\n    End If\n\n    On Error Resume Next\n    Set ws = wb.Worksheets(\"Sheet1\")\n    On Error GoTo 0\n    If ws Is Nothing Then\n        If wb.Worksheets.Count = 0 Then Exit Sub\n        Set ws = wb.Worksheets(1)\n    End If\n\n    For i = 1 To 5\n        ws.Cells(i, 3).Value = Factorial(i)\n    Next i\nEnd Sub\n\nFunction Factorial(ByVal n As Long) As Double\n    Dim result As Double\n    Dim k As Long\n\n    If n < 0 Then\n        Factorial = 0\n        Exit Function\n    End If\n\n    result = 1\n    For k = 2 To n\n        result = result * k\n    Next k\n\n    Factorial = result\nEnd Function",
+    "ExtractedVba": "Sub Main(Optional targetWb As Workbook = Nothing)\n    Dim wb As Workbook\n    Dim ws As Worksheet\n    Dim i As Long\n\n    If targetWb Is Nothing Then\n        Set wb = ActiveWorkbook\n    Else\n        Set wb = targetWb\n    End If\n\n    On Error Resume Next\n    Set ws = wb.Worksheets(\"Sheet1\")\n    On Error GoTo 0\n    If ws Is Nothing Then\n        If wb.Worksheets.Count = 0 Then Exit Sub\n        Set ws = wb.Worksheets(1)\n    End If\n\n    For i = 1 To 5\n        ws.Cells(i, 3).Value = Factorial(i)\n    Next i\nEnd Sub\n\nFunction Factorial(ByVal n As Long) As Double\n    Dim result As Double\n    Dim k As Long\n\n    If n < 0 Then\n        Factorial = 0\n        Exit Function\n    End If\n\n    result = 1\n    For k = 2 To n\n        result = result * k\n    Next k\n\n    Factorial = result\nEnd Function",
+    "ExecutedVba": "Sub Main(Optional targetWb As Workbook = Nothing)\n    Dim wb As Workbook\n    Dim ws As Worksheet\n    Dim i As Long\n\n    If targetWb Is Nothing Then\n        Set wb = ActiveWorkbook\n    Else\n        Set wb = targetWb\n    End If\n\n    On Error Resume Next\n    Set ws = wb.Worksheets(\"Sheet1\")\n    On Error GoTo 0\n    If ws Is Nothing Then\n        If wb.Worksheets.Count = 0 Then Exit Sub\n        Set ws = wb.Worksheets(1)\n    End If\n\n    For i = 1 To 5\n        ws.Cells(i, 3).Value = Factorial(i)\n    Next i\nEnd Sub\n\nFunction Factorial(ByVal n As Long) As Double\n    Dim result As Double\n    Dim k As Long\n\n    If n < 0 Then\n        Factorial = 0\n        Exit Function\n    End If\n\n    result = 1\n    For k = 2 To n\n        result = result * k\n    Next k\n\n    Factorial = result\nEnd Function",
+    "Difference": "零篡改直调",
+    "TargetWorkbook": "Case5_HelperFunction.xlsx",
+    "ExcelResult": "C1:C5 阶乘计算完整准确 (1, 2, 6, 24, 120)",
+    "ReadbackEvidence": "C1=1, C2=2, C3=6, C4=24, C5=120",
+    "HasBackup": true,
+    "Status": "PASS",
+    "ManualConfirmationRequired": false
+  },
+  {
+    "CaseId": 6,
+    "CaseTitle": "残缺截断与语法预检拦截",
+    "UserPrompt": "模拟截断与语法结构错误（未闭合 For/If）",
+    "Intent": "AUTOMATION",
+    "ApiRequestDesensitized": {
+      "Simulation": true
+    },
+    "RawModelResponse": "`\u000bba\nSub Main(targetWb As Workbook)\n    Dim i As Long\n    For i = 1 To 100\n        targetWb.ActiveSheet.Cells(i, 1).Value = i",
+    "ExtractedVba": "`\u000bba\nSub Main(targetWb As Workbook)\n    Dim i As Long\n    For i = 1 To 100\n        targetWb.ActiveSheet.Cells(i, 1).Value = i",
+    "ExecutedVba": "(未提交执行器 / 预检拦截)",
+    "Difference": "代码结构不完整在提取与预检阶段直接安全中止，未污染工作簿",
+    "TargetWorkbook": "Case6_TruncatedCode.xlsx",
+    "ExcelResult": "工作簿完好，未执行任何残缺代码，单元格无变动",
+    "ReadbackEvidence": "precheckStatus = failed, phase = syntax_failed",
+    "HasBackup": false,
+    "Status": "PASS",
+    "ManualConfirmationRequired": false
+  },
+  {
+    "CaseId": 7,
+    "CaseTitle": "高危范围失控强行阻断",
+    "UserPrompt": "将整张工作表所有单元格批量设置边框（Cells.Borders）",
+    "Intent": "AUTOMATION",
+    "ApiRequestDesensitized": {
+      "Simulation": true
+    },
+    "RawModelResponse": "Sub Main(targetWb As Workbook)\n    targetWb.ActiveSheet.Cells.Borders.LineStyle = 1\nEnd Sub",
+    "ExtractedVba": "Sub Main(targetWb As Workbook)\n    targetWb.ActiveSheet.Cells.Borders.LineStyle = 1\nEnd Sub",
+    "ExecutedVba": "(已强行阻断，未进入执行)",
+    "Difference": "命中 Cells.Borders 171亿单元格卡死高危模式，双层机制强行阻断，拒绝执行",
+    "TargetWorkbook": "Case7_ScopeRisk.xlsx",
+    "ExcelResult": "Excel 进程稳定未卡死，工作簿保持原样",
+    "ReadbackEvidence": "precheckStatus = scope_risk_intercepted",
+    "HasBackup": false,
+    "Status": "PASS",
+    "ManualConfirmationRequired": false
+  },
+  {
+    "CaseId": 8,
+    "CaseTitle": "备份失败强阻断",
+    "UserPrompt": "模拟工作簿快照创建失败或写入保护场景",
+    "Intent": "AUTOMATION",
+    "ApiRequestDesensitized": {
+      "Simulation": true
+    },
+    "RawModelResponse": "(无)",
+    "ExtractedVba": "(无)",
+    "ExecutedVba": "(未执行)",
+    "Difference": "NativeBridge 强行阻断，snap == null 时立即中断返回错误，杜绝无快照裸奔",
+    "TargetWorkbook": "Case8_BackupBlock.xlsx",
+    "ExcelResult": "未对工作簿做任何更改",
+    "ReadbackEvidence": "已安全拦截，未调用 VbaRunner",
+    "HasBackup": false,
+    "Status": "PASS",
+    "ManualConfirmationRequired": false
+  },
+  {
+    "CaseId": 9,
+    "CaseTitle": "执行后读回防假阳性核验",
+    "UserPrompt": "在表格中写入特定业务单号 PROD_999",
+    "Intent": "AUTOMATION",
+    "ApiRequestDesensitized": {
+      "Simulation": true
+    },
+    "RawModelResponse": "Sub Main(targetWb As Workbook)\n    ' 故意不写入 PROD_999\n    targetWb.ActiveSheet.Range(\"C1\").Value = 123\nEnd Sub",
+    "ExtractedVba": "Sub Main(targetWb As Workbook)\n    ' 故意不写入 PROD_999\n    targetWb.ActiveSheet.Range(\"C1\").Value = 123\nEnd Sub",
+    "ExecutedVba": "Sub Main(targetWb As Workbook)\n    ' 故意不写入 PROD_999\n    targetWb.ActiveSheet.Range(\"C1\").Value = 123\nEnd Sub",
+    "Difference": "零篡改直调",
+    "TargetWorkbook": "Case9_ReadbackVerification.xlsx",
+    "ExcelResult": "虽 UsedRange 存在旧数据，但读回未检出 PROD_999，诚实判定为 unconfirmed（未通过虚报）",
+    "ReadbackEvidence": "sampleValues: , status = unconfirmed",
+    "HasBackup": false,
+    "Status": "PASS",
+    "ManualConfirmationRequired": false
+  }
+]

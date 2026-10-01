@@ -1,0 +1,16 @@
+# 1. 自动化测试完全清空的临时隔离测试目录（已确认零文件留存）
+bin/scratch/
+scratch/entry_test_isolated/
+scratch/repro_select_case/
+scratch/snap_verify_isolated/
+scratch/state_test_isolated/
+scratch/scratch/
+
+# 2. 治理清理专用本地备份目录（固定命名，无模糊通配）
+.backup_cleanup_batch1_20261001/
+.backup_cleanup_batch2_20261001/
+.backups/
+
+# 3. 长期测试与调试生成物隔离目录（由 clean_artifacts.ps1 管理）
+.artifacts/
+
