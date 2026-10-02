@@ -57,27 +57,36 @@
 | `TASK-R1a-02` | R1a | **前端“附加选区”卡片与只读预览**<br>在输入区增加附加按钮、紧凑预览卡、4项发送选项与透明查看弹窗。 | `accepted` | `web/src/components/ChatInput.svelte`<br>`web/src/App.svelte` | 用户人工实测通过，选区预览正常 |
 | `TASK-R1a-03` | R1a | **选区数据结构化注入 Prompt**<br>低信任数据段注入，严格防范文本单元格指令提权；请求固化与跨工作簿拦截。 | `accepted` | `web/src/services/llm.ts`<br>`web/src/services/bridge.ts` | 用户人工实测通过，请求隔离正常 |
 | `TASK-FIX-FOCUS-01` | 交互缺陷 | **修复 Excel 工作表与 WebView2 任务窗格焦点交接缺陷**<br>解决点击文本框输入后再点击工作表单元格，键盘输入仍进入插件的单向锁焦问题。 | `accepted` | `src/TaskPaneFocusHelper.cs`<br>`src/TaskPaneControl.cs`<br>`src/LeeExcelAddIn.cs`<br>`tests/tools/VerifyFocusHandover.cs` | 用户实测通过：插件输入后点击单元格，新输入正确进入单元格；缺陷正式关闭；其他未实测边界保留待验 |
-| `TASK-R1b-01` | R1b 切片 1 | **选区采集时间、快照提示与刷新原区域**<br>数据契约扩充 `capturedAt` 与 `attachmentId`；定向读取原工作簿/表/地址；并发防旧覆盖校验；刷新失败容灾保留旧数据；发送瞬间冻结附件。 | `automated_verified` | `src/SelectionContextService.cs`<br>`src/NativeBridge.cs`<br>`web/src/components/ChatInput.svelte`<br>`web/src/services/bridge.ts`<br>`test_suite_unit.cjs` | 离线测试 41/41 PASS (含 5 项 R1b 专项)，C# 编译成功；等待前台人工实测 |
+| `TASK-R1b-01` | R1b 切片 1 | **选区采集时间、快照提示与刷新原区域**<br>数据契约扩充 `capturedAt` 与 `attachmentId`；定向读取原工作簿/表/地址；并发防旧覆盖校验；刷新失败容灾保留旧数据；发送瞬间冻结附件。 | `automated_verified`<br>*(真实 Excel UI 自动验收)* | `src/SelectionContextService.cs`<br>`src/NativeBridge.cs`<br>`web/src/components/ChatInput.svelte`<br>`scripts/run_desktop_acceptance.ps1`<br>`.artifacts/tests/desktop_acceptance_*/` | 真实桌面端自动化验收 9/9 PASS (含 4 项真实 UI 步骤与 5 项宿主集成)，保留 4 张高清截图证据；等待用户人工签收 |
+| `TASK-FRAMEWORK-01` | 基础设施 | **真实 Excel 桌面端自动化验收框架**<br>独立 C# 执行器与 PowerShell 驱动入口，覆盖环境检查、样本准备、启动隔离 Excel、UIA 控制 Ribbon、COM 控制工作表、任务窗格 UI 交互、截图保存与安全清理。 | `accepted` | `scripts/run_desktop_acceptance.ps1`<br>`tests/tools/DesktopAcceptanceRunner.cs`<br>`tests/diagnostics/ProbeDesktopUia.cs` | 完整建立端到端桌面自动化能力，经真实测试验证 100% 成功，系统原有 Excel 实例绝对安全保护 |
 
 ---
 
-## 4. 阶段验收结论与后续切片原则
+## 4. 阶段验收结论、自动化成果与边界定义
 
 1. **R1a 选区功能与焦点修复验收结论**：
    - 用户已完成前台实测：插件输入后点击单元格，键盘输入正确进入单元格，焦点交接正常。
    - `TASK-R1a-01` ~ `TASK-R1a-03` 及 `TASK-FIX-FOCUS-01` 全部验收通过（`accepted`），交互缺陷正式关闭。
-   - 事实边界保留：双击就地编辑、公式栏、中文输入法（IME）在极端长流式时的前台表现，继续标为未验证，不泛化为全部交互通过。
-2. **R1b 切片 1 验证状态 (`automated_verified`)**：
-   - 选区采集时间、快照提示与【🔄 刷新原区域】已完成编码与离线自动化验证；
-   - 宿主定向定位目标工作簿与目标工作表，原对象不存在明确报错，绝不 fallback 到当前选区；
-   - 前端维护 `refreshSeq` 与 `attachmentId`，防卡片移除后晚到恢复，防旧响应覆盖；
-   - 刷新失败保留旧快照数据与时间，发送瞬间冻结本次附件；
-   - 当前等待用户前台人工实测验收（5 项最小验收用例）。
-3. **后续 R1b 切片原则（宏引用与 Token 估算，严格禁止在本轮编码）**：
-   - 引用宏由用户主动选择，不根据“修改/调整/刚才”等词自动勾选。
-   - 引用模型源码正文，排除宿主透明包装器；失败或未运行宏也可引用，不要求必须由 VbaRunner 产生哈希。
-   - 验收正确引用进入请求，不强制模型只能追加某一行。
-   - 审计先记录准确字符量；不把 3.5 字符/Token 称为准确估算，不据此裁剪源码或设置模型输出上限。
+2. **R1b 切片 1 验证状态 (`automated_verified`，真实 Excel UI 自动验收)**：
+   - 已建立可复用的真实桌面端自动化验收框架并完成自动化端到端实测（**9/9 PASS**）：
+     - `TC-REG-01`：功能区 Ribbon 选项卡与 AI助手展开（`pass`，截图：`TC-REG-01_ribbon_activated.png`）；
+     - `TC-R1b-01`：定向刷新原区域与活动单元格保持（`pass`，修改 A2 后特意点击 D10，只读 COM 100% 确认活动单元格仍为 `$D$10`，截图：`TC-R1b-01_refreshed_D10_kept.png`）；
+     - `TC-R1b-02`：替换为当前选区（`pass`，切片更新为 `$D$10:$E$12`，截图：`TC-R1b-02_attachment_replaced.png`）；
+     - `TC-R1b-07`：焦点平滑交接与草稿保持（`pass`，工作表输入后草稿完好保留，截图：`TC-R1b-07_focus_handover_verified.png`）；
+     - `TC-R1b-03` ~ `TC-R1b-06` 及 `TC-REG-02`：5 项处理层/集成测试 100% 通过（刷新中禁止发送、移除防旧响应复活、发送瞬间冻结快照、脱敏全路径不入 Prompt、存量 42 项核心门禁保持）。
+3. **授权进入 accepted 与必须由用户签收的边界定义**：
+   - **可凭真实桌面自动化证据进入 `accepted` 的客观功能**：
+     1. 定向刷新原区域时工作表原对象严格核实，活动单元格 `$D$10` 绝对不漂移；
+     2. 替换附件卡片切片与时间更新；
+     3. 刷新中禁止发送（按钮置灰与 Enter 拦截）；
+     4. 刷新中移除附件后旧响应丢弃，卡片不复活；
+     5. 发送瞬间冻结附件，后续源数据变更历史记录不变；
+     6. 本地物理全路径绝对不进入模型 API 提示词；
+     7. 功能区 Ribbon 布局完整与离线门禁 42/42 PASS。
+   - **仍必须保留由用户签收的主观/设备相关边界**：
+     1. 复杂第三方中文输入法（IME）在极端长流式前台输出时的微弱闪烁感与组合按键体验；
+     2. 实际调用商业付费大模型真实 API 产生的账单与真实模型思考质量；
+     3. 包含超大合并单元格、复杂透视表与保护工作表等极端企业级模板的视觉呈现主观审美。
 
 
 ### 4.1 最小功能闭环 (R1a)

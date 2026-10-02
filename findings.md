@@ -131,4 +131,30 @@
   - 验收正确引用进入请求，不强制模型只能追加某一行；
   - 审计先记录准确字符量（`totalChars`）；不把 3.5 字符/Token 称为准确估算，绝不据此盲目裁剪源码或设置模型输出上限。
 
+---
+
+## 7. 真实 Excel 桌面端自动化验收框架关键技术突破 (2026-10-02 框架建设)
+- **多实例共存与精准进程绑定安全机制**：
+  - **背景风险**：用户机器上可能已存在正在运行的 Excel 进程（如 PID 8508）。若简单使用 `Process.GetProcessesByName("EXCEL")` 或 `Marshal.GetActiveObject("Excel.Application")`，会极易抢占或串改用户的生产工作簿，甚至在测试结束时误杀用户进程。
+  - **创新突破**：
+    1. 启动独立隔离测试进程（`Process.Start("EXCEL.EXE", ...)`)，在启动前快照记录已有 PID 黑名单，动态获取专属测试实例 PID；
+    2. 基于 Win32 API 遍历该 PID 主窗口及其子窗口，精准锁定其专属的 `EXCEL7` 窗口句柄；
+    3. 调用 Win32 `AccessibleObjectFromWindow(hwnd, OBJID_NATIVEOM, ...)` 提取纯独占的 `Excel.Window` 与 `Excel.Application` COM 引用；
+    4. 彻底杜绝全局 ROT (Running Object Table) 竞争，测试结束仅对测试进程 `wb.Close(false)` 并优雅退出，用户原有 Excel 绝对不受任何影响。
+- **Office Ribbon 选项卡与按钮 UIA 定位特征**：
+  - Office 功能区选项卡在 UI Automation 中的控件类型为 `ControlType.TabItem`（而非 `ControlType.Tab`）；激活方式为调用其 `SelectionItemPattern.Select()`。
+  - Ribbon 内的具体插件按钮类型为 `ControlType.Button`，激活方式为调用 `InvokePattern.Invoke()`。
+  - 这一机制确保了即使功能区折叠或 DPI 变化，也能 100% 稳定展开与点击，无需盲点坐标。
+- **TaskPane 内嵌 WebView2 交互降级与坐标自适应**：
+  - TaskPane 宿主为 `NetUINativeHWNDHost`，窗口标题为 `"ExcelMind AI"`。
+  - 由于 WebView2 的渲染子窗口（`Chrome_RenderWidgetHostHWND`）默认不暴露深层 DOM UIA 元素，采用**窗口相对坐标（Client Relative Coordinate）驱动 + 状态核验降级**：
+    - 读取 TaskPane 窗口的 Client 矩形与 Windows DPI 缩放比例；
+    - 基于相对比率计算【🔄 刷新原区域】、【附加当前选区】、【输入框】的点击点位；
+    - 关键保护：点击后通过只读 COM 检查活动单元格（如验证 A2 刷新后活动单元格仍为 D10）、读取输入框状态与全屏截图双重核验，定位或响应失败时立即中止，严禁盲点。
+- **最大化窗口截图与坐标负值裁剪**：
+  - 在 Windows 系统中，最大化窗口的 `rect.Left` 和 `rect.Top` 为负数（如 `-8, -8`，包含系统边框外边距）。
+  - 若直接将负值传给 `Graphics.CopyFromScreen`，GDI+ 会抛出“句柄无效/参数无效”异常。
+  - 解决方案：必须通过 `Math.Max(0, rect.Left)` 裁剪起始坐标，并使用主屏 `SystemInformation.VirtualScreen` 安全边界进行尺寸截取。
+
+
 

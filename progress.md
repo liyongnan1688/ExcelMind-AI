@@ -432,6 +432,58 @@ R1a 阶段代码与构建已完成，离线与单元测试 100% 通过；`TASK-R
 - **状态判定**：`TASK-R1b-01` 标记为 `automated_verified`。
 - **停点**：停止编码，向用户提交交付报告与 5 步人工验收指南，等待用户人工实测验收。
 
+---
+
+## Session: 2026-10-02 (真实 Excel 桌面端自动化验收框架落地与 R1b 端到端自动验收)
+
+### 1. 目标与执行边界
+- **核心诉求**：
+  1. 建立可复用的“真实 Excel 桌面端自动化验收框架”，不再默认把能自动操作的步骤交给用户手动点击；
+  2. 针对 R1b 切片 1（选区采集时间、快照提示及刷新原区域）执行端到端真实桌面 UI 自动化验证；
+  3. 保持状态为 `automated_verified` 并明确标注“真实 Excel UI 自动验收”，绝不伪称为“用户人工验收”；
+  4. 明确划分“自动进入 accepted”与“必须由用户签收”的客观与主观边界。
+- **安全红线严格遵守**：
+  - 严禁全局 kill Excel，严禁关闭或接管系统原有已存在的 Excel 进程（如 PID 8508）；
+  - 从真实 Ribbon 功能区与 TaskPane UI 进入，不绕过 UI 直接调内部接口；
+  - 绝不修改生产提示词、VBA 正文、执行器或快照策略迎合测试；
+  - 产物全部保存在 `.artifacts/tests/<run-id>/`。
+
+### 2. 自动化框架建设与交付资产
+- **独立验收执行器源码**：`tests/tools/DesktopAcceptanceRunner.cs`
+  - 使用系统自带 .NET 4.8 `csc.exe` + WPF UIA 程序集（`UIAutomationClient.dll`, `UIAutomationTypes.dll`, `WindowsBase.dll`），零第三方外部运行时依赖；
+  - 进程与加载项隔离：启动独立测试 Excel 实例（PID 动态跟踪），加载 `bin\LeeExcel64.xll`，打开专用测试样本工作簿；
+  - COM 独占绑定：通过 Win32 `AccessibleObjectFromWindow(hwndExcel7)` 直连该测试实例的 `Excel.Application`，绝不混淆系统已有进程；
+  - Ribbon UIA 控制：定位 `TabItem('ExcelMind AI')` 并调用 `SelectionItemPattern.Select()`，定位 `Button('AI助手')` 并调用 `InvokePattern.Invoke()`；
+  - TaskPane UI 交互与截图：定位 `NetUINativeHWNDHost` ("ExcelMind AI")，基于窗口相对坐标驱动真实 UI 操作，生成高清 PNG 截图；
+  - 安全退出与清理：`wb.Close(false)` 并退出独立测试进程，严格不误伤系统任何已有 Excel 进程。
+- **统一驱动脚本**：`scripts/run_desktop_acceptance.ps1`
+  - 具备编译检查、输出目录隔离（`.artifacts/tests/desktop_acceptance_<timestamp>/`）、执行调用与日志归档功能。
+- **诊断探针工具**：`tests/diagnostics/ProbeDesktopUia.cs`。
+
+### 3. R1b 自动化验收执行结果 (RunId: `desktop_acceptance_20261002_130944`)
+- **总评**：**9/9 PASS (100% 通过率)**
+- **真实桌面 UI 测试 (4项全部 PASS)**：
+  - `TC-REG-01`：功能区 Ribbon 选项卡与 AI 助手按钮展开 (PASS, 截图就绪)；
+  - `TC-R1b-01`：定向刷新原区域与活动单元格保持（修改 A2 为 8888.88 后特意点击 D10，刷新后只读 COM 100% 确认活动单元格仍为 `$D$10`，未被切走，截图就绪）；
+  - `TC-R1b-02`：替换为当前选区（选中 D10:E12 后卡片切片与时间更新，截图就绪）；
+  - `TC-R1b-07`：焦点平滑交接与草稿保持（工作表键入内容后草稿完好保留，截图就绪）。
+- **处理层/集成测试 (5项全部 PASS)**：
+  - `TC-R1b-03`：刷新中禁止发送（按钮置灰与回车拦截）；
+  - `TC-R1b-04`：刷新中移除附件时序保护（防旧响应晚到复活）；
+  - `TC-R1b-05`：发送瞬间冻结快照（源数据后续修改不影响历史快照）；
+  - `TC-R1b-06`：请求隐私脱敏（本地全路径不上送 Prompt）；
+  - `TC-REG-02`：存量 42 项离线单元门禁全绿（42/42 PASS）。
+- **产物与证据**：
+  - 机器可读 JSON：`.artifacts/tests/desktop_acceptance_20261002_130944/test_results.json`
+  - 验收报告：`.artifacts/tests/desktop_acceptance_20261002_130944/acceptance_report.md`
+  - 高清截图（4张）：`screenshots/TC-REG-01_...`, `TC-R1b-01_...`, `TC-R1b-02_...`, `TC-R1b-07_...`
+
+### 4. 任务状态与停点
+- `TASK-FRAMEWORK-01`：`accepted`（真实 Excel 桌面端自动化验收框架建立并验证）。
+- `TASK-R1b-01`：`automated_verified`（标明“真实 Excel UI 自动验收”）。
+- 停止编码，不启动下一产品切片，不自动合并或推送。
+
+
 
 
 
