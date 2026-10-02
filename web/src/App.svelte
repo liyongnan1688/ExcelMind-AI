@@ -1,12 +1,12 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
+  import { Zap, MessageSquare } from 'lucide-svelte';
   import Header from './components/Header.svelte';
   import SettingsModal from './components/SettingsModal.svelte';
   import ScriptDrawer from './components/ScriptDrawer.svelte';
   import ExecutionCard from './components/ExecutionCard.svelte';
   import ChatInput from './components/ChatInput.svelte';
-  import { Zap, MessageSquare } from 'lucide-svelte';
-  import { bridge, type WorkbookInfo, type ScriptItem, type VbaExecutionData } from './services/bridge';
+  import { bridge, type WorkbookInfo, type ScriptItem, type VbaExecutionData, type SelectionSnapshot } from './services/bridge';
   import {
     callLlmStream,
     extractVbaCode,
@@ -23,12 +23,14 @@
     streamVbaCode?: string; // 流式生成的代码
     execution?: VbaExecutionData | null;
     isExecuting?: boolean;
+    selectionSnapshot?: SelectionSnapshot; // 附加的只读选区快照
   }
 
   let workbook: WorkbookInfo | null = null;
   let messages: ChatMessage[] = [];
   let isProcessing = false;
   let messagesContainer: HTMLElement;
+  let inspectingSnapshot: SelectionSnapshot | null = null;
 
   let showSettings = false;
   let showScripts = false;
@@ -162,14 +164,24 @@
   }
 
   // 核心交互：用户显式入口驱动、请求生命周期固定、通道响应分流、目标锁定与写后核验
-  async function handleSend(text: string, userSelectedMode?: 'AUTOMATION' | 'CHAT') {
+  async function handleSend(text: string, userSelectedMode?: 'AUTOMATION' | 'CHAT', selectionSnapshot?: SelectionSnapshot) {
     if (!text.trim() || isProcessing) return;
+
+    // 工作簿一致性核验：若附加了选区，且为操作模式，核对目标工作簿
+    const requestMode: 'AUTOMATION' | 'CHAT' = userSelectedMode || 'AUTOMATION';
+    if (selectionSnapshot && requestMode === 'AUTOMATION') {
+      const currentWbName = (workbook?.name || '').trim();
+      const attachedWbName = (selectionSnapshot.context.workbookName || '').trim();
+      if (currentWbName && attachedWbName && currentWbName.toLowerCase() !== attachedWbName.toLowerCase()) {
+        alert(`⚠️ 附加选区来自工作簿【${attachedWbName}】，但当前活动工作簿为【${currentWbName}】。\n\n为避免跨工作簿误操作，请重新附加当前工作簿选区或移除附件后再发送。`);
+        return;
+      }
+    }
 
     isProcessing = true;
 
     // 唯一模式来源：用户显式入口，严禁根据文本内容猜测意图
     const requestId = 'req_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
-    const requestMode: 'AUTOMATION' | 'CHAT' = userSelectedMode || 'AUTOMATION';
     const userMsgId = 'user_' + requestId;
     const assistantMsgId = 'ai_' + requestId;
 
@@ -190,9 +202,10 @@
       sheets,
       activeSheet,
       usedRange,
+      selectionSnapshot,
     };
 
-    // 1. 添加用户消息（显示发送瞬间锁定的模式标签）
+    // 1. 添加用户消息（显示发送瞬间锁定的模式标签与选区快照）
     messages = [
       ...messages,
       {
@@ -200,6 +213,7 @@
         role: 'user',
         content: text,
         mode: currentRequest.requestMode,
+        selectionSnapshot: currentRequest.selectionSnapshot,
       },
     ];
     await scrollToBottom();
@@ -247,7 +261,8 @@
           }
           messages = [...messages];
         },
-        chatHistory
+        chatHistory,
+        currentRequest.selectionSnapshot
       );
 
       let rawResponse = streamRes.fullText;
@@ -538,6 +553,25 @@
               </div>
             {/if}
             <div class="user-bubble {msg.mode === 'CHAT' ? 'bubble-chat' : 'bubble-auto'}">{msg.content}</div>
+
+            <!-- 若随请求附加了选区，在用户气泡下方显示紧凑标识与查看发送按钮 -->
+            {#if msg.selectionSnapshot}
+              <div class="user-selection-badge">
+                <span class="badge-icon">📎</span>
+                <span class="badge-text">
+                  已附加选区: {msg.selectionSnapshot.context.sheetName}!{msg.selectionSnapshot.context.address}
+                  ({msg.selectionSnapshot.options.includeSamples ? `含${msg.selectionSnapshot.context.sampleRowCount}行样本` : '仅结构'})
+                </span>
+                <button
+                  class="badge-view-btn"
+                  type="button"
+                  on:click={() => (inspectingSnapshot = msg.selectionSnapshot)}
+                  title="查看本次随提示词发送给模型的只读数据"
+                >
+                  查看发送内容
+                </button>
+              </div>
+            {/if}
           </div>
         </div>
       {:else}
@@ -566,6 +600,30 @@
 
   <!-- 底部紧凑输入栏 -->
   <ChatInput disabled={isProcessing} onSend={handleSend} />
+
+  <!-- 查看发送内容弹窗 (脱敏展示，绝不暴露 API Key) -->
+  {#if inspectingSnapshot}
+    <div class="modal-backdrop" role="presentation" on:click|self={() => (inspectingSnapshot = null)}>
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3>📎 本次随请求发送的只读选区数据</h3>
+          <button class="close-x-btn" on:click={() => (inspectingSnapshot = null)}>✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="audit-summary-bar">
+            <span>包含字段: <code>{inspectingSnapshot.summary.fieldsIncluded.join(', ')}</code></span>
+            <span>样本范围: <code>{inspectingSnapshot.summary.sampleRowRange}</code></span>
+            <span>字符数: <code>{inspectingSnapshot.summary.totalChars}</code></span>
+          </div>
+          <p class="modal-tip">以下为作为低信任数据段注入请求的完整文本（不含任何系统 API Key 凭据）：</p>
+          <pre class="payload-preview-code"><code>{inspectingSnapshot.formattedText}</code></pre>
+        </div>
+        <div class="modal-footer">
+          <button class="primary-btn" on:click={() => (inspectingSnapshot = null)}>关闭</button>
+        </div>
+      </div>
+    </div>
+  {/if}
 
   <!-- 设置弹窗 -->
   {#if showSettings}
@@ -680,5 +738,149 @@
     white-space: pre-wrap;
     word-break: break-all;
     box-shadow: var(--office-shadow-sm);
+  }
+
+  /* 附加选区用户气泡徽章 */
+  .user-selection-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: #f3f9f5;
+    border: 1px solid #c7e0d2;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    color: #107c41;
+  }
+
+  .badge-icon {
+    font-size: 11px;
+  }
+
+  .badge-text {
+    font-family: var(--font-family-mono, monospace);
+  }
+
+  .badge-view-btn {
+    border: none;
+    background: transparent;
+    color: #0078d4;
+    cursor: pointer;
+    font-size: 11px;
+    text-decoration: underline;
+    padding: 0 2px;
+  }
+
+  .badge-view-btn:hover {
+    color: #106ebe;
+  }
+
+  /* 模态弹窗 */
+  .modal-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+
+  .modal-card {
+    background: white;
+    border-radius: var(--office-radius);
+    box-shadow: var(--office-shadow-lg, 0 8px 16px rgba(0, 0, 0, 0.14));
+    width: 90%;
+    max-width: 400px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--office-border);
+  }
+
+  .modal-header h3 {
+    margin: 0;
+    font-size: 13px;
+    color: var(--office-text);
+  }
+
+  .close-x-btn {
+    border: none;
+    background: transparent;
+    font-size: 14px;
+    cursor: pointer;
+    color: #605e5c;
+  }
+
+  .modal-body {
+    padding: 12px 14px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .audit-summary-bar {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 11px;
+    background: #f3f2f1;
+    padding: 6px 8px;
+    border-radius: 4px;
+  }
+
+  .audit-summary-bar code {
+    background: #e1dfdd;
+    padding: 1px 3px;
+    border-radius: 2px;
+  }
+
+  .modal-tip {
+    font-size: 11px;
+    color: #605e5c;
+    margin: 0;
+  }
+
+  .payload-preview-code {
+    background: #f8f9fa;
+    border: 1px solid #e1dfdd;
+    padding: 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-family: var(--font-family-mono, monospace);
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 220px;
+    overflow-y: auto;
+    margin: 0;
+  }
+
+  .modal-footer {
+    padding: 8px 14px;
+    border-top: 1px solid var(--office-border);
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  .primary-btn {
+    background: var(--excel-green);
+    color: white;
+    border: none;
+    border-radius: var(--office-radius-sm);
+    padding: 4px 14px;
+    font-size: 12px;
+    cursor: pointer;
   }
 </style>

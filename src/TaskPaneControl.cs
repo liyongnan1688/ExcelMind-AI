@@ -12,6 +12,7 @@ namespace LeeExcel
         private WebView2 _webView;
         private dynamic _app;
         private string _pendingAction = null;
+        private TaskPaneFocusMessageFilter _focusFilter = null;
 
         public TaskPaneControl(dynamic excelApp)
         {
@@ -25,6 +26,42 @@ namespace LeeExcel
             Controls.Add(_webView);
 
             InitializeWebView();
+
+            // 注册跨窗格/工作表平滑焦点交接过滤器
+            try
+            {
+                _focusFilter = new TaskPaneFocusMessageFilter(this.Handle, _app);
+                Application.AddMessageFilter(_focusFilter);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("AddMessageFilter notice: " + ex.Message);
+            }
+        }
+
+        public void RelinquishFocusToExcel()
+        {
+            if (this.IsHandleCreated)
+            {
+                TaskPaneFocusHelper.RelinquishFocusToExcel(this.Handle, _app);
+            }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                if (_focusFilter != null)
+                {
+                    try
+                    {
+                        Application.RemoveMessageFilter(_focusFilter);
+                    }
+                    catch { }
+                    _focusFilter = null;
+                }
+            }
+            base.Dispose(disposing);
         }
 
         private async void InitializeWebView()

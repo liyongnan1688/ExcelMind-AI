@@ -8,6 +8,64 @@ export interface SnapshotItem {
   vbaPreview: string;
 }
 
+export interface CellSampleItem {
+  row: number;
+  col: number;
+  address: string;
+  value: any;
+  displayText: string;
+  formula?: string | null;
+  valueType: 'string' | 'number' | 'boolean' | 'empty' | 'error';
+  isTextTruncated?: boolean;
+}
+
+export interface SelectionContextData {
+  workbookName: string;
+  workbookFullName: string;
+  sheetName: string;
+  address: string;
+  totalRows: number;
+  totalColumns: number;
+  startRow: number;
+  startColumn: number;
+  endRow: number;
+  endColumn: number;
+  isSingleArea: boolean;
+  sampleRowCount: number;
+  sampleColumnCount: number;
+  sampleAddress: string;
+  candidateHeaders: string[];
+  sampleRows: CellSampleItem[][];
+  formulaStatus: 'has_formula' | 'no_formula' | 'sample_mixed' | 'unknown' | string;
+  mergeStatus: 'has_merged' | 'no_merged' | 'sample_mixed' | 'unknown' | string;
+  visibilityStatus: 'sample_scanned_only' | 'unknown' | string;
+  isRowTruncated: boolean;
+  isColumnTruncated: boolean;
+  maxTextLengthLimit: number;
+  unscannedNotes: string;
+}
+
+export interface SelectionSendOptions {
+  includeStructure: boolean; // 总是 true
+  includeSamples: boolean; // 默认 false
+  includeFormulas: boolean; // 默认 false
+  firstRowAsHeader: boolean; // 默认 true
+}
+
+export interface SelectionSnapshot {
+  context: SelectionContextData;
+  options: SelectionSendOptions;
+  formattedText: string;
+  summary: {
+    fieldsIncluded: string[];
+    sampleRowRange: string;
+    sampleColRange: string;
+    totalChars: number;
+    isTruncated: boolean;
+    truncatedNotes: string;
+  };
+}
+
 export interface WorkbookInfo {
   name: string;
   fullName: string;
@@ -323,6 +381,63 @@ class NativeBridgeClient {
       };
     }
 
+    if (action === 'get_selection_context') {
+      return {
+        ok: true,
+        action,
+        data: {
+          workbookName: '2026年9月部门预算与绩效表.xlsx',
+          workbookFullName: 'C:\\Users\\35651\\Documents\\2026年9月部门预算与绩效表.xlsx',
+          sheetName: '汇总看板',
+          address: '$A$1:$F$10',
+          totalRows: 10,
+          totalColumns: 6,
+          startRow: 1,
+          startColumn: 1,
+          endRow: 10,
+          endColumn: 6,
+          isSingleArea: true,
+          sampleRowCount: 3,
+          sampleColumnCount: 6,
+          sampleAddress: '$A$1:$F$3',
+          candidateHeaders: ['部门', '科目', '预算金额', '实际支出', '执行率', '责任人'],
+          sampleRows: [
+            [
+              { row: 1, col: 1, address: '$A$1', value: '部门', displayText: '部门', valueType: 'string', isTextTruncated: false },
+              { row: 1, col: 2, address: '$B$1', value: '科目', displayText: '科目', valueType: 'string', isTextTruncated: false },
+              { row: 1, col: 3, address: '$C$1', value: '预算金额', displayText: '预算金额', valueType: 'string', isTextTruncated: false },
+              { row: 1, col: 4, address: '$D$1', value: '实际支出', displayText: '实际支出', valueType: 'string', isTextTruncated: false },
+              { row: 1, col: 5, address: '$E$1', value: '执行率', displayText: '执行率', valueType: 'string', isTextTruncated: false },
+              { row: 1, col: 6, address: '$F$1', value: '责任人', displayText: '责任人', valueType: 'string', isTextTruncated: false }
+            ],
+            [
+              { row: 2, col: 1, address: '$A$2', value: '研发部', displayText: '研发部', valueType: 'string', isTextTruncated: false },
+              { row: 2, col: 2, address: '$B$2', value: '云资源租赁', displayText: '云资源租赁', valueType: 'string', isTextTruncated: false },
+              { row: 2, col: 3, address: '$C$2', value: 500000, displayText: '500000', valueType: 'number', isTextTruncated: false },
+              { row: 2, col: 4, address: '$D$2', value: 420000, displayText: '420000', valueType: 'number', isTextTruncated: false },
+              { row: 2, col: 5, address: '$E$2', value: 0.84, displayText: '0.84', formula: '=D2/C2', valueType: 'number', isTextTruncated: false },
+              { row: 2, col: 6, address: '$F$2', value: '张工', displayText: '张工', valueType: 'string', isTextTruncated: false }
+            ],
+            [
+              { row: 3, col: 1, address: '$A$3', value: '市场部', displayText: '市场部', valueType: 'string', isTextTruncated: false },
+              { row: 3, col: 2, address: '$B$3', value: '广告宣发', displayText: '广告宣发', valueType: 'string', isTextTruncated: false },
+              { row: 3, col: 3, address: '$C$3', value: 300000, displayText: '300000', valueType: 'number', isTextTruncated: false },
+              { row: 3, col: 4, address: '$D$3', value: 310000, displayText: '310000', valueType: 'number', isTextTruncated: false },
+              { row: 3, col: 5, address: '$E$3', value: 1.033, displayText: '1.033', formula: '=D3/C3', valueType: 'number', isTextTruncated: false },
+              { row: 3, col: 6, address: '$F$3', value: '李经理', displayText: '李经理', valueType: 'string', isTextTruncated: false }
+            ]
+          ],
+          formulaStatus: 'sample_mixed',
+          mergeStatus: 'no_merged',
+          visibilityStatus: 'sample_scanned_only',
+          isRowTruncated: true,
+          isColumnTruncated: false,
+          maxTextLengthLimit: 100,
+          unscannedNotes: '选区共 10 行 × 6 列。本次仅安全抽样前 3 行 × 前 6 列。未扫描其余单元格内容，未扫描全表筛选/隐藏行状态。'
+        } as any,
+      };
+    }
+
     return {
       ok: true,
       action,
@@ -330,6 +445,25 @@ class NativeBridgeClient {
       data: {} as any,
     };
   }
+
+  public async getSelectionContext(
+    sampleRows: number = 5,
+    sampleCols: number = 15
+  ): Promise<{ ok: boolean; data?: SelectionContextData; error?: string; errorType?: string }> {
+    const res = await this.send<SelectionContextData>('get_selection_context', {
+      sampleRows: sampleRows.toString(),
+      sampleCols: sampleCols.toString(),
+    });
+    if (res.ok && res.data) {
+      return { ok: true, data: res.data };
+    }
+    return {
+      ok: false,
+      error: res.error || '获取选区失败',
+      errorType: (res.data as any)?.errorType || 'exception',
+    };
+  }
 }
 
 export const bridge = new NativeBridgeClient();
+

@@ -1,8 +1,9 @@
-# Lee-Excel 技术规范与说明书 (Technical Specification)
+# ExcelMind AI 技术规范与说明书 (Technical Specification)
 
-> **版本**：v1.0 (基线治理后标准版本)  
+> **版本**：v1.2 (基线固化与统一主规划治理版本)  
 > **文档性质**：系统技术规范、架构规约与开发者操作手册  
-> **编写日期**：2026-10-01  
+> **业务与演进主规划**：唯一主规划为 [docs/product-roadmap.md](file:///c:/Users/35651/Desktop/Google/lee-excle/docs/product-roadmap.md)，任务推进严格以主规划为准。  
+> **编写日期**：2026-10-02  
 > **面向对象**：系统维护工程师、发布工程师与插件二次开发者  
 
 ---
@@ -10,15 +11,19 @@
 ## 1. 项目用途与整体架构
 
 ### 1.1 系统定位
-Lee-Excel 是专为 Windows 平台 Microsoft Excel 桌面端开发的原生 AI 加载项。通过整合大语言模型强大的理解推理能力与本地 Office COM 自动化接口，提供侧边栏沉浸式交互，帮助用户高效完成数据加工、公式填充、格式美化与数据分析。
+ExcelMind AI 是专为 Windows 平台 Microsoft Excel 桌面端开发的原生 AI 智能工作台加载项。通过整合大语言模型理解推理能力与本地 Office COM 自动化接口，提供侧边栏沉浸式交互，帮助用户高效完成数据加工、复杂计算、多维汇总、报表格式美化与 VBA 宏复用。
 
 ### 1.2 整体架构设计
 系统采用分层松耦合架构：
-1. **宿主层 (Excel Host)**：原生 Excel 进程，通过 COM 接口加载标准 XLL 二进制加载项并渲染 Ribbon 扩展菜单。
+1. **宿主层 (Excel Host)**：原生 Excel 进程，通过 COM 接口加载标准 XLL 二进制加载项并渲染 Ribbon 扩展菜单（“ExcelMind AI”选项卡）。
 2. **桥接与容器层 (.NET Add-In Core)**：基于 Excel-DNA 框架构建 C# 类库，向宿主注入右侧原生任务窗格（CustomTaskPane），内部宿主 Microsoft Edge WebView2 控件。
 3. **交互表示层 (Web TaskPane UI)**：Svelte 5 构建的 Office Fluent 风格单页应用（SPA），运行在 WebView2 的独立渲染进程中。
 4. **调度网关 (Native Bridge)**：利用 WebView2 原生消息通道，通过 JSON 协议在 Web 前端与 C# 宿主之间进行异步双向调度。
 5. **执行保护引擎 (VBA Runner & Snapshot Engine)**：负责宏代码提取标准化、多工作簿目标锁定、写后状态读回核验与数据快照防损撤回。
+6. **物理持久化存储 (AppData)**：
+   - 宏库：`%APPDATA%\ExcelMindAI\Scripts\`（保存 `.bas` 与 `.meta.json`，向下兼容迁移旧目录）
+   - 快照：`%APPDATA%\ExcelMindAI\Backups\`（保存全本独立副本与救援备份）
+   - API 配置：WebView2 本地 LocalStorage (`excelmind_ai_llm_config`)，密钥纯本地保留。
 
 ---
 

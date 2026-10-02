@@ -128,12 +128,22 @@ namespace LeeExcel
                         if (_taskPaneControl != null) _taskPaneControl.NotifyWorkbookChanged();
                     };
 
+                    Action relinquishFocus = () =>
+                    {
+                        if (_taskPaneControl != null) _taskPaneControl.RelinquishFocusToExcel();
+                    };
+
                     try { app.WorkbookActivate += notify; } catch { }
                     try { app.WorkbookOpen += notify; } catch { }
                     try { app.NewWorkbook += notify; } catch { }
                     try { app.WindowActivate += new Action<object, object>((wb, wn) => notify(wb)); } catch { }
                     try { app.WorkbookAfterSave += new Action<object, bool>((wb, success) => notify(wb)); } catch { }
                     try { app.SheetActivate += new Action<object>((sh) => notify(null)); } catch { }
+
+                    // 工作表交互双重保险：当用户在工作表触发选区或编辑操作时，若焦点仍残留于任务窗格，平滑归还给工作表
+                    try { app.SheetSelectionChange += new Action<object, object>((sh, target) => relinquishFocus()); } catch { }
+                    try { app.SheetBeforeDoubleClick += new Action<object, object, bool>((sh, target, cancel) => relinquishFocus()); } catch { }
+                    try { app.SheetBeforeRightClick += new Action<object, object, bool>((sh, target, cancel) => relinquishFocus()); } catch { }
                 }
                 catch { }
             }

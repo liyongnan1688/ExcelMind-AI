@@ -84,6 +84,10 @@ namespace LeeExcel
                         resp = HandleGetWorkbookInfo(req, app);
                         break;
 
+                    case "get_selection_context":
+                        resp = HandleGetSelectionContext(req, app);
+                        break;
+
                     case "execute_vba":
                         resp = HandleExecuteVba(req, app);
                         break;
@@ -696,6 +700,42 @@ namespace LeeExcel
                 action = "delete_script",
                 message = ok ? "宏已成功删除" : err,
                 error = err
+            };
+        }
+
+        private static BridgeResponse HandleGetSelectionContext(Dictionary<string, string> req, dynamic app)
+        {
+            int sampleRows = SelectionContextService.DefaultMaxSampleRows;
+            int sampleCols = SelectionContextService.DefaultMaxSampleCols;
+
+            if (req.ContainsKey("sampleRows"))
+            {
+                int r;
+                if (int.TryParse(req["sampleRows"], out r)) sampleRows = r;
+            }
+            if (req.ContainsKey("sampleCols"))
+            {
+                int c;
+                if (int.TryParse(req["sampleCols"], out c)) sampleCols = c;
+            }
+
+            var result = SelectionContextService.GetSelectionContext(app, sampleRows, sampleCols);
+            if (!result.ok)
+            {
+                return new BridgeResponse
+                {
+                    ok = false,
+                    action = "get_selection_context",
+                    error = result.error,
+                    data = new Dictionary<string, string> { { "errorType", result.errorType ?? "unknown" } }
+                };
+            }
+
+            return new BridgeResponse
+            {
+                ok = true,
+                action = "get_selection_context",
+                data = result.data
             };
         }
     }

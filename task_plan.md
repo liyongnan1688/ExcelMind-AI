@@ -1,191 +1,128 @@
-# 项目规划书 (Project Plan) : Lee-Excel AI 原生助手
+# 项目规划与任务计划书 (Task Plan) : ExcelMind AI
 
-> **版本**：v1.1 (全局规划与资产基线建立)  
-> **维护责任人**：系统维护负责人 / 发布工程师 / 技术文档负责人  
-> **最近更新时间**：2026-10-01  
-> **基准代码分支**：`feat/system-quality-fix`  
-
----
-
-## 1. 项目目标与范围定义
-
-### 1.1 项目愿景
-Lee-Excel 是一个基于 **Excel-DNA** 与 **Microsoft Edge WebView2** 架构构建的高性能、沉浸式 Microsoft Excel 桌面 AI 助手插件。项目致力于将大语言模型（LLM）的自然语言意图理解能力与本地 Excel 自动化能力深度融合，让用户通过简洁的交互界面完成复杂的电子表格构建、复杂公式设置、数据清洗、多维汇总及报表美化。
-
-### 1.2 当前项目范围
-- **平台范围**：Windows 桌面版 Microsoft Excel（x64 架构优先，兼顾 x86）。
-- **交互边界**：
-  - Excel 原生 Ribbon 自定义菜单（“AI 助手”标签页及“打开 AI 任务窗格”按钮）；
-  - 430px 宽度的 Office Fluent 风格嵌入式任务窗格（CustomTaskPane）；
-  - 任务窗格内嵌现代 Web 交互界面（Svelte 5 SPA）；
-  - 本地 COM 互操作与 VBA 动态宏注入执行；
-  - 本地工作簿快照防丢失与安全回退保障。
-- **非本次目标**：
-  - 本次任务不涉及跨平台（macOS/Web 版 Office 365）扩展；
-  - 本次任务不升级核心框架依赖，不进行破坏性架构重构。
+> **主路线图引用**：本文件执行阶段计划严格遵循唯一主规划 [docs/product-roadmap.md](file:///c:/Users/35651/Desktop/Google/lee-excle/docs/product-roadmap.md)。  
+> **当前锁定版本**：v1.2.0 (Git Commit: `231ae3a`)  
+> **当前执行切片**：**R1a：“用户显式附加选区 → 只读预览 → 按用户选择随本次请求发送”**（本轮严格仅限 R1a，不自动进入 R1b–R7）  
+> **最近更新时间**：2026-10-02  
 
 ---
 
-## 2. 当前实际已实现的功能矩阵
+## 1. 真实仓库功能矩阵与状态划分（事实审计）
 
-根据实际源码（`src/` 与 `web/src/`）及只读核对，当前系统功能矩阵与真实验证状态划分如下：
+根据对现有代码（`src/`、`web/src/`、`scripts/`）、配置文件以及测试资产的实际审计，严格按以下 5 种状态进行区分，**绝不把历史 Office.js 概念混淆为当前 COM/VBA 执行能力**：
 
-| 功能模块 | 功能描述与技术实现 | 真实状态划分 | 依据与说明 |
+| 核心功能模块 | 技术实现与代码位置 | 真实状态划分 | 依据与验收证据 |
 | :--- | :--- | :--- | :--- |
-| **显式双通道路由** | 提供明确的 CHAT（问答闲聊）与 AUTOMATION（表格自动化）双模式；发送时刻在前端严格锁定 `requestMode` | **测试已验证** | `test_suite_unit.cjs` 验证了跨通道隔离、发送模式固化与异步切换保护 |
-| **严格代码提取与拦截** | 抛弃脆弱正则猜词；实现未闭合代码围栏拦截、缺少 `End Sub` 截断拦截与非代码响应安全退避 | **测试已验证** | `test_suite_unit.cjs` 覆盖多段围栏、截断及问答提及 Sub 场景，全部通过 |
-| **目标工作簿绑定** | 前端采集并发起时刻的工作簿标识（`targetWorkbookFullName` / `Name`）；宿主锁定目标对象并在宏执行前后核验身份，防多窗口切换串改 | **源码中已实现**<br>*(实际运行待验证)* | `VbaRunner.cs` 与 `NativeBridge.cs` 包含显式绑定代码；尚未在多前台 Excel 窗口切换下人工实测 |
-| **写后状态客观读回** | 宏执行后由 C# 宿主读取目标表格的 `UsedRange`、起笔坐标、单元格抽样文本、公式状态与边框底色，客观比对算式与排版，不虚假伪称满分 | **源码中已实现**<br>*(测试已验证比对逻辑)* | 前端核验比对逻辑由单测验证；宿主 COM 读回依赖实际 Excel 进程环境 |
-| **安全快照与撤回机制** | 执行前对未保存与已保存工作簿建立内存/临时快照；提供一键撤回宏执行对表格的修改 | **源码中已实现**<br>*(实际运行待验证)* | `SnapshotManager.cs` 包含完整快照存储与回滚逻辑；实际恢复效果需前台实测 |
-| **宏脚本本地抽屉存储** | 支持将高频或生成的自动化脚本保存至本地 `%APPDATA%\LeeExcel\Scripts\` 并提供列表管理 | **源码中已实现** | `ScriptManager.cs` 实现并提供接口 |
-| **脱敏审计与极简汇报** | 默认一句话汇报执行状态；提供“写后核验”与“审计日志”折叠卡，展示脱敏参数与读回摘要 | **源码中已实现** | `ExecutionCard.svelte` 包含完整组件实现 |
+| **选区只读感知 (R1a)** | `src/SelectionContextService.cs`（COM 批量子区域读取）、`ChatInput.svelte`（预览卡与选项）、`llm.ts`（低信任 Prompt 组装） | **自动测试通过**<br>*(awaiting_manual)* | Node 单测 36/36 PASS (含 9 项 R1a 专项测试)，C# 单测 11/11 PASS，Vite 构建就绪；待前台人工验收 |
+| **双通道显式路由** | 前端 `ChatInput.svelte`、`App.svelte` 锁定 `requestMode` (CHAT vs AUTOMATION)；后端严格执行路由隔离 | **自动测试通过**<br>(用户人工体验良好) | `test_suite_unit.cjs` (PASS: 36/36)，跨通道隔离与异步切换锁定用例 100% 验证 |
+| **代码提取与截断拦截** | `web/src/services/llm.ts` 废弃脆弱正则；未闭合代码块、缺少 `End Sub` 拦截；非代码回复不报错 | **自动测试通过** | `test_suite_unit.cjs` 覆盖多段围栏、截断拦截及正文中提及 Sub 场景；无代码纯文本标注 `no_code` |
+| **源码 100% 保真** | `src/ScriptManager.cs` 计算 SHA256；不替换引号、不正则改写代码；`src/VbaRunner.cs` 原文与包装器分离 | **自动测试通过** | `test_suite_unit.cjs` 验证智能引号保真；`test_regex_counter_example.cjs` 验证反例杜绝 |
+| **目标工作簿绑定** | `src/NativeBridge.cs` 锁定目标 `FullName`/`Name`，`VbaRunner.cs` 在执行前后校验身份，防多窗口串改 | **已实现 (源码级)**<br>*(真实多窗口待人工验证)* | 源码包含显式工作簿查找与绑定核验；尚未在多前台 Excel 窗口频繁切换下完成用户最终签收 |
+| **COM 宏注入与执行** | `src/VbaRunner.cs` 注入标准模块 `VBComponents.Add(vbext_ct_StdModule)` 并调用 `app.Run` | **自动测试通过**<br>*(外部隔离实测)* | `tests/tools/VerifyRealExcelExecution.cs` 验证无害宏执行；真实生产复杂宏仍依赖宿主单线程调度 |
+| **执行错误阶段展示** | `VbaRunner.cs` 细分 `failureStage`、`vbaErrNumber`、`comHResult`；`ExecutionCard.svelte` 阶段透明展示 | **已实现 (源码级)** | 错误阶段捕获已接入前端审计卡片；复杂 VBE 弹窗需 Windows API 探测辅助 |
+| **执行前全本快照恢复** | `src/SnapshotManager.cs` 在 `%APPDATA%\ExcelMindAI\Backups\` 创建物理独立副本；提供救援副本恢复 | **已实现 (源码级)**<br>*(实际工作簿待人工验收)* | 代码实现完整，支持未保存/已保存工作簿备份与恢复前救援；用户尚未进行整套异常恢复签收 |
+| **宏库多源导入与管理** | `src/ScriptManager.cs` 存储于 `%APPDATA%\ExcelMindAI\Scripts\`；支持文件/粘贴导入、重命名、导出 | **已实现** | `VerifyMacroFeature.cs` 编译验证；`.bas` 与 `.meta.json` 双向持久化成功；旧数据自动迁移可见 |
+| **功能区 (Ribbon) 布局** | `src/LeeExcelAddIn.cs` 包含智能助手、宏工具（宏库、导入）、设置（API设置）三大分组 | **用户人工验收** | 2026-10-02 真实 Excel 运行确认显示正常；UI Automation 探测取证完成并保留截图 |
+| **冷启动无重复注册** | `ScriptManager.cs` 等内部辅助函数显式限定为 `internal`，避免 Excel-DNA 自动导出为 Excel 工作表函数 | **自动测试通过** | 真实 Excel 加载探测证据 `ribbon_automation_evidence.txt` 验证 Excel-DNA 注册无异常 |
+| **大模型 API 本地配置** | `web/src/services/config.ts` 保存在 LocalStorage (`excelmind_ai_llm_config`)，兼容旧配置迁移 | **已实现** | 纯本地存储，兼容 DeepSeek/OpenAI/Claude/通义千问/Ollama 等；Key 不离机 |
+| **会话历史持久化** | `web/src/App.svelte` 当前会话记录仅存在于 Svelte 运行时内存，刷新页面重置 | **已知限制** | 标记为系统已知限制，R1a 未越权实现持久化 |
 
 ---
 
-## 3. 当前系统架构与模块边界概览
+## 2. 当前可用版本与最小回归清单 (v1.2.0 基线)
 
-```text
-+------------------------------------------------------------------------------------+
-|                                 Microsoft Excel 宿主                               |
-+------------------------------------------------------------------------------------+
-       |                                                         ^
-       | 1. 加载 XLL                                              | 6. COM API / 宏注入
-       v                                                         v
-+-------------------------------+                         +--------------------------+
-|  bin/LeeExcel64.xll (ExcelDna)|                         |     Microsoft Excel      |
-|  bin/LeeExcel.dna             |                         |     Workbooks & Sheets   |
-+-------------------------------+                         +--------------------------+
-       |                                                         ^
-       | 2. 载入 .NET DLL                                         | 5. 状态读回 / 单元格校验
-       v                                                         |
-+----------------------------------------------------------------+-------------------+
-|                        bin/LeeExcel.dll (C# 原生插件核心)                          |
-|  - LeeExcelAddIn.cs     : 插件生命周期 (AutoOpen / AutoClose), 注册 Ribbon UI      |
-|  - TaskPaneControl.cs   : 管理 CustomTaskPane 并宿主 Microsoft Edge WebView2 控件 |
-|  - NativeBridge.cs      : 前后端 JSON 调度网关 (Dispatch)                          |
-|  - VbaRunner.cs         : 目标工作簿绑定、宏标准化注入、写后状态读回 (Readback)    |
-|  - SnapshotManager.cs   : 未保存/已保存工作簿工作态快照与精准恢复                  |
-|  - ScriptManager.cs     : 本地常用宏脚本持久化与检索                               |
-|  - SimpleJson.cs        : 独立无依赖轻量 JSON 序列化器                             |
-+------------------------------------------------------------------------------------+
-       |
-       | 3. WebView2 控件加载本地映射虚拟域名 (https://app.lee-excel/)
-       v
-+------------------------------------------------------------------------------------+
-|                        bin/dist/ (Svelte 5 前端单页应用)                           |
-|  - App.svelte           : 双通道状态分发与任务生命周期调度                         |
-|  - ChatInput.svelte     : 显式 CHAT / AUTOMATION 模式切换与锁定                    |
-|  - ExecutionCard.svelte : 执行卡片、写后客观核验比对结果、脱敏审计日志展示         |
-|  - llm.ts               : 大模型请求构造、严格代码提取与截断拦截比对               |
-|  - bridge.ts            : window.chrome.webview 双向 postMessage 通信包装          |
-+------------------------------------------------------------------------------------+
-```
+- **可用基线 Commit**：`231ae3a` (Release v1.2.0 自动构建工作流就绪)
+- **最小回归验证清单 (必须 100% 保持)**：
+  1. **对话不执行**：CHAT 模式下用户任何指令均不调用 COM 宏执行器，不触发快照创建。
+  2. **操作写值**：AUTOMATION 模式下有效 VBA 成功在目标工作簿写值，写后读回 `WorkbookReadback` 准确捕获区域。
+  3. **无代码回复不伪报宏失败**：AUTOMATION 模式下纯文本说明回复不触发执行，不伪报宏执行错误。
+  4. **导入保存重开**：导入宏持久化到 `%APPDATA%\ExcelMindAI\Scripts\`，重开 Excel 宏库列表完整可见。
+  5. **源码保真**：VBA 宏引号、中文、`Option Explicit`、模块属性绝不被静默正则改写。
+  6. **运行错误展示**：宏执行失败如实汇报阶段（编译期/注入期/运行期）与错误描述，不报虚假成功。
+  7. **快照恢复**：执行前在 `%APPDATA%\ExcelMindAI\Backups\` 物理备份；恢复前保存救援副本。
+  8. **冷启动无重复注册**：内部 C# 函数不滥用 public static，Excel-DNA 冷启动无重复函数注册异常。
 
 ---
 
-## 4. 当前状态分类：已完成、进行中与待验证
+## 3. R0 治理与 R1a 实施任务执行记录表
 
-### 4.1 已经完成（Facts）
-1. **工作区首轮保守清理**：完成了第一批 123 个纯临时生成文件的清理，全量建立哈希备份并保持 100% 受保护核心资产未变动。
-2. **安全忽略规则**：建立限制性 `.gitignore`，隔离已清空的测试生成目录与本地备份。
-3. **前端通道显式拆分与代码提取**：完成了 Svelte 组件与 `llm.ts` 的核心改造，并通过 27 项单元测试基线。
-
-### 4.2 进行中（In Progress）
-1. **统一技术说明与开发规约建设**：建立全面的 `TECHNICAL_SPEC.md`。
-2. **多前台窗口并发切换下的稳健性强化**：持续针对目标绑定机制优化边界用例。
-
-### 4.3 待验证事项（Pending Verification）
-1. **实际 Excel 宿主加载与界面渲染**：需要在安装有 Office 的环境下启动实际 Excel，观察 Ribbon 与 WebView2 任务窗格响应。
-2. **复杂长耗时宏的 UI 响应度**：宏执行期间 Excel COM 单线程阻塞对前端交互的影响需实测评估。
-3. **真实大模型端到端调用（受限验证）**：需在安全授权下使用测试账号验证联网全链路。
+| 任务 ID | 所属阶段 | 任务内容与用户价值 | 状态 | 交付文件 / 证据 | 停点判定 |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `TASK-R0-01` | R0 | **真实功能状态审计与边界划分**<br>彻底梳理代码、测试与人工验收边界，区隔 Office.js 与桌面 VBA。 | `accepted` | `task_plan.md`<br>`findings.md`<br>`progress.md` | 事实边界核实完成 |
+| `TASK-R0-02` | R0 | **可用版本基线固定与最小回归清单**<br>锁定 commit `231ae3a` (v1.2.0)，确立 8 项不可退化最小回归。 | `accepted` | `docs/product-roadmap.md`<br>`task_plan.md` | 8 项回归基准确立 |
+| `TASK-R0-03` | R0 | **统一主规划路线图建立**<br>以 `docs/product-roadmap.md` 为唯一主规划，统领 R0–R7，消除多份计划冲突。 | `accepted` | `docs/product-roadmap.md` | 唯一规划文件生效 |
+| `TASK-R0-04` | R0 | **R1a 最小切片接口与文件映射预备**<br>梳理选区只读服务接口契约与前端组件映射，本轮不编写代码。 | `accepted` | `docs/product-roadmap.md` §8<br>`task_plan.md` §4 | 接口已定义，等用户授权 |
+| `TASK-R1a-01` | R1a | **C# 宿主选区只读上下文服务**<br>独立 `SelectionContextService`，批量读取 Value2/Formula/结构，严禁整列加载，绝不逐格跨 COM。 | `accepted` | `src/SelectionContextService.cs`<br>`src/NativeBridge.cs` | 用户人工实测通过，选区只读基本功能正常 |
+| `TASK-R1a-02` | R1a | **前端“附加选区”卡片与只读预览**<br>在输入区增加附加按钮、紧凑预览卡、4项发送选项与透明查看弹窗。 | `accepted` | `web/src/components/ChatInput.svelte`<br>`web/src/App.svelte` | 用户人工实测通过，选区预览正常 |
+| `TASK-R1a-03` | R1a | **选区数据结构化注入 Prompt**<br>低信任数据段注入，严格防范文本单元格指令提权；请求固化与跨工作簿拦截。 | `accepted` | `web/src/services/llm.ts`<br>`web/src/services/bridge.ts` | 用户人工实测通过，请求隔离正常 |
+| `TASK-FIX-FOCUS-01` | 交互缺陷 | **修复 Excel 工作表与 WebView2 任务窗格焦点交接缺陷**<br>解决点击文本框输入后再点击工作表单元格，键盘输入仍进入插件的单向锁焦问题。 | `accepted` | `src/TaskPaneFocusHelper.cs`<br>`src/TaskPaneControl.cs`<br>`src/LeeExcelAddIn.cs`<br>`tests/tools/VerifyFocusHandover.cs` | 用户实测通过：插件输入后点击单元格，新输入正确进入单元格；缺陷正式关闭；其他未实测边界保留待验 |
 
 ---
 
-## 5. 已知问题、技术债务与主要风险
+## 4. 阶段验收结论与 R1b 待启动状态
 
-1. **依赖项全量进版本库**：
-   - 现状：`packages/`（82MB NuGet 离线包）和 `web/node_modules/`（18,762个文件）在 Git 历史中被全量跟踪。
-   - 债务：仓库体积较大，常规 clone 耗时；但当前提供了极好的“无网络断网可编译”保障，短期内不可冒进清理。
-2. **缺乏标准发布安装打包机制**：
-   - 现状：当前发布依赖直接拷贝整套 `bin/` 目录。
-   - 风险：目标用户机器若未预装 WebView2 Runtime 或 .NET Framework 4.8，可能启动报错。
-3. **VBE 弹窗自动化响应依赖 Windows API 嗅探**：
-   - 现状：当宏出现编译或语法错误时，Excel VBE 可能弹出模态对话框，需依赖探针探测捕获。
+1. **R1a 选区功能与焦点修复验收结论**：
+   - 用户已完成前台实测：插件输入后点击单元格，键盘输入正确进入单元格，焦点交接正常。
+   - `TASK-R1a-01` ~ `TASK-R1a-03` 及 `TASK-FIX-FOCUS-01` 全部验收通过（`accepted`），交互缺陷正式关闭。
+   - 事实边界保留：双击就地编辑、公式栏、中文输入法（IME）在极端长流式时的前台表现，继续标为未验证，不泛化为全部交互通过。
+2. **R1b 准入状态**：
+   - 当前已完成 R1b 最小切片设计，严格不执行编码，等待用户明确指令后方可实施。
+   - *(注：原 R1a 5步人工验收已于 2026-10-02 完成并确认，结果已归档至 progress.md)*
+
+
+### 4.1 最小功能闭环 (R1a)
+“用户在 Excel 中框选区域 → 任务窗格点击【附加当前选区】 → 前端弹出只读结构卡片（工作表、地址、行列数、表头候选、首行样本、选项勾选） → 用户确认后随自然语言发送 → 大模型基于真实表格结构生成针对性 VBA”。
+
+### 4.2 接口契约定义
+- **桥接动作 (Action)**：`get_selection_context`
+- **请求负载 (Request)**：
+  ```json
+  { "action": "get_selection_context", "requestId": "req_sel_xxx", "params": { "sampleRowCount": 3 } }
+  ```
+- **响应负载 (Response)**：
+  ```json
+  {
+    "ok": true,
+    "action": "get_selection_context",
+    "requestId": "req_sel_xxx",
+    "data": {
+      "workbookName": "当前工作簿.xlsx",
+      "sheetName": "Sheet1",
+      "address": "$A$1:$F$20",
+      "rowCount": 20,
+      "columnCount": 6,
+      "isSingleArea": true,
+      "headers": ["列1", "列2", "列3"],
+      "sampleRows": [["数据A", "数据B", "数据C"]],
+      "hasFormulas": false,
+      "hasMergedCells": false,
+      "isFilteredOrHidden": false,
+      "truncated": false
+    }
+  }
+  ```
+
+### 4.3 预定修改文件映射
+1. `src/NativeBridge.cs`：添加 `get_selection_context` 消息分发；
+2. `src/VbaRunner.cs`：实现 `GetSelectionContext`，通过 COM 批量读取 `range.Value2`，严禁逐格 COM 遍历；多区域友好降级；
+3. `web/src/services/bridge.ts`：导出 `getSelectionContext` 调用方法；
+4. `web/src/components/ChatInput.svelte`：实现【附加当前选区】按钮与紧凑只读卡片；
+5. `web/src/services/llm.ts`：实现安全的 Markdown 表格提示词格式化函数（防文本单元格指令注入）。
 
 ---
 
-## 6. 后续演进任务与优先级路线
+## 5. 历史归档与原始记录
 
-| 优先级 | 任务阶段 | 具体目标与验收标准 |
-| :---: | :--- | :--- |
-| **P0** | **真实加载验证** | 执行 `run_excel.ps1`，验证右侧任务窗格加载、Fluent 风格界面渲染及与当前工作簿信息读取正常。 |
-| **P1** | **第二批测试归档** | 将 `scratch/` 下 19 个独立 `.cs` 测试工具源码与重要日志归档至规范目录（如 `tests/tools/`），解除草稿区依赖。 |
-| **P2** | **发布构建规范化** | 编写标准的发布检查脚本（`check_release_readiness.ps1`），自动验证 `bin/` 绿包依赖完整性。 |
-| **P3** | **独立安装程序探索** | 研究 Inno Setup 或 MSIX 打包，自动检测宿主 .NET 4.8 与 WebView2 运行时。 |
+### 5.1 【历史归档：2026-10-01 工作区首轮保守清理与测试规范】
+- 针对 123 个临时文件完成物理备份（`.backup_cleanup_batch1_20261001/`）与安全清理；
+- 16 个核心测试工具迁移至 `tests/tools/` 与 `tests/diagnostics/`；
+- 9 个历史证据迁移至 `docs/history/evidence_202609/`；
+- 建立安全清理入口 `scripts/clean_artifacts.ps1`，默认仅预览，需 `-Apply` 执行；
+- 保留 11 个活跃保护脚本于 `scratch/`（含用户修改）。
 
----
-
-## 7. 本次清理产生的结构变化及影响说明
-
-- **被清理的文件**：共 123 个未跟踪文件（包括 11 个散落在 `bin/` 根目录的临时测试 exe、47 个内存 dump 片段、24 个测试运行产生的临时 xlsx 以及 40 个过程草稿代码切片）。
-- **保留的核心文件**：`src/` 核心源码、`web/src/` 前端源码、`build_addin.ps1`、`run_excel.ps1`、根目录核心测试脚本、`bin/` 核心运行时库（DLL/XLL/DNA/dist）以及 `scratch/` 下的 19 个测试工具源码与历史日志全部保留原位。
-- **运行影响**：零负面影响。消除了发布目录 `bin/` 内的非生产测试二进制污染，核心构建与前端单页应用结构保持绝对稳定。
-
----
-
-## 8. 【历史归档：系统性质量修复专项规划】（原始记录完整保留）
-
-> 以下内容为 2026-09-25 启动的“系统性质量修复 (system-quality-fix)”专项任务的原始历史记录，已归档保存，禁止覆盖删除。
-
-### 核心目标与纠偏原则
-1. **解除未经证实的假设**：
-   - 不把 `temperature: 0.1` 假定为数值矩阵的唯一因果；移除写死强制温度，支持前端可选配置与按模型能力传参（默认留空不强传）。
-   - 严禁把“统一使用 ActiveWorkbook”作为目标绑定方案；任务发起时在前端与宿主锁定具体目标工作簿（FullName / Name），执行前后校验身份，生成的 VBA 不受窗口切换置顶影响。
-2. **拆分聊天与自动化通道 (CHAT vs AUTOMATION)**：
-   - 问答、闲聊、身份咨询走 CHAT（零 VBA、零快照、零注入）。
-   - 明确操作指令走 AUTOMATION。
-   - 意图不明确时发出简短澄清，绝不乱执行。
-3. **修复生成协议与代码提取**：
-   - 彻底删除 D1:L9、35行上限、严禁逐格等偏置词。
-   - 严禁凭 `includes('Sub')` 猜代码；响应截断或缺少 End Sub 时立即安全拦截。
-4. **区分“宏已运行”与“任务完成”**：
-   - COM 执行成功仅代表宏已运行。
-   - 引入写后读回 (Readback)，比对起始单元格、算式特征、数据完整性；主观美化如实标为“效果待确认”。
-5. **脱敏审计日志与极简界面**：
-   - 气泡保持一句话汇报，默认折叠；审计日志记录脱敏参数、规整步骤与读回数据。
-6. **跨任务全面回归**：
-   - 覆盖纯聊天、代码解释、阶梯算式表、纯数字矩阵、数据格式化、公式、筛选、图表、截断保护与多窗口切换。
-
-### 专项阶段进展记录
-#### Phase 1: 基础环境与回退基线
-- **Status:** complete
-- **Tasks:**
-  - [x] 在 `feat/system-quality-fix` 分支保留 `fdab9e1` 可回退基线。
-
-#### Phase 2: C# 宿主引擎目标绑定与写后读回 (Readback)
-- **Status:** complete
-- **Tasks:**
-  - [x] `src/VbaRunner.cs`：实现 `WorkbookReadback` 状态读回（区域、首末坐标、行列数、边框、底色、公式、抽样）。
-  - [x] `src/VbaRunner.cs`：实现过程入口标准化与目标工作簿显式绑定（防止 ActiveWorkbook/ThisWorkbook 切换窗口串改）。
-  - [x] `src/NativeBridge.cs`：实现 `FindTargetWorkbook`，针对目标工作簿执行与快照备份。
-  - [x] `src/SnapshotManager.cs`：强化未保存工作簿防崩溃保护。
-  - [x] 通过系统 `csc.exe` 成功编译 `bin/LeeExcel.dll` 与组织 `bin/LeeExcel64.xll`。
-
-#### Phase 3: 前端通道路由、严格协议与写后核验
-- **Status:** complete
-- **Tasks:**
-  - [x] `web/src/services/config.ts`：增加可选 `temperature` 配置，移除写死温度。
-  - [x] `web/src/services/llm.ts`：实现 `detectIntent`（精确划分 CHAT、AUTOMATION、AMBIGUOUS）。
-  - [x] `web/src/services/llm.ts`：实现双通道系统提示词（CHAT 严禁代码块，AUTOMATION 规范输出并清除 D1:L9 偏置）。
-  - [x] `web/src/services/llm.ts`：实现严格代码提取 `extractVbaCode` 与截断拦截。
-  - [x] `web/src/services/llm.ts`：实现 `verifyExecutionResult`（客观核验算式文本、坐标起点与主观美化）。
-  - [x] `web/src/components/ExecutionCard.svelte`：增加“写后核验”与“审计日志”选项卡，默认折叠，不伪称满分完成。
-  - [x] `web/src/App.svelte`：实现通道分流调度与简短汇报。
-  - [x] `npm run build` 构建成功，输出到 `bin/dist/`。
-
-#### Phase 4: 多场景自动化回归测试
-- **Status:** complete
-- **Tasks:**
-  - [x] 运行 `node test_suite_unit.cjs`：30 项单元测试（多措辞意图、截断拦截、核验逻辑）100% 通过。
-  - [x] 运行 `test_system_suite.ps1`：9 项独立 Excel COM 集成测试（多工作簿切换隔离、阶梯算式表、纯数字矩阵、数据完整性、公式、筛选、图表）100% 通过。
-  - [x] 运行 `test_core.ps1`：存量基础功能 100% 通过。
+### 5.2 【历史归档：2026-09-25 系统性质量修复专项】
+- 移除写死 temperature，转为前端可选配置；
+- 拆分 CHAT 与 AUTOMATION 显式双通道；
+- 废弃脆弱的 `includes('Sub')` 与 D1:L9 偏置词；
+- 引入写后读回机制 `WorkbookReadback`；
+- 单元测试与系统集成测试 100% 通过。

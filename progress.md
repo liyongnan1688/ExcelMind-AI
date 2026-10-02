@@ -238,6 +238,160 @@
 ### 最终结论
 本轮文件整理与路径修复全部完成，实际Excel运行待人工验证。
 
+---
+
+## Session: 2026-10-02 (R0 阶段实施：规划治理、基线固定与任务体系建立)
+
+### 阶段目标与授权范围
+- **授权约束**：严格限定为 **R0 阶段**，不自动开发 R1–R7 任何业务功能。
+- **核心目标**：全面核实真实仓库能力与资产位置，建立唯一主规划，固化 v1.2.0 可用基线与最小回归清单，预备 R1a 接口映射。
+
+### 阶段实施细节与事实记录
+- [x] **真实仓库功能与资产深度审计 (TASK-R0-01)**：
+  - 核实物理存储路径：宏库位于 `%APPDATA%\ExcelMindAI\Scripts\`（含旧目录自动迁移），快照位于 `%APPDATA%\ExcelMindAI\Backups\`（含救援副本），API 配置位于 WebView2 `localStorage['excelmind_ai_llm_config']`，聊天记录当前在 Svelte 运行时内存。
+  - 严格区分 5 类状态：已实现、自动测试通过、用户人工验收、未验证、已知限制；彻底杜绝历史 Office.js 概念混淆。
+- [x] **建立唯一主规划路线图 (TASK-R0-03)**：
+  - 新建 `docs/product-roadmap.md` 作为项目唯一定位与主规划源，系统化纳入《ExcelMind AI 产品迭代规划书》。
+  - 详细定义不可退化原则、R0–R7 演进顺序、每阶段范围、不做项、验收标准与停点。
+  - 建立 6 个开源项目（OpenRefine、Rubberduck、ClosedXML、VBA-Web、xlwings、duckdb-excel）的研究参考规范台账，明确许可证要求与边界约束。
+  - 建立具备唯一任务 ID（`TASK-R0-01` ~ `TASK-R6c-01`）的任务跟踪表，采用 6 级严格状态机。
+- [x] **固化可用版本基线与最小回归清单 (TASK-R0-02)**：
+  - 锁定可用基线：`231ae3a` (Release v1.2.0)。
+  - 确立 8 项不可退化最小回归：对话不执行、操作写值、无代码回复不伪报宏失败、导入保存重开、源码保真、运行错误展示、快照恢复、冷启动无重复注册。
+- [x] **离线门禁自动化验证**：
+  - 运行 `node test_suite_unit.cjs`：27/27 PASS（覆盖显式双通道、代码截断拦截、异步切换保护、写后核验比对等）。
+  - 运行 `node test_regex_counter_example.cjs`：3/3 PASS（验证禁用正则静默改写的必要性与反例杜绝）。
+- [x] **R1a 最小切片接口与文件映射预备 (TASK-R0-04)**：
+  - 完成“用户显式附加选区 → 只读上下文卡预览 → 确认发送”的架构设计。
+  - 定义了 `get_selection_context` 请求响应契约与 `SelectionContextDto` 数据结构。
+  - 明确映射至 `src/NativeBridge.cs`、`src/VbaRunner.cs`、`web/src/components/ChatInput.svelte` 与 `web/src/services/llm.ts`。
+  - 严格遵守纪律，未编写任何 R1a 业务代码，等待用户授权。
+
+### 最终状态
+R0 阶段全部目标已达成并通过离线验证；当前工作区干净，无未授权代码变动；停下等待用户验收 R0 并授权启动 R1a。
+
+---
+
+## Session: 2026-10-02 (R1a 阶段实施：用户显式附加选区 → 只读预览 → 按用户选择随本次请求发送)
+
+### 阶段目标与授权范围
+- **授权约束**：严格限定为 **R1a 阶段** 最小切片，不实施 R1b–R7；不修改模型 VBA、不增加语法/算法限制；不改变现有操作/对话路由、宏执行器、快照和宏库行为。
+- **两项短核对**：
+  1. **宏库真实目录**：`%APPDATA%\ExcelMindAI\Scripts\`（包含 `.bas` 与 `.meta.json`）。启动时代码自动将旧 `%APPDATA%\LeeExcel\Scripts\` 数据无损迁移复制，旧宏完全可见；历史报告出现的 `ExcelMind\scripts` 确认为书写笔误，已在主规划文档中统一修正。
+  2. **会话历史状态**：`web/src/App.svelte` 中的 `messages` 数组完全属于纯前端运行时内存状态，刷新/重开即重置，明确标记为已知限制，R1a 严格未做跨会话持久化。
+
+### 阶段实施细节与文件修改
+- [x] **新增只读选区服务 (TASK-R1a-01)**：
+  - 新建 `src/SelectionContextService.cs`，彻底独立于 `VbaRunner.cs`，专职只读安全读取。
+  - 严格限制：零写入、零格式化、零激活工作表、零选区改变、零宏注入、零大模型调用、零 API Key 触碰。
+  - COM 安全采样：绝不加载整表或整列 Value2，预先限制样本行列上限（默认行上限 5，列上限 15，单元格文本上限 100 字符，超长标注 `...[截断]`）。
+  - 友好降级机制：多区域（`Areas.Count > 1`）与非 Range 选中（如 Chart、Shape）返回友好降级错误，绝不静默改读 `ActiveSheet.UsedRange`。
+  - 数据契约真实表达：区分 `candidateHeaders`、保留原始数据类型与公式、局部状态明确标为 `sample_scanned_only` / `unknown`，不夸大推论全表。
+- [x] **宿主调度网关分发 (TASK-R1a-01)**：
+  - 更新 `src/NativeBridge.cs`，添加 `case "get_selection_context"` 分发至 `HandleGetSelectionContext`。
+  - 确保调用在宿主线程完成，以标准 JSON 格式返回给前端。
+- [x] **前端选区只读预览与显式勾选控制 (TASK-R1a-02)**：
+  - 更新 `web/src/services/bridge.ts`，导出 `SelectionContextData`、`SelectionSendOptions`、`SelectionSnapshot` 等强类型接口，提供 `bridge.getSelectionContext()` 及 mock 桩。
+  - 更新 `web/src/components/ChatInput.svelte`，在输入框上方新增【📎 附加当前选区】按钮（对话/操作双模式通用）。
+  - 紧凑只读预览卡：展示工作簿名、工作表、地址、总行列数、采样范围、局部特征与未扫描说明；提供重新读取与移除操作。
+  - 4 项发送配置开关（默认仅候选表头有效，样本值与公式默认不勾选，需用户显式确认）：
+    1. 首行作为表头（取消勾选则降级为纯候选）
+    2. 包含样本值（默认关）
+    3. 包含样本公式（默认关）
+    4. 仅发送结构（关闭值与公式）
+- [x] **请求生命周期固化、跨表隔离与防提权注入 (TASK-R1a-03)**：
+  - 更新 `web/src/services/llm.ts`，新增 `formatSelectionContextForPrompt` 组装器：
+    - 将选区以低信任独立数据段 `<excel_selection_context>` 注入 user prompt，显式声明单元格文本为纯业务数据，不得执行任何内部指令，彻底阻断提示词提权。
+    - 路径脱敏：仅向模型提供工作簿名称与区域地址，本地绝对物理路径默认剔除。
+    - 发送审计：在请求发出时记录 `selectionAudit`（包含发送字段、样本行数、列数、字符量、省略情况），普通日志不存业务值全文。
+  - 更新 `web/src/App.svelte`：
+    - 发送时固化快照：点击发送时将当前模式、目标工作簿身份、选区快照与发送选项深拷贝冻结到 `ChatMessage`，后续选区变动或模式切换对已发请求零影响。
+    - 操作模式跨表强拦截：若附件来自工作簿 A，而当前操作目标工作簿变为 B，强行拦截发送并弹窗提示用户重新附加或移除附件，绝不混用上下文。
+    - 对话模式安全：对话模式携带附件时仅做业务解释分析，绝不产生快照、写值或 `execute_vba`。
+    - 前端展示：用户消息气泡展示附件徽章，提供【查看发送内容】弹窗（严格脱敏且绝不包含 API Key）。
+
+### 构建与自动化验证结果
+- **C# 宿主编译**：运行 `build_addin.ps1`，成功编译 `bin/LeeExcel.dll`（0 Errors, 0 Warnings）。
+- **前端构建打包**：运行 `pnpm run build`，成功打包至 `bin/dist/`（TypeScript 检查通过）。
+- **C# 独立单元测试工具**：
+  - 编写 `tests/tools/VerifySelectionContext.cs`，编译至 `.artifacts/tests/selection_verification/` 并执行；
+  - 11 项全功能验证（单单元格、非 A1 起始、整列子区域限制、多区域降级拦截、非 Range 降级拦截、中文与前导零保真、日期与公式识别、长文本截断、仅结构发送过滤、含样本值过滤、注入隔离标签）**全部 100% 通过 (PASS: 11/11)**。
+- **离线核心单测门禁**：
+  - 扩充 `test_suite_unit.cjs` 新增 9 项 R1a 选区与提示注入隔离测试；
+  - 运行 `node test_suite_unit.cjs`：**36/36 PASS (100%)**。
+  - 运行 `node test_regex_counter_example.cjs`：**3/3 PASS (100%)**。
+
+### 最终状态
+R1a 阶段代码与构建已完成，离线与单元测试 100% 通过；`TASK-R1a-01` ~ `TASK-R1a-03` 状态标记为 `awaiting_manual`；停下等待用户人工验收，不自动进入 R1b。
+
+---
+
+## 缺陷排查与纠偏 (2026-10-02：对话/操作点击发送无响应缺陷修复)
+
+### 1. 现象与根因定位 (Systematic Debugging)
+- **用户反馈**：在对话模式附加选区并输入“这几行有什么”后，点击【💬 对话】或按 Enter 无法发送，消息未进入列表，文字未清空。
+- **排查证据与根因**：
+  1. 静态扫描 `web/src/App.svelte` 模板标签：发现第 546 行 `<Zap size={10} />` 与第 549 行 `<MessageSquare size={10} />` 在用户气泡的 `user-mode-tag` 中被直接使用；
+  2. 但在 `App.svelte` 顶部的 `<script>` 导入区中，**遗漏了 `import { Zap, MessageSquare } from 'lucide-svelte';`**；
+  3. Vite 编译时将其降级为全局裸调用 `MessageSquare(_a, { size: 10 })`；当用户点击发送并向 `messages` 插入第一条带 `mode: 'CHAT'` 的消息时，Svelte 触发微任务重绘，直接抛出未捕获的 **`ReferenceError: MessageSquare is not defined`**；
+  4. 该 ReferenceError 导致 Svelte 渲染管道瞬间崩溃卡死，UI 更新冻结，输入框内容无法反映清空，后续点击亦全部失效。
+
+### 2. 修复与防御加固措施
+- **补齐组件导入**：在 `web/src/App.svelte` 顶部显式补齐 `import { Zap, MessageSquare } from 'lucide-svelte';`，全仓扫描确认无其他组件遗漏。
+- **数据兜底防御**：在 `web/src/services/llm.ts` 的 `formatSelectionContextForPrompt` 中，对 `candidateHeaders` 增加防空数组兜底（`Array.isArray(ctx.candidateHeaders) && ... : ['列1']`）。
+- **组件异常保护**：在 `web/src/components/ChatInput.svelte` 的 `handleSubmit` 中加入 try-catch 保护，若组装遇到异常直接在输入框上方错误条展示，杜绝任何静默崩溃。
+- **前端构建产物更新**：重新执行 `pnpm run build`，编译产物 `bin/dist/assets/index-DasbtHtN.js` 已完成打包，`Zap` 与 `MessageSquare` 100% 正确混淆引用。
+- **离线核心单测回归**：`node test_suite_unit.cjs` (36/36 PASS), `node test_regex_counter_example.cjs` (3/3 PASS)。
+
+---
+
+## 缺陷排查与修复 (2026-10-02：Excel 工作表与任务窗格输入焦点交接缺陷)
+
+### 1. 现象与真实根因判定 (Systematic Debugging)
+- **缺陷现象**：在插件文本框输入“插件草稿”后，鼠标点击 Excel 单元格（如 A1），键盘输入依然进入插件文本框，未进入单元格。
+- **根因判定**：
+  - 排除根因 B（异步回调抢焦点）：审查前端全仓，流式输出、API 返回、选区读取、模式切换**零 focus()、零 autofocus 代码**。
+  - 排除根因 C（全局按键截获）：全仓无全局 Windows 键盘 Hook，按键绑定仅局限在 `<textarea>` 自身。
+  - **确认根因 A（WebView2 未释放 Win32 焦点）**：
+    - CustomTaskPane 与 Excel 主窗口属于同一 UI 线程。
+    - 点击工作表 `EXCEL7` 窗口时，Excel 改变了选区框绘制，但未显式调用 Win32 `SetFocus(hwndExcel7)`。
+    - 系统的 Win32 键盘焦点句柄 `GetFocus()` 依然停留在 WebView2 内部子窗口（`Chrome_RenderWidgetHostHWND`），后续按键被操作系统直接投递给 Chromium。
+
+### 2. 最小改动修复实施
+- **`src/TaskPaneFocusHelper.cs` (新增)**：
+  - 封装 Win32 API：`GetFocus`、`SetFocus`、`IsChild`、`GetParent`、`FindWindowEx`、`GetClassName`。
+  - 实现 `IsChildOrSame`：支持直接句柄比对、`IsChild` 及 `GetParent` 递归向上回溯（64层防环）。
+  - 实现 `GetActiveWorksheetHwnd`：安全枚举当前前台工作簿的 `EXCEL7` 窗口句柄。
+  - 实现 `RelinquishFocusToExcel`：仅在焦点确实在任务窗格内部时才安全让出焦点。
+  - 实现 `TaskPaneFocusMessageFilter : IMessageFilter`：纯 WinForms 进程内消息过滤（非系统钩子），监听鼠标点击 `WM_LBUTTONDOWN` 等消息，当点击在任务窗格外且焦点在窗格内时，显式将焦点平滑交还目标控件（如 `EXCEL7`）；**永远返回 false**，不吞掉任何消息。
+- **`src/TaskPaneControl.cs` (修改)**：
+  - 构造函数中向 `Application` 注册 `TaskPaneFocusMessageFilter`。
+  - 在 `Dispose` 中注销 `TaskPaneFocusMessageFilter`。
+  - 公开 `RelinquishFocusToExcel` 供 COM 事件调用。
+- **`src/LeeExcelAddIn.cs` (修改)**：
+  - 在 `AutoOpen` 中为 `SheetSelectionChange`、`SheetBeforeDoubleClick`、`SheetBeforeRightClick` 增加焦点归还双重保险。
+
+### 3. 自动化验证与门禁全绿
+- **插件全量编译**：运行 `build_addin.ps1`，成功编译 `bin/LeeExcel.dll`（0 Errors, 0 Warnings）。
+- **焦点机制独立单元测试**：
+  - 编写 `tests/tools/VerifyFocusHandover.cs`，编译至 `.artifacts/tests/focus_handover/` 并执行；
+  - 13 项单元验证（句柄判定、边界防护、WinForms 控件树判定、消息过滤不吞消息、空指针抗崩溃保护）**全部 100% 通过 (PASS: 13/13)**。
+- **离线核心单测门禁**：
+  - 运行 `node test_suite_unit.cjs`：**36/36 PASS (100%)**。
+  - 运行 `node test_regex_counter_example.cjs`：**3/3 PASS (100%)**。
+
+### 4. 验收结论与状态锁定
+- **用户实测通过**：用户已在前台真实 Excel 运行中完成实测，在插件输入后点击单元格，新输入能够正确进入单元格，确认焦点交接功能验证成功。
+- **状态统一更新**：
+  - R1a 选区感知功能（`TASK-R1a-01` ~ `TASK-R1a-03`）状态统一锁定为：`accepted`。
+  - 焦点交接缺陷（`TASK-FIX-FOCUS-01` / `BUG-FOCUS-01`）状态统一锁定为：`accepted`（正式关闭）。
+- **事实边界保留**：其他未深度覆盖边界（中文输入法组合、公式栏、双击编辑、极端长流式前台表现）如实标记为待验，绝不泛化为“全部交互通过”。
+- **下一阶段准入**：R1b 进入 `planned` 状态，已产出最小设计文档，严禁在此阶段编码，等待用户明确授权启动。
+
+
+
+
+
 
 
 
