@@ -224,13 +224,13 @@ namespace LeeExcel
             }
         }
 
-        public void OpenScripts()
+        public void OpenMacroLibrary()
         {
             if (this.InvokeRequired)
             {
                 try
                 {
-                    this.BeginInvoke(new Action(OpenScripts));
+                    this.BeginInvoke(new Action(OpenMacroLibrary));
                 }
                 catch { }
                 return;
@@ -238,12 +238,17 @@ namespace LeeExcel
 
             if (_webView != null && _webView.CoreWebView2 != null)
             {
-                _webView.CoreWebView2.PostWebMessageAsString("{\"action\":\"open_scripts\"}");
+                _webView.CoreWebView2.PostWebMessageAsString("{\"action\":\"open_macro_library\"}");
             }
             else
             {
-                _pendingAction = "open_scripts";
+                _pendingAction = "open_macro_library";
             }
+        }
+
+        public void OpenScripts()
+        {
+            OpenMacroLibrary();
         }
 
         public void OpenSettings()
@@ -266,6 +271,33 @@ namespace LeeExcel
             {
                 _pendingAction = "open_settings";
             }
+        }
+
+        public void OpenImportMacro()
+        {
+            if (this.InvokeRequired)
+            {
+                try
+                {
+                    this.BeginInvoke(new Action(OpenImportMacro));
+                }
+                catch { }
+                return;
+            }
+
+            if (_webView != null && _webView.CoreWebView2 != null)
+            {
+                _webView.CoreWebView2.PostWebMessageAsString("{\"action\":\"open_import_macro\"}");
+            }
+            else
+            {
+                _pendingAction = "open_import_macro";
+            }
+        }
+
+        public void OpenMyMacros()
+        {
+            OpenMacroLibrary();
         }
     }
 }

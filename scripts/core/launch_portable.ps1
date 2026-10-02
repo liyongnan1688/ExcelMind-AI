@@ -1,7 +1,11 @@
-# ExcelMind AI 便携式免安装启动器 (Portable Launcher)
+﻿# ExcelMind AI 便携式免安装启动器 (Portable Launcher)
 # 自动检测当前 Excel 架构并挂载对应 XLL 启动，不修改注册表
 
 $ErrorActionPreference = "Continue"
+
+# 统一控制台输出编码为 UTF-8，防止在 Windows PowerShell 5.1 下输出中文字符乱码
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
 
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host "           ExcelMind AI 原生插件 - 便携启动向导           " -ForegroundColor Cyan

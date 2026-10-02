@@ -130,7 +130,8 @@ namespace LeeExcel
             }
         }
 
-        public static string ComputeSha256(string text)
+        // 内部哈希计算辅助方法，收敛可见性为 internal，避免被 Excel-DNA 自动导出为 Excel 工作表函数
+        internal static string ComputeSha256(string text)
         {
             if (string.IsNullOrEmpty(text)) return "";
             using (var sha = System.Security.Cryptography.SHA256.Create())
@@ -143,7 +144,7 @@ namespace LeeExcel
             }
         }
 
-        public static VbaExecutionResult RunVbaCode(dynamic app, dynamic targetWorkbook, string vbaCode, string rawModelResponse = "")
+        public static VbaExecutionResult RunVbaCode(dynamic app, dynamic targetWorkbook, string vbaCode, string rawModelResponse = "", string selectedEntryPoint = null)
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
             var transformSteps = new List<string>();
@@ -161,49 +162,6 @@ namespace LeeExcel
                 try { origCalculation = (int)app.Calculation; } catch { }
             }
 
-            if (targetWorkbook == null)
-            {
-                return new VbaExecutionResult
-                {
-                    success = false,
-                    summary = "执行中断：未指定有效的目标工作簿",
-                    error = "目标工作簿对象为空或已关闭",
-                    rawModelResponse = rawModelResponse ?? "",
-                    originalVbaCode = vbaCode ?? "",
-                    executedVbaCode = "",
-                    wrapperCode = null,
-                    originalCodeHash = ComputeSha256(vbaCode),
-                    executedCodeHash = "",
-                    isSourceIdentical = false,
-                    transformSteps = transformSteps,
-                    elapsedMs = 0
-                };
-            }
-
-            string earlyTargetName = "";
-            try { earlyTargetName = (string)targetWorkbook.Name; } catch { }
-
-            if (!string.IsNullOrEmpty(earlyTargetName) && IsWorkbookLocked(earlyTargetName))
-            {
-                return new VbaExecutionResult
-                {
-                    success = false,
-                    precheckStatus = "workbook_locked",
-                    executionPhase = "blocked_by_lock",
-                    summary = "执行已拒绝：目标工作簿已被安全锁定",
-                    error = "该工作簿此前发生未证实恢复的宏挂起，为防止进一步损坏数据已被锁定，禁止继续注入执行新宏。\n\n【快照恢复指引】：请在面板中点击【快照回滚】将工作簿恢复至执行前初始状态（回滚成功将自动解除锁定），或在保存其他工作簿后重启 Excel。",
-                    riskNotice = "【安全锁定保护】当前工作簿已处于锁定状态，已阻止新宏注入运行。请使用快照恢复以解除锁定。",
-                    rawModelResponse = rawModelResponse ?? "",
-                    originalVbaCode = vbaCode ?? "",
-                    executedVbaCode = "",
-                    wrapperCode = null,
-                    originalCodeHash = ComputeSha256(vbaCode),
-                    executedCodeHash = "",
-                    isSourceIdentical = true,
-                    transformSteps = transformSteps,
-                    elapsedMs = 0
-                };
-            }
 
             if (string.IsNullOrEmpty(vbaCode))
             {
@@ -342,85 +300,123 @@ namespace LeeExcel
             string mainProcName = null;
             bool isNativeWbParam = false;
 
-            // 规则 1：寻找名为 Main 的 Sub 过程
-            var mainSubs = new List<Match>();
-            foreach (Match m in subMatches)
+            if (!string.IsNullOrEmpty(selectedEntryPoint))
             {
-                if (string.Equals(m.Groups[2].Value, "Main", StringComparison.OrdinalIgnoreCase))
-                {
-                    mainSubs.Add(m);
-                }
-            }
-
-            if (mainSubs.Count == 1)
-            {
-                mainProcName = mainSubs[0].Groups[2].Value;
-                string p = mainSubs[0].Groups[3].Value;
-                if (Regex.IsMatch(p, @"(?:targetWb|wb|workbook)\s+As\s+(?:Workbook|Object)", RegexOptions.IgnoreCase))
-                {
-                    targetProcMatch = mainSubs[0];
-                    isNativeWbParam = true;
-                }
-            }
-            else if (mainSubs.Count > 1)
-            {
-                return new VbaExecutionResult
-                {
-                    success = false,
-                    precheckStatus = "entry_conflict",
-                    executionPhase = "blocked_before_run",
-                    summary = "执行已拒绝：检测到多个名为 Main 的重复过程定义",
-                    error = "代码中存在多个名为 Main 的 Sub 过程定义，存在语法冲突，已在运行前安全拦截。",
-                    riskNotice = "【过程冲突拦截】代码存在重复定义的 Sub Main，已阻止注入以防编译错误。",
-                    rawModelResponse = rawModelResponse ?? "",
-                    originalVbaCode = vbaCode,
-                    executedVbaCode = vbaCode,
-                    wrapperCode = null,
-                    originalCodeHash = ComputeSha256(vbaCode),
-                    executedCodeHash = ComputeSha256(vbaCode),
-                    isSourceIdentical = true,
-                    transformSteps = transformSteps,
-                    elapsedMs = sw.ElapsedMilliseconds,
-                    origScreenUpdating = origScreenUpdating,
-                    origDisplayAlerts = origDisplayAlerts,
-                    origEnableEvents = origEnableEvents,
-                    origCalculation = origCalculation,
-                    hostStateRestored = true,
-                    hostStateRestoreDetails = "运行前拦截阶段，未变更宿主全局状态"
-                };
-            }
-            else
-            {
-                // 无 Sub Main 时：
-                // 规则 2：寻找显式接收 targetWb As Workbook 的 Sub 过程
-                var targetParamSubs = new List<Match>();
+                // 用户显式指定了执行入口 (例如从宏列表中选定)
+                Match chosenSub = null;
                 foreach (Match m in subMatches)
                 {
-                    string p = m.Groups[3].Value;
-                    if (Regex.IsMatch(p, @"(?:targetWb|wb|workbook)\s+As\s+(?:Workbook|Object)", RegexOptions.IgnoreCase))
+                    if (string.Equals(m.Groups[2].Value, selectedEntryPoint, StringComparison.OrdinalIgnoreCase))
                     {
-                        targetParamSubs.Add(m);
+                        chosenSub = m;
+                        break;
                     }
                 }
 
-                if (targetParamSubs.Count == 1)
+                if (chosenSub == null)
                 {
-                    targetProcMatch = targetParamSubs[0];
-                    mainProcName = targetParamSubs[0].Groups[2].Value;
-                    isNativeWbParam = true;
-                }
-                else if (targetParamSubs.Count > 1)
-                {
-                    var pNames = new List<string>();
-                    foreach (Match m in targetParamSubs) pNames.Add(m.Groups[2].Value);
                     return new VbaExecutionResult
                     {
                         success = false,
-                        precheckStatus = "entry_ambiguous",
+                        precheckStatus = "entry_unidentified",
                         executionPhase = "blocked_before_run",
-                        summary = "执行已拒绝：存在多个接收 Workbook 参数的过程，无法唯一确定主入口",
-                        error = "代码中包含多个接收 Workbook 参数的过程 (" + string.Join(", ", pNames) + ") 且无 Sub Main。宿主拒绝猜测执行。",
-                        riskNotice = "【入口歧义拦截】为防误调辅助过程，宿主已拒绝执行。",
+                        failureStage = "entry_unidentified",
+                        summary = "执行已拒绝：未在代码中找到指定的入口过程【" + selectedEntryPoint + "】",
+                        error = "代码中不存在名为 '" + selectedEntryPoint + "' 的 Sub 过程。请在宏管理中选择有效的过程入口。",
+                        riskNotice = "【指定入口无效】宿主拒绝执行未定义或不存在的过程。",
+                        rawModelResponse = rawModelResponse ?? "",
+                        originalVbaCode = vbaCode,
+                        executedVbaCode = vbaCode,
+                        wrapperCode = null,
+                        originalCodeHash = ComputeSha256(vbaCode),
+                        executedCodeHash = ComputeSha256(vbaCode),
+                        isSourceIdentical = true,
+                        transformSteps = transformSteps,
+                        elapsedMs = sw.ElapsedMilliseconds,
+                        origScreenUpdating = origScreenUpdating,
+                        origDisplayAlerts = origDisplayAlerts,
+                        origEnableEvents = origEnableEvents,
+                        origCalculation = origCalculation,
+                        hostStateRestored = true,
+                        hostStateRestoreDetails = "运行前拦截阶段，未变更宿主全局状态"
+                    };
+                }
+
+                string p = chosenSub.Groups[3].Value;
+                if (string.IsNullOrEmpty(p) || Regex.IsMatch(p, @"^(?:\s*|\s*'.*)$"))
+                {
+                    mainProcName = chosenSub.Groups[2].Value;
+                    isNativeWbParam = false;
+                    targetProcMatch = chosenSub;
+                }
+                else if (Regex.IsMatch(p, @"^\s*(?:targetWb|wb|workbook)\s+As\s+(?:Workbook|Object)\s*$", RegexOptions.IgnoreCase))
+                {
+                    mainProcName = chosenSub.Groups[2].Value;
+                    isNativeWbParam = true;
+                    targetProcMatch = chosenSub;
+                }
+                else
+                {
+                    return new VbaExecutionResult
+                    {
+                        success = false,
+                        precheckStatus = "entry_unidentified",
+                        executionPhase = "blocked_before_run",
+                        failureStage = "entry_unidentified",
+                        summary = "执行已拒绝：指定入口过程包含必填参数，无法直接作为宏运行",
+                        error = "过程 '" + selectedEntryPoint + "' 包含必填参数 (" + p.Trim() + ")。宿主不填入猜测参数，拒绝执行。请使用无参 Sub 或接收 targetWb As Workbook 的过程作为入口。",
+                        riskNotice = "【参数不支持拦截】宿主不填入猜测参数，不改写源码绕过限制。",
+                        rawModelResponse = rawModelResponse ?? "",
+                        originalVbaCode = vbaCode,
+                        executedVbaCode = vbaCode,
+                        wrapperCode = null,
+                        originalCodeHash = ComputeSha256(vbaCode),
+                        executedCodeHash = ComputeSha256(vbaCode),
+                        isSourceIdentical = true,
+                        transformSteps = transformSteps,
+                        elapsedMs = sw.ElapsedMilliseconds,
+                        origScreenUpdating = origScreenUpdating,
+                        origDisplayAlerts = origDisplayAlerts,
+                        origEnableEvents = origEnableEvents,
+                        origCalculation = origCalculation,
+                        hostStateRestored = true,
+                        hostStateRestoreDetails = "运行前拦截阶段，未变更宿主全局状态"
+                    };
+                }
+            }
+            else
+            {
+                // 未显式指定入口时，执行严格的自动推导规则
+                // 规则 1：寻找名为 Main 的 Sub 过程
+                var mainSubs = new List<Match>();
+                foreach (Match m in subMatches)
+                {
+                    if (string.Equals(m.Groups[2].Value, "Main", StringComparison.OrdinalIgnoreCase))
+                    {
+                        mainSubs.Add(m);
+                    }
+                }
+
+                if (mainSubs.Count == 1)
+                {
+                    mainProcName = mainSubs[0].Groups[2].Value;
+                    string p = mainSubs[0].Groups[3].Value;
+                    if (Regex.IsMatch(p, @"(?:targetWb|wb|workbook)\s+As\s+(?:Workbook|Object)", RegexOptions.IgnoreCase))
+                    {
+                        targetProcMatch = mainSubs[0];
+                        isNativeWbParam = true;
+                    }
+                }
+                else if (mainSubs.Count > 1)
+                {
+                    return new VbaExecutionResult
+                    {
+                        success = false,
+                        precheckStatus = "entry_conflict",
+                        executionPhase = "blocked_before_run",
+                        summary = "执行已拒绝：检测到多个名为 Main 的重复过程定义",
+                        error = "代码中存在多个名为 Main 的 Sub 过程定义，存在语法冲突，已在运行前安全拦截。",
+                        riskNotice = "【过程冲突拦截】代码存在重复定义的 Sub Main，已阻止注入以防编译错误。",
                         rawModelResponse = rawModelResponse ?? "",
                         originalVbaCode = vbaCode,
                         executedVbaCode = vbaCode,
@@ -440,27 +436,36 @@ namespace LeeExcel
                 }
                 else
                 {
-                    // 无 Sub Main，且无接收 targetWb 参数的 Sub
-                    // 规则 3：若代码中【有且仅有 1 个】Sub 过程，可以确定其为唯一无参入口
-                    if (subMatches.Count == 1)
+                    // 无 Sub Main 时：
+                    // 规则 2：寻找显式接收 targetWb As Workbook 的 Sub 过程
+                    var targetParamSubs = new List<Match>();
+                    foreach (Match m in subMatches)
                     {
-                        mainProcName = subMatches[0].Groups[2].Value;
-                        isNativeWbParam = false;
+                        string p = m.Groups[3].Value;
+                        if (Regex.IsMatch(p, @"(?:targetWb|wb|workbook)\s+As\s+(?:Workbook|Object)", RegexOptions.IgnoreCase))
+                        {
+                            targetParamSubs.Add(m);
+                        }
                     }
-                    else
-                    {
-                        // 规则 4：存在多个无参 Sub 过程，且没有任何一个叫 Main，入口完全不明确！坚决拒绝盲猜！
-                        var subNames = new List<string>();
-                        foreach (Match m in subMatches) subNames.Add(m.Groups[2].Value);
 
+                    if (targetParamSubs.Count == 1)
+                    {
+                        targetProcMatch = targetParamSubs[0];
+                        mainProcName = targetParamSubs[0].Groups[2].Value;
+                        isNativeWbParam = true;
+                    }
+                    else if (targetParamSubs.Count > 1)
+                    {
+                        var pNames = new List<string>();
+                        foreach (Match m in targetParamSubs) pNames.Add(m.Groups[2].Value);
                         return new VbaExecutionResult
                         {
                             success = false,
-                            precheckStatus = "entry_unidentified",
+                            precheckStatus = "entry_ambiguous",
                             executionPhase = "blocked_before_run",
-                            summary = "执行已拒绝：代码包含多个过程且无法明确确定主入口",
-                            error = "代码中包含多个 Sub 过程 (" + string.Join(", ", subNames) + ")，未指定主入口 Sub Main 亦无明确的 targetWb 参数过程。为防止盲目猜测调用辅助过程导致不可控后果，宿主已拒绝执行。",
-                            riskNotice = "【入口歧义拦截】宿主不猜测、不改写模型源码。请在提示词中要求模型明确主入口过程（如命名为 Sub Main 或指定 targetWb 参数）。",
+                            summary = "执行已拒绝：存在多个接收 Workbook 参数的过程，无法唯一确定主入口",
+                            error = "代码中包含多个接收 Workbook 参数的过程 (" + string.Join(", ", pNames) + ") 且无 Sub Main。宿主拒绝猜测执行。",
+                            riskNotice = "【入口歧义拦截】为防误调辅助过程，宿主已拒绝执行。",
                             rawModelResponse = rawModelResponse ?? "",
                             originalVbaCode = vbaCode,
                             executedVbaCode = vbaCode,
@@ -478,7 +483,104 @@ namespace LeeExcel
                             hostStateRestoreDetails = "运行前拦截阶段，未变更宿主全局状态"
                         };
                     }
+                    else
+                    {
+                        // 无 Sub Main，且无接收 targetWb 参数的 Sub
+                        // 规则 3：若代码中【有且仅有 1 个】Sub 过程，可以确定其为唯一无参入口
+                        if (subMatches.Count == 1)
+                        {
+                            mainProcName = subMatches[0].Groups[2].Value;
+                            isNativeWbParam = false;
+                        }
+                        else
+                        {
+                            // 规则 4：存在多个无参 Sub 过程，且没有任何一个叫 Main，入口完全不明确！坚决拒绝盲猜！
+                            var subNames = new List<string>();
+                            foreach (Match m in subMatches) subNames.Add(m.Groups[2].Value);
+
+                            return new VbaExecutionResult
+                            {
+                                success = false,
+                                precheckStatus = "entry_unidentified",
+                                executionPhase = "blocked_before_run",
+                                summary = "执行已拒绝：代码包含多个过程且无法明确确定主入口",
+                                error = "代码中包含多个 Sub 过程 (" + string.Join(", ", subNames) + ")，未指定主入口 Sub Main 亦无明确的 targetWb 参数过程。为防止盲目猜测调用辅助过程导致不可控后果，宿主已拒绝执行。请在宏管理中明确选定要运行的入口过程。",
+                                riskNotice = "【入口歧义拦截】宿主不猜测、不改写模型源码。请在宏管理中指定入口过程或命名为 Sub Main。",
+                                rawModelResponse = rawModelResponse ?? "",
+                                originalVbaCode = vbaCode,
+                                executedVbaCode = vbaCode,
+                                wrapperCode = null,
+                                originalCodeHash = ComputeSha256(vbaCode),
+                                executedCodeHash = ComputeSha256(vbaCode),
+                                isSourceIdentical = true,
+                                transformSteps = transformSteps,
+                                elapsedMs = sw.ElapsedMilliseconds,
+                                origScreenUpdating = origScreenUpdating,
+                                origDisplayAlerts = origDisplayAlerts,
+                                origEnableEvents = origEnableEvents,
+                                origCalculation = origCalculation,
+                                hostStateRestored = true,
+                                hostStateRestoreDetails = "运行前拦截阶段，未变更宿主全局状态"
+                            };
+                        }
+                    }
                 }
+            }
+
+            if (targetWorkbook == null)
+            {
+                return new VbaExecutionResult
+                {
+                    success = false,
+                    summary = "执行中断：未指定有效的目标工作簿",
+                    error = "目标工作簿对象为空或已关闭",
+                    rawModelResponse = rawModelResponse ?? "",
+                    originalVbaCode = vbaCode ?? "",
+                    executedVbaCode = "",
+                    wrapperCode = null,
+                    originalCodeHash = ComputeSha256(vbaCode),
+                    executedCodeHash = "",
+                    isSourceIdentical = false,
+                    transformSteps = transformSteps,
+                    elapsedMs = sw.ElapsedMilliseconds,
+                    origScreenUpdating = origScreenUpdating,
+                    origDisplayAlerts = origDisplayAlerts,
+                    origEnableEvents = origEnableEvents,
+                    origCalculation = origCalculation,
+                    hostStateRestored = true,
+                    hostStateRestoreDetails = "运行前拦截阶段，未变更宿主全局状态"
+                };
+            }
+
+            string earlyTargetName = "";
+            try { earlyTargetName = (string)targetWorkbook.Name; } catch { }
+
+            if (!string.IsNullOrEmpty(earlyTargetName) && IsWorkbookLocked(earlyTargetName))
+            {
+                return new VbaExecutionResult
+                {
+                    success = false,
+                    precheckStatus = "workbook_locked",
+                    executionPhase = "blocked_by_lock",
+                    summary = "执行已拒绝：目标工作簿已被安全锁定",
+                    error = "该工作簿此前发生未证实恢复的宏挂起，为防止进一步损坏数据已被锁定，禁止继续注入执行新宏。\n\n【快照恢复指引】：请在面板中点击【快照回滚】将工作簿恢复至执行前初始状态（回滚成功将自动解除锁定），或在保存其他工作簿后重启 Excel。",
+                    riskNotice = "【安全锁定保护】当前工作簿已处于锁定状态，已阻止新宏注入运行。请使用快照恢复以解除锁定。",
+                    rawModelResponse = rawModelResponse ?? "",
+                    originalVbaCode = vbaCode ?? "",
+                    executedVbaCode = "",
+                    wrapperCode = null,
+                    originalCodeHash = ComputeSha256(vbaCode),
+                    executedCodeHash = "",
+                    isSourceIdentical = true,
+                    transformSteps = transformSteps,
+                    elapsedMs = sw.ElapsedMilliseconds,
+                    origScreenUpdating = origScreenUpdating,
+                    origDisplayAlerts = origDisplayAlerts,
+                    origEnableEvents = origEnableEvents,
+                    origCalculation = origCalculation,
+                    hostStateRestored = true,
+                    hostStateRestoreDetails = "运行前拦截阶段，未变更宿主全局状态"
+                };
             }
 
             string targetWbName = "";
@@ -520,30 +622,39 @@ namespace LeeExcel
             string wrapperCode = null;
             string finalCode = vbaCode;
 
+            // 4.1 检查并处理 .bas 模块头属性 (如 Attribute VB_Name)
+            // 原文保真原则：存储库中完整保留原始文件与哈希；若注入宿主 AddFromString 不支持模块属性，
+            // 必须明确在 transformSteps 中记录处理对象与原因，严禁称完整文件与执行文本完全一致。
+            bool hasModuleAttrs = Regex.IsMatch(finalCode, @"^\s*Attribute\s+VB_\w+", RegexOptions.Multiline | RegexOptions.IgnoreCase);
+            if (hasModuleAttrs)
+            {
+                finalCode = Regex.Replace(finalCode, @"^\s*Attribute\s+VB_[^\r\n]*\r?\n?", "", RegexOptions.Multiline | RegexOptions.IgnoreCase);
+                transformSteps.Add("【模块属性处理】宿主使用 VBE CodeModule.AddFromString 注入模块文本时，VBA 语法引擎不支持内嵌 Attribute 模块头声明（此为 .bas 导出专用属性）。宿主仅在动态注入目标临时模块时剥离该属性以确保语法编译通过；存储库中的原始源码、文件副本与哈希 100% 保持原貌。");
+            }
+
             if (isNativeWbParam)
             {
-                // 模型过程原生声明了接收目标工作簿参数，100% 原始源码直调
+                // 模型过程原生声明了接收目标工作簿参数，原始源码直调
                 callMacroName = mainProcName;
-                finalCode = vbaCode;
                 wrapperCode = null;
-                transformSteps.Add("直调主入口: " + callMacroName + " (模型原生接收目标工作簿参数，源码 100% 原始直调，无包装器)");
+                transformSteps.Add("直调主入口: " + callMacroName + " (原生接收目标工作簿参数，源码直接调用，无包装器)");
             }
             else
             {
-                // 模型生成了通用无参主过程
-                // 原则：模型正文源码保持 100% 零修改，仅在模块尾部追加受控的透明调用入口包装器
+                // 通用无参主过程
+                // 原则：正文源码保持零修改，仅在模块尾部追加受控的透明调用入口包装器
                 string wrapperSubName = "LeeHostRunner_" + DateTime.Now.ToString("mmss_fff") + "_" + Guid.NewGuid().ToString("N").Substring(0, 4);
                 callMacroName = wrapperSubName;
 
                 wrapperCode =
-                    "\r\n' ===== [LeeExcel 自动生成的受控调用入口包装器 - 保持模型正文源码零篡改] =====\r\n" +
+                    "\r\n' ===== [LeeExcel 自动生成的受控调用入口包装器 - 保持正文源码零篡改] =====\r\n" +
                     "Sub " + wrapperSubName + "(targetWb As Workbook)\r\n" +
                     "    targetWb.Activate\r\n" +
                     "    Call " + mainProcName + "\r\n" +
                     "End Sub";
 
-                finalCode = vbaCode + "\r\n" + wrapperCode;
-                transformSteps.Add("模型源码正文 100% 保持原貌。因主过程为无参，宿主独立追加受控入口包装器: " + wrapperSubName + " -> 调度主过程 " + mainProcName + "。实测边界警示：包装器激活目标簿确保 ActiveSheet/ActiveWorkbook 导向目标簿；但不能保证对显式指定外部工作簿的任意代码具备沙箱级强制隔离。多簿安全由整本快照与执行后全局比对保障。");
+                finalCode = finalCode + "\r\n" + wrapperCode;
+                transformSteps.Add("正文源码保持原貌。因主过程为无参，宿主独立追加受控入口包装器: " + wrapperSubName + " -> 调度主过程 " + mainProcName + "。实测边界警示：包装器激活目标簿确保 ActiveSheet/ActiveWorkbook 导向目标簿；但不能保证对显式指定外部工作簿的任意代码具备沙箱级强制隔离。多簿安全由整本快照与执行后全局比对保障。");
             }
 
             string originalHash = ComputeSha256(vbaCode);

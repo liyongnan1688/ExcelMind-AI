@@ -1,7 +1,11 @@
-# ExcelMind AI 自动化安装与环境配置脚本
+﻿# ExcelMind AI 自动化安装与环境配置脚本
 # 适用：Office 2010 / 2013 / 2016 / 2019 / 2021 / Microsoft 365 (32位与64位)
 
 $ErrorActionPreference = "Continue"
+
+# 统一控制台输出编码为 UTF-8，防止在 Windows PowerShell 5.1 下输出中文字符乱码
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
 
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host "           ExcelMind AI 原生插件 - 自动化安装向导           " -ForegroundColor Cyan

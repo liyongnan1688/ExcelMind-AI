@@ -19,12 +19,25 @@ export interface WorkbookInfo {
 }
 
 export interface ScriptItem {
+  id?: string;
   name: string;
+  displayName?: string;
   fileName: string;
-  filePath: string;
+  filePath?: string;
   createdAt: string;
+  updatedAt?: string;
   description: string;
+  category?: string;
+  sourceType?: 'file' | 'paste' | 'legacy' | string;
+  originalFileName?: string;
+  encoding?: string;
   code: string;
+  originalCodeHash?: string;
+  entryPoint?: string;
+  rawBytesBase64?: string;
+  lastExecutionResult?: string;
+  lastExecutedAt?: string;
+  isVerified?: boolean;
 }
 
 export interface WorkbookReadback {

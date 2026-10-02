@@ -38,6 +38,9 @@
   let unbindWorkbookChange: (() => void) | null = null;
   let unbindOpenScripts: (() => void) | null = null;
   let unbindOpenSettings: (() => void) | null = null;
+  let unbindOpenImportMacro: (() => void) | null = null;
+  let unbindOpenMyMacros: (() => void) | null = null;
+  let unbindOpenMacroLibrary: (() => void) | null = null;
 
   onMount(() => {
     // 监听 C# 宿主推送的工作簿激活变更
@@ -45,10 +48,31 @@
       workbook = info;
     });
 
-    // 监听 Ribbon 菜单打开“我的脚本”抽屉
+    // 监听 Ribbon 菜单打开“宏库”/“我的脚本”抽屉
+    unbindOpenMacroLibrary = bridge.onAction('open_macro_library', () => {
+      showScripts = true;
+      showSettings = false;
+      scriptDrawerRef?.openTab('list');
+    });
+
     unbindOpenScripts = bridge.onAction('open_scripts', () => {
       showScripts = true;
       showSettings = false;
+      scriptDrawerRef?.openTab('list');
+    });
+
+    // 监听 Ribbon 菜单打开“我的宏”列表
+    unbindOpenMyMacros = bridge.onAction('open_my_macros', () => {
+      showScripts = true;
+      showSettings = false;
+      scriptDrawerRef?.openTab('list');
+    });
+
+    // 监听 Ribbon 菜单打开“导入宏”窗口
+    unbindOpenImportMacro = bridge.onAction('open_import_macro', () => {
+      showScripts = true;
+      showSettings = false;
+      scriptDrawerRef?.openTab('import');
     });
 
     // 监听 Ribbon 菜单打开“API配置”弹窗
@@ -79,6 +103,17 @@
       (window as any).__openScripts = () => {
         showScripts = true;
         showSettings = false;
+        scriptDrawerRef?.openTab('list');
+      };
+      (window as any).__openMyMacros = () => {
+        showScripts = true;
+        showSettings = false;
+        scriptDrawerRef?.openTab('list');
+      };
+      (window as any).__openImportMacro = () => {
+        showScripts = true;
+        showSettings = false;
+        scriptDrawerRef?.openTab('import');
       };
       (window as any).__openSettings = () => {
         showSettings = true;
@@ -105,8 +140,11 @@
   onDestroy(() => {
     if (pollTimer) clearInterval(pollTimer);
     if (unbindWorkbookChange) unbindWorkbookChange();
+    if (unbindOpenMacroLibrary) unbindOpenMacroLibrary();
     if (unbindOpenScripts) unbindOpenScripts();
     if (unbindOpenSettings) unbindOpenSettings();
+    if (unbindOpenImportMacro) unbindOpenImportMacro();
+    if (unbindOpenMyMacros) unbindOpenMyMacros();
   });
 
   async function refreshWorkbookInfo() {
@@ -395,10 +433,14 @@
     }
   }
 
-  // 从“我的脚本”直接运行
-  async function handleRunScript(script: ScriptItem) {
+  // 从“我的宏”直接运行
+  async function handleRunScript(script: ScriptItem, entryPoint?: string) {
     if (isProcessing) return;
     isProcessing = true;
+
+    const chosenEntryPoint = entryPoint || script.entryPoint || '';
+    const macroDisplayName = script.displayName || script.name;
+    const entryLabel = chosenEntryPoint ? ` (入口: ${chosenEntryPoint})` : '';
 
     const userMsgId = 'user_script_' + Date.now();
     messages = [
@@ -406,7 +448,7 @@
       {
         id: userMsgId,
         role: 'user',
-        content: `运行脚本: 【${script.name}】`,
+        content: `运行宏: 【${macroDisplayName}】${entryLabel}`,
       },
     ];
 
@@ -417,8 +459,8 @@
     const assistantMsg: ChatMessage = {
       id: assistantMsgId,
       role: 'assistant',
-      content: `正在向【${targetWbName || '当前活动工作簿'}】运行本地脚本: ${script.name}...`,
-      prompt: `运行脚本: ${script.name}`,
+      content: `正在向【${targetWbName || '当前活动工作簿'}】运行宏: ${macroDisplayName}...`,
+      prompt: `运行宏: ${macroDisplayName}`,
       isExecuting: true,
       execution: null,
     };
@@ -428,27 +470,30 @@
     try {
       const execRes = await bridge.send<VbaExecutionData>('execute_vba', {
         code: script.code,
-        prompt: `运行脚本: ${script.name}`,
+        prompt: `运行宏: ${macroDisplayName}`,
         targetWorkbookName: targetWbName,
         targetWorkbookFullName: targetWbFullName,
+        entryPoint: chosenEntryPoint,
+        scriptId: script.id || script.fileName,
       });
 
       if (execRes.ok && execRes.data) {
-        const verification = verifyExecutionResult(`运行脚本: ${script.name}`, execRes.data.readback);
+        const verification = verifyExecutionResult(`运行宏: ${macroDisplayName}`, execRes.data.readback);
         execRes.data.verificationStatus = verification.status;
         execRes.data.verificationNote = verification.note;
         assistantMsg.execution = execRes.data;
-        assistantMsg.content = `脚本【${script.name}】已运行完成。${verification.note}`;
+        assistantMsg.content = `宏【${macroDisplayName}】已运行完成。${verification.note}`;
       } else {
-        assistantMsg.content = `脚本执行失败：${execRes.error}`;
+        assistantMsg.content = `宏执行失败：${execRes.error}`;
         assistantMsg.execution = {
-          summary: execRes.error || '脚本执行失败',
+          summary: execRes.error || '宏执行失败',
           error: execRes.error,
           elapsedMs: 0,
           vbaCode: script.code,
         };
       }
       await refreshWorkbookInfo();
+      scriptDrawerRef?.refreshScripts();
     } catch (e: any) {
       assistantMsg.content = `运行失败: ${e.message}`;
       assistantMsg.execution = {
@@ -527,10 +572,11 @@
     <SettingsModal onClose={() => (showSettings = false)} />
   {/if}
 
-  <!-- “我的脚本”抽屉 -->
+  <!-- “宏管理与我的脚本”抽屉 -->
   <ScriptDrawer
     bind:this={scriptDrawerRef}
     isOpen={showScripts}
+    {workbook}
     onClose={() => (showScripts = false)}
     onRunScript={handleRunScript}
   />

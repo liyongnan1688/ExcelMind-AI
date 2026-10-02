@@ -14,10 +14,44 @@ namespace LeeExcel
   <ribbon>
     <tabs>
       <tab id='LeeExcelTab' label='ExcelMind AI'>
-        <group id='LeeExcelGroup' label='智能操作'>
-          <button id='btnTogglePane' label='ExcelMind AI' size='large' onAction='OnTogglePane' getImage='GetButtonImage' />
-          <button id='btnOpenScripts' label='自动化脚本' size='large' onAction='OnOpenScripts' imageMso='VisualBasic' />
-          <button id='btnOpenSettings' label='API配置' size='large' onAction='OnOpenSettings' imageMso='ServerConnection' />
+        <!-- 分组 1：智能助手 -->
+        <group id='GroupAssistant' label='智能助手'>
+          <button id='btnAssistant'
+                  label='ExcelMind AI'
+                  size='large'
+                  onAction='OnTogglePane'
+                  getImage='GetButtonImage'
+                  screentip='ExcelMind AI'
+                  supertip='打开或收起 ExcelMind AI 侧边栏，支持自然语言对话、公式生成与工作簿自动化操作。' />
+        </group>
+
+        <!-- 分组 2：宏工具 -->
+        <group id='GroupMacroTools' label='宏工具'>
+          <button id='btnMacroLibrary'
+                  label='宏库'
+                  size='large'
+                  onAction='OnOpenMacroLibrary'
+                  imageMso='VisualBasic'
+                  screentip='宏库'
+                  supertip='查看、搜索、运行、重命名、导出和管理所有已保存的 VBA 宏与自动化脚本。' />
+          <button id='btnImportMacro'
+                  label='导入'
+                  size='large'
+                  onAction='OnImportMacro'
+                  imageMso='ImportTextFile'
+                  screentip='导入'
+                  supertip='从本地 .bas/.vba/.txt 文件导入或直接粘贴 VBA 源码，命名保存至宏库。' />
+        </group>
+
+        <!-- 分组 3：设置 -->
+        <group id='GroupSettings' label='设置'>
+          <button id='btnApiSettings'
+                  label='API设置'
+                  size='large'
+                  onAction='OnOpenSettings'
+                  imageMso='ServerConnection'
+                  screentip='API设置'
+                  supertip='配置大模型 API 密钥、接口地址及模型服务参数。' />
         </group>
       </tab>
     </tabs>
@@ -42,14 +76,30 @@ namespace LeeExcel
             LeeExcelAddIn.ToggleTaskPane();
         }
 
-        public void OnOpenScripts(IRibbonControl control)
+        public void OnOpenMacroLibrary(IRibbonControl control)
         {
-            LeeExcelAddIn.OpenScripts();
+            LeeExcelAddIn.OpenMacroLibrary();
+        }
+
+        public void OnImportMacro(IRibbonControl control)
+        {
+            LeeExcelAddIn.OpenImportMacro();
         }
 
         public void OnOpenSettings(IRibbonControl control)
         {
             LeeExcelAddIn.OpenSettings();
+        }
+
+        // 向后兼容旧入口
+        public void OnOpenScripts(IRibbonControl control)
+        {
+            LeeExcelAddIn.OpenMacroLibrary();
+        }
+
+        public void OnMyMacros(IRibbonControl control)
+        {
+            LeeExcelAddIn.OpenMacroLibrary();
         }
     }
 
@@ -129,13 +179,18 @@ namespace LeeExcel
             }
         }
 
-        public static void OpenScripts()
+        public static void OpenMacroLibrary()
         {
             EnsureTaskPaneVisible();
             if (_taskPaneControl != null)
             {
-                _taskPaneControl.OpenScripts();
+                _taskPaneControl.OpenMacroLibrary();
             }
+        }
+
+        public static void OpenScripts()
+        {
+            OpenMacroLibrary();
         }
 
         public static void OpenSettings()
@@ -145,6 +200,20 @@ namespace LeeExcel
             {
                 _taskPaneControl.OpenSettings();
             }
+        }
+
+        public static void OpenImportMacro()
+        {
+            EnsureTaskPaneVisible();
+            if (_taskPaneControl != null)
+            {
+                _taskPaneControl.OpenImportMacro();
+            }
+        }
+
+        public static void OpenMyMacros()
+        {
+            OpenMacroLibrary();
         }
     }
 }

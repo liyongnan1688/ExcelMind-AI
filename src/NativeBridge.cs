@@ -108,6 +108,14 @@ namespace LeeExcel
                         resp = HandleSaveScript(req);
                         break;
 
+                    case "rename_script":
+                        resp = HandleRenameScript(req);
+                        break;
+
+                    case "update_script_result":
+                        resp = HandleUpdateScriptResult(req);
+                        break;
+
                     case "delete_script":
                         resp = HandleDeleteScript(req);
                         break;
@@ -419,7 +427,20 @@ namespace LeeExcel
             }
 
             // 2. 在目标工作簿中执行动态 VBA 并读回实际状态
-            var result = VbaRunner.RunVbaCode(app, targetWb, code, rawModelResponse);
+            string entryPoint = req.ContainsKey("entryPoint") ? req["entryPoint"] : null;
+            var result = VbaRunner.RunVbaCode(app, targetWb, code, rawModelResponse, entryPoint);
+
+            string scriptId = req.ContainsKey("scriptId") ? req["scriptId"] : (req.ContainsKey("fileName") ? req["fileName"] : null);
+            if (!string.IsNullOrEmpty(scriptId))
+            {
+                try
+                {
+                    string resStatus = result.success ? "执行成功" : ("执行失败: " + (result.summary ?? result.error));
+                    string errIgnored;
+                    ScriptManager.UpdateExecutionResult(scriptId, resStatus, out errIgnored);
+                }
+                catch { }
+            }
 
             // 安全获取工作簿名称与路径：宏可能关闭了工作簿导致 COM 引用失效
             string resolvedTargetName = targetName;
@@ -591,31 +612,89 @@ namespace LeeExcel
 
         private static BridgeResponse HandleSaveScript(Dictionary<string, string> req)
         {
-            string name = req.ContainsKey("name") ? req["name"] : "";
+            string id = req.ContainsKey("id") ? req["id"] : "";
+            string displayName = req.ContainsKey("displayName") ? req["displayName"] : (req.ContainsKey("name") ? req["name"] : "");
             string code = req.ContainsKey("code") ? req["code"] : "";
             string desc = req.ContainsKey("description") ? req["description"] : "";
+            string category = req.ContainsKey("category") ? req["category"] : "";
+            string sourceType = req.ContainsKey("sourceType") ? req["sourceType"] : "paste";
+            string originalFileName = req.ContainsKey("originalFileName") ? req["originalFileName"] : "";
+            string encoding = req.ContainsKey("encoding") ? req["encoding"] : "UTF-8";
+            string entryPoint = req.ContainsKey("entryPoint") ? req["entryPoint"] : "";
+            string rawBytesBase64 = req.ContainsKey("rawBytesBase64") ? req["rawBytesBase64"] : "";
+            bool overwrite = req.ContainsKey("overwrite") && (req["overwrite"] == "true" || req["overwrite"] == "1" || req["overwrite"] == "True");
 
+            string savedId;
             string err;
-            bool ok = ScriptManager.SaveScript(name, code, desc, out err);
+            bool ok = ScriptManager.SaveScript(
+                id,
+                displayName,
+                code,
+                desc,
+                category,
+                sourceType,
+                originalFileName,
+                encoding,
+                entryPoint,
+                rawBytesBase64,
+                overwrite,
+                out savedId,
+                out err
+            );
+
             return new BridgeResponse
             {
                 ok = ok,
                 action = "save_script",
-                message = ok ? "脚本已成功保存到本地“我的脚本”库！" : err,
+                message = ok ? ("宏【" + displayName + "】已成功保存！") : err,
+                error = err,
+                data = new Dictionary<string, string> { { "id", savedId ?? "" }, { "displayName", displayName } }
+            };
+        }
+
+        private static BridgeResponse HandleRenameScript(Dictionary<string, string> req)
+        {
+            string id = req.ContainsKey("id") ? req["id"] : (req.ContainsKey("fileName") ? req["fileName"] : "");
+            string newDisplayName = req.ContainsKey("newDisplayName") ? req["newDisplayName"] : (req.ContainsKey("displayName") ? req["displayName"] : "");
+
+            string err;
+            bool ok = ScriptManager.RenameScript(id, newDisplayName, out err);
+            return new BridgeResponse
+            {
+                ok = ok,
+                action = "rename_script",
+                message = ok ? ("宏显示名称已成功更新为【" + newDisplayName + "】！") : err,
+                error = err,
+                data = new Dictionary<string, string> { { "id", id }, { "displayName", newDisplayName } }
+            };
+        }
+
+        private static BridgeResponse HandleUpdateScriptResult(Dictionary<string, string> req)
+        {
+            string id = req.ContainsKey("id") ? req["id"] : (req.ContainsKey("fileName") ? req["fileName"] : "");
+            string result = req.ContainsKey("lastExecutionResult") ? req["lastExecutionResult"] : "";
+
+            string err;
+            bool ok = ScriptManager.UpdateExecutionResult(id, result, out err);
+            return new BridgeResponse
+            {
+                ok = ok,
+                action = "update_script_result",
+                message = ok ? "执行状态已同步更新" : err,
                 error = err
             };
         }
 
         private static BridgeResponse HandleDeleteScript(Dictionary<string, string> req)
         {
-            string fileName = req.ContainsKey("fileName") ? req["fileName"] : "";
+            string fileName = req.ContainsKey("id") ? req["id"] : (req.ContainsKey("fileName") ? req["fileName"] : "");
             string err;
             bool ok = ScriptManager.DeleteScript(fileName, out err);
             return new BridgeResponse
             {
                 ok = ok,
                 action = "delete_script",
-                message = ok ? "脚本已删除" : err,
+                message = ok ? "宏已成功删除" : err,
                 error = err
             };
         }

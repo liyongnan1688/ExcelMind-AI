@@ -1,4 +1,4 @@
-# ExcelMind AI 跨机器发布包全自动打包流水线
+﻿# ExcelMind AI 跨机器发布包全自动打包流水线
 # 职责：编译前端与后端、组织双架构依赖、生成安装卸载套件、打包为独立 ZIP
 
 param(
@@ -6,6 +6,11 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+# 统一控制台输出编码为 UTF-8，防止在 Windows PowerShell 5.1 下输出中文字符乱码
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
 $projectRoot = Split-Path -Parent $PSScriptRoot
 
 Write-Host "==========================================================" -ForegroundColor Cyan
