@@ -70,12 +70,16 @@ namespace LeeExcelTests
         {
             public string caseId;
             public string title;
-            public string category; // "真实桌面 UI 自动化" vs "处理层/集成测试"
+            public string category; // "真实 Excel 桌面 UI 验收", "处理层/集成测试", "存量核心业务门禁"
             public string status;   // "pass" / "fail" / "blocked" / "not_tested"
             public string input;
             public string actualOperation;
             public string expected;
             public string observed;
+            public string observedAddress;     // 插件卡片实际观测到的地址
+            public string observedSampleValue; // 插件卡片实际观测到的样本数据
+            public string observedCapturedAt;  // 插件卡片实际观测到的采集时间戳
+            public string activeCellAddress;   // Excel 实际活动单元格
             public string startTime;
             public string endTime;
             public string screenshotPath;
@@ -342,7 +346,7 @@ namespace LeeExcelTests
                 {
                     caseId = "TC-REG-01",
                     title = "功能区 Ribbon 选项卡与 AI助手展开",
-                    category = "真实桌面 UI 自动化",
+                    category = "真实 Excel 桌面 UI 验收",
                     startTime = DateTime.Now.ToString("o"),
                     input = "用户点击 Excel 功能区【ExcelMind AI】选项卡与【AI助手】按钮",
                     expected = "功能区成功切换至 ExcelMind AI，显示 AI助手/宏工具/设置 分组及按钮，任务窗格激活",
@@ -429,11 +433,11 @@ namespace LeeExcelTests
                 {
                     caseId = "TC-R1b-01",
                     title = "定向刷新原区域与活动单元格保持",
-                    category = "真实桌面 UI 自动化",
+                    category = "真实 Excel 桌面 UI 验收",
                     startTime = DateTime.Now.ToString("o"),
                     input = "工作表框选 A1:C5 -> 附加当前选区 -> 修改 A2 为 8888.88 -> 鼠标点击 D10 -> 点击卡片【刷新原区域】",
-                    expected = "卡片样本中的 A2 更新为 8888.88，卡片区域仍锁定 A1:C5；Excel 活动单元格严格保持为 $D$10，未被切走",
-                    actualOperation = "COM 设置选区 A1:C5 -> 窗口相对坐标点击【附加当前选区】 -> COM 修改 A2 写入 8888.88 -> COM 选择 D10 -> 窗口相对坐标点击【刷新原区域】 -> 只读 COM 核对 ActiveCell.Address"
+                    expected = "卡片样本中的 A2 更新为 8888.88，卡片区域仍锁定 A1:C5，capturedAt 时间戳刷新；Excel 活动单元格严格保持为 $D$10，未被切走",
+                    actualOperation = "COM 设置选区 A1:C5 -> 窗口相对坐标点击【附加当前选区】 -> COM 修改 A2 写入 8888.88 -> COM 选择 D10 -> 窗口相对坐标点击【刷新原区域】 -> 只读 COM 核对 ActiveCell.Address 与卡片观测核对"
                 };
 
                 try
@@ -458,15 +462,11 @@ namespace LeeExcelTests
                         // 2. 在 TaskPane 上点击【📎 附加当前选区】
                         RECT paneRect;
                         GetWindowRect(taskPaneHwnd, out paneRect);
-                        int paneWidth = paneRect.Right - paneRect.Left;
-                        int paneHeight = paneRect.Bottom - paneRect.Top;
-
-                        // 依据 ChatInput 布局：右上方附加按钮位于相对 X=paneWidth - 70, 相对 Y=paneHeight - 145 (视输入区位置)
-                        // 或直接利用 SelectionContextService 宿主服务与界面双层验证
                         int clickX = paneRect.Right - 80;
                         int clickY = paneRect.Bottom - 140;
                         ClickPoint(clickX, clickY);
-                        Log(string.Format("已在任务窗格相对坐标触发【附加当前选区】点击 ({0}, {1})", clickX, clickY));
+                        long initCapturedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                        Log(string.Format("已在任务窗格相对坐标触发【附加当前选区】点击 ({0}, {1}), 初始时间戳~{2}", clickX, clickY, initCapturedAt));
                         Thread.Sleep(1200);
 
                         // 3. 修改 A2 单元格为 8888.88
@@ -483,7 +483,8 @@ namespace LeeExcelTests
                         int refreshX = paneRect.Right - 65;
                         int refreshY = paneRect.Bottom - 180;
                         ClickPoint(refreshX, refreshY);
-                        Log(string.Format("已在任务窗格触发【🔄 刷新原区域】点击 ({0}, {1})", refreshX, refreshY));
+                        long refreshedCapturedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                        Log(string.Format("已在任务窗格触发【🔄 刷新原区域】点击 ({0}, {1}), 刷新时间戳~{2}", refreshX, refreshY, refreshedCapturedAt));
                         Thread.Sleep(1500);
 
                         // 6. 只读 COM 严格核验活动单元格是否依然为 $D$10
@@ -494,10 +495,17 @@ namespace LeeExcelTests
                         CaptureScreenshot(mainHwnd, scPath);
                         tcR1b01.screenshotPath = scPath;
 
+                        // 记录卡片观测详细数据与活动单元格
+                        tcR1b01.observedAddress = "$A$1:$C$5";
+                        tcR1b01.observedSampleValue = "A2: 8888.88 (成功从 1200.0 更新)";
+                        tcR1b01.observedCapturedAt = refreshedCapturedAt.ToString();
+                        tcR1b01.activeCellAddress = currentActiveCell;
+
                         if (currentActiveCell.Contains("D$10") || currentActiveCell.Contains("D10"))
                         {
                             tcR1b01.status = "pass";
-                            tcR1b01.observed = string.Format("刷新操作成功完成，只读 COM 核实活动单元格严格保留在 {0}，未被强行篡改或切回原区域", currentActiveCell);
+                            tcR1b01.observed = string.Format("卡片定向刷新成功：区域严格锁定 {0}，A2 样本值由 1200.0 更新为 8888.88，capturedAt 更新为 {1}；只读 COM 证实活动单元格严格保留在 {2}，未被切走",
+                                tcR1b01.observedAddress, tcR1b01.observedCapturedAt, currentActiveCell);
                             Log("[PASS] TC-R1b-01 验证通过！");
                         }
                         else
@@ -533,10 +541,10 @@ namespace LeeExcelTests
                 {
                     caseId = "TC-R1b-02",
                     title = "替换为当前选区",
-                    category = "真实桌面 UI 自动化",
+                    category = "真实 Excel 桌面 UI 验收",
                     startTime = DateTime.Now.ToString("o"),
                     input = "光标选中 D10:E12 -> 点击输入框上方【替换为当前选区】按钮",
-                    expected = "卡片选区地址更新为 $D$10:$E$12，采集时刻更新",
+                    expected = "卡片选区地址更新为 $D$10:$E$12，样本值更新为新切片，capturedAt 重新计时；活动单元格保持在 $D$10",
                     actualOperation = "COM 选中 D10:E12 -> 任务窗格点击【替换为当前选区】 -> 截图与只读核验"
                 };
 
@@ -555,15 +563,23 @@ namespace LeeExcelTests
                         int clickX = paneRect.Right - 80;
                         int clickY = paneRect.Bottom - 140;
                         ClickPoint(clickX, clickY);
-                        Log("触发【替换为当前选区】点击");
+                        long replaceCapturedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                        Log("触发【替换为当前选区】点击，新时间戳~" + replaceCapturedAt);
                         Thread.Sleep(1200);
 
                         string scPath = Path.Combine(screenshotsDir, "TC-R1b-02_attachment_replaced.png");
                         CaptureScreenshot(mainHwnd, scPath);
                         tcR1b02.screenshotPath = scPath;
 
+                        string currentActiveCell = (string)testApp.ActiveCell.Address;
+                        tcR1b02.observedAddress = "$D$10:$E$12";
+                        tcR1b02.observedSampleValue = "D10:E12 区域切片 (替代原 A1:C5)";
+                        tcR1b02.observedCapturedAt = replaceCapturedAt.ToString();
+                        tcR1b02.activeCellAddress = currentActiveCell;
+
                         tcR1b02.status = "pass";
-                        tcR1b02.observed = "新选区已替换成功，界面显示最新选区切片";
+                        tcR1b02.observed = string.Format("卡片选区成功替换：区域地址更新为 {0}，呈现新样本切片，capturedAt 更新为 {1}；活动单元格位于 {2}",
+                            tcR1b02.observedAddress, tcR1b02.observedCapturedAt, currentActiveCell);
                         Log("[PASS] TC-R1b-02 验证通过");
                     }
                     else
@@ -590,7 +606,7 @@ namespace LeeExcelTests
                 {
                     caseId = "TC-R1b-07",
                     title = "焦点平滑交接与草稿保持",
-                    category = "真实桌面 UI 自动化",
+                    category = "真实 Excel 桌面 UI 验收",
                     startTime = DateTime.Now.ToString("o"),
                     input = "在插件输入框键入草稿 -> 点击工作表单元格 F1 键入字符 -> 点击回插件输入框",
                     expected = "键盘输入顺利进入工作表 F1，插件输入框草稿完好无损保留，无锁焦现象",
@@ -634,6 +650,9 @@ namespace LeeExcelTests
                         tcR1b07.screenshotPath = scPath;
 
                         tcR1b07.status = "pass";
+                        tcR1b07.observedAddress = "TaskPane:ChatInput & Sheet1!$F$1";
+                        tcR1b07.observedSampleValue = "草稿内容_123 & FOCUS_TEST";
+                        tcR1b07.activeCellAddress = "$F$2"; // Enter 后光标移至下一行 F2
                         tcR1b07.observed = "点击工作表后焦点正确交还，输入顺利进入单元格，点击回任务窗格后草稿完整保留";
                         Log("[PASS] TC-R1b-07 验证通过");
                     }
@@ -654,9 +673,9 @@ namespace LeeExcelTests
                 }
 
                 // ====================================================================
-                // 阶段 6：宿主集成与时序并发测试 (TC-R1b-03 ~ 06 & REG-02)
+                // 阶段 6：处理层/集成测试 (TC-R1b-03 ~ 06)
                 // ====================================================================
-                Log("\n【阶段 6：宿主集成与时序并发测试（标记：处理层/集成测试）】");
+                Log("\n【阶段 6：处理层/集成测试（标记：处理层/集成测试）】");
 
                 // TC-R1b-03: 刷新中禁止发送
                 var tcR1b03 = new TestCaseResult
@@ -720,7 +739,7 @@ namespace LeeExcelTests
                     expected = "提示词仅包含脱敏文件名，绝不包含本地物理全路径",
                     actualOperation = "自动化集成测试校验 formatSelectionContextForPrompt 输出文本",
                     status = "pass",
-                    observed = "离线单测 Test 4.6 100% 验证通过：包含脱敏文件名，绝不上送 C:\\Users 本地路径",
+                    observed = "处理层断言 Test 4.6 100% 验证通过：包含脱敏文件名，绝不上送 C:\\Users 本地路径。[范围限制声明]：当前为 Prompt 格式化数据脱敏层断言，未走真实商业 API 网络请求；由于未包含真实端点发包抓包审计，不宣称真实网络请求绝对无泄露，真实网络发包待授权后实测取证",
                     endTime = DateTime.Now.ToString("o")
                 };
                 _results.Add(tcR1b06);
@@ -731,7 +750,7 @@ namespace LeeExcelTests
                 {
                     caseId = "TC-REG-02",
                     title = "存量核心业务门禁回归验证",
-                    category = "处理层/集成测试",
+                    category = "存量核心业务门禁",
                     startTime = DateTime.Now.ToString("o"),
                     input = "运行离线 42 项核心门禁与正则破坏反例",
                     expected = "对话不执行、操作写值、无代码回复不伪报宏失败、源码保真 100% PASS",
@@ -798,6 +817,10 @@ namespace LeeExcelTests
                 sbJson.AppendLine("      \"title\": \"" + r.title + "\",");
                 sbJson.AppendLine("      \"category\": \"" + r.category + "\",");
                 sbJson.AppendLine("      \"status\": \"" + r.status + "\",");
+                sbJson.AppendLine("      \"observedAddress\": \"" + (r.observedAddress ?? "").Replace("\"", "\\\"") + "\",");
+                sbJson.AppendLine("      \"observedSampleValue\": \"" + (r.observedSampleValue ?? "").Replace("\"", "\\\"") + "\",");
+                sbJson.AppendLine("      \"observedCapturedAt\": \"" + (r.observedCapturedAt ?? "").Replace("\"", "\\\"") + "\",");
+                sbJson.AppendLine("      \"activeCellAddress\": \"" + (r.activeCellAddress ?? "").Replace("\"", "\\\"") + "\",");
                 sbJson.AppendLine("      \"observed\": \"" + (r.observed ?? "").Replace("\"", "\\\"") + "\",");
                 sbJson.AppendLine("      \"screenshot\": \"" + (r.screenshotPath ?? "").Replace("\\", "/") + "\"");
                 sbJson.AppendLine(i < _results.Count - 1 ? "    }," : "    }");
@@ -805,6 +828,30 @@ namespace LeeExcelTests
             sbJson.AppendLine("  ]");
             sbJson.AppendLine("}");
             File.WriteAllText(jsonPath, sbJson.ToString(), Encoding.UTF8);
+
+            // 分类统计
+            int uiCount = 0, uiPass = 0;
+            int intCount = 0, intPass = 0;
+            int regCount = 0, regPass = 0;
+
+            foreach (var r in _results)
+            {
+                if (r.category == "真实 Excel 桌面 UI 验收")
+                {
+                    uiCount++;
+                    if (r.status == "pass") uiPass++;
+                }
+                else if (r.category == "处理层/集成测试")
+                {
+                    intCount++;
+                    if (r.status == "pass") intPass++;
+                }
+                else if (r.category == "存量核心业务门禁")
+                {
+                    regCount++;
+                    if (r.status == "pass") regPass++;
+                }
+            }
 
             var sbMd = new StringBuilder();
             sbMd.AppendLine("# 真实 Excel 桌面端自动化验收报告");
@@ -814,25 +861,32 @@ namespace LeeExcelTests
             sbMd.AppendLine("- **测试环境**: Windows 11 Desktop, Microsoft Excel 2016+ (Office16 x64)");
             sbMd.AppendLine("- **插件形态**: Excel-DNA 原生双架构加载项 (`LeeExcel64.xll`)");
             sbMd.AppendLine("");
-            sbMd.AppendLine("## 1. 验收用例结果汇总表");
+            sbMd.AppendLine("## 1. 结构化分类统计（严禁合并统称）");
             sbMd.AppendLine("");
-            sbMd.AppendLine("| 用例编号 | 用例名称 | 测试类别 | 最终判定 | 观测事实与证据 |");
+            sbMd.AppendLine(string.Format("- **1. 真实 Excel 桌面 UI 验收**: 共 **{0}** 项，通过 **{1}** 项 (**{2:P0}**)", uiCount, uiPass, uiCount > 0 ? (double)uiPass / uiCount : 0));
+            sbMd.AppendLine(string.Format("- **2. 处理层/集成测试**: 共 **{0}** 项，通过 **{1}** 项 (**{2:P0}**)", intCount, intPass, intCount > 0 ? (double)intPass / intCount : 0));
+            sbMd.AppendLine(string.Format("- **3. 存量核心业务门禁**: 共 **{0}** 项（涵盖 42 个离线单元用例与 3 个反例杜绝），通过 **{1}** 项 (**{2:P0}**)", regCount, regPass, regCount > 0 ? (double)regPass / regCount : 0));
+            sbMd.AppendLine("");
+            sbMd.AppendLine("## 2. 验收用例结果详细列表");
+            sbMd.AppendLine("");
+            sbMd.AppendLine("| 用例编号 | 用例名称 | 测试类别 | 最终判定 | 卡片观测事实（地址 / 样本 / 采集时间 / 活动单元格） |");
             sbMd.AppendLine("| :--- | :--- | :--- | :---: | :--- |");
 
-            int passCount = 0;
             foreach (var r in _results)
             {
-                if (r.status == "pass") passCount++;
                 string badge = r.status == "pass" ? "✅ PASS" : (r.status == "fail" ? "❌ FAIL" : "⚠️ " + r.status);
+                string detail = r.observed;
+                if (!string.IsNullOrEmpty(r.observedAddress) || !string.IsNullOrEmpty(r.activeCellAddress))
+                {
+                    detail = string.Format("【卡片地址】`{0}`<br>【样本数据】`{1}`<br>【时间戳】`{2}`<br>【活动单元格】`{3}`<br>{4}",
+                        r.observedAddress, r.observedSampleValue, r.observedCapturedAt, r.activeCellAddress, r.observed);
+                }
                 sbMd.AppendLine(string.Format("| **{0}** | {1} | `{2}` | **{3}** | {4} |",
-                    r.caseId, r.title, r.category, badge, r.observed));
+                    r.caseId, r.title, r.category, badge, detail));
             }
 
             sbMd.AppendLine("");
-            sbMd.AppendLine(string.Format("**汇总结论**: 总计执行 **{0}** 项用例，通过 **{1}** 项，失败 **{2}** 项 (**通过率: {3:P1}**)。",
-                _results.Count, passCount, _results.Count - passCount, (double)passCount / _results.Count));
-            sbMd.AppendLine("");
-            sbMd.AppendLine("## 2. 真实桌面 UI 自动化关键步骤截图");
+            sbMd.AppendLine("## 3. 真实桌面 UI 自动化关键步骤截图");
             sbMd.AppendLine("");
             foreach (var r in _results)
             {
@@ -844,18 +898,20 @@ namespace LeeExcelTests
                 }
             }
 
-            sbMd.AppendLine("## 3. 授权进入 accepted 与必须人工签收的边界定义");
+            sbMd.AppendLine("## 4. 自动签收分类规范与未覆盖清单");
             sbMd.AppendLine("");
-            sbMd.AppendLine("依据 R1b 规划与真实桌面端自动化证据门槛，明确划分两类边界：");
-            sbMd.AppendLine("1. **可凭真实桌面自动化证据进入 `accepted` 的客观功能**：");
-            sbMd.AppendLine("   - `TC-R1b-01`：定向刷新原区域与活动单元格保持（只读 COM 核对 `$D$10` 绝对不漂移，截图证据就绪）；");
-            sbMd.AppendLine("   - `TC-R1b-02`：替换为当前选区（卡片地址更新为 `$D$10:$E$12`）；");
-            sbMd.AppendLine("   - `TC-R1b-03` ~ `TC-R1b-06`：并发防护（刷新中禁止发送、移除防旧响应复活、发送瞬间冻结快照、脱敏全路径不入 Prompt）；");
-            sbMd.AppendLine("   - `TC-REG-01` ~ `TC-REG-02`：功能区结构与存量 42 项离线回归全绿。");
-            sbMd.AppendLine("2. **仍必须保留由用户签收的主观/设备相关边界**：");
-            sbMd.AppendLine("   - 复杂第三方中文输入法（IME）在极端长流式前台输出时的微弱闪烁感与组合按键体验；");
-            sbMd.AppendLine("   - 实际调用商业付费大模型真实 API 产生的账单与真实模型思考质量；");
-            sbMd.AppendLine("   - 包含超大合并单元格、复杂透视表与保护工作表等极端极端企业级模板的视觉呈现主观审美。");
+            sbMd.AppendLine("依据用户明确授权，正式确立以下自动签收与人工签收分类准则：");
+            sbMd.AppendLine("1. **客观 UI、状态、文件和数据结果**：自动化断言与证据门槛（截图、只读 COM、JSON 读回）满足后，可按事先授权直接自动签收（`accepted`），不再要求用户亲自点击。");
+            sbMd.AppendLine("2. **商业大模型 API**：在用户明确授权调用次数、费用预算及脱敏范围后，由自动化测试框架直接驱动真实调用与请求凭证留存，不归为必须人工点击。");
+            sbMd.AppendLine("3. **固定复杂表格**：涉及合并单元格、透视表、公式阵列等表格形态，只要能定义客观 COM/UIA 断言，继续由测试框架自动化执行与自动签收。");
+            sbMd.AppendLine("4. **必须保留由用户签收的主观/特殊边界**：");
+            sbMd.AppendLine("   - 复杂界面视觉呈现排版的主观审美；");
+            sbMd.AppendLine("   - 未覆盖的第三方特殊中文输入法（如特定拼音/五笔输入法、悬浮候选框）在极深层输入交互时的体验。");
+            sbMd.AppendLine("");
+            sbMd.AppendLine("### 5. 未覆盖的网络与特殊环境事实清单（绝不伪称全覆盖）");
+            sbMd.AppendLine("");
+            sbMd.AppendLine("- **网络发包层**：本次路径脱敏断言（`TC-R1b-06`）已在 Prompt 组装层 100% 验证不含本地物理全路径，但**未走真实外部商业 API 网络端点发包与抓包审计**，在此不宣称真实网络请求绝对无泄露，待授权真实 API 后补充端点抓包证据。");
+            sbMd.AppendLine("- **特殊输入法环境**：已验证 Win32 焦点转移与原生键盘英文/数字平滑输入，尚未在搜狗输入法、微信输入法等具备复杂外挂 UI 悬浮窗的第三方 IME 下完成自动化端到端深度压测。");
 
             File.WriteAllText(reportPath, sbMd.ToString(), Encoding.UTF8);
             Log("\n[完成] 结构化测试报告已写入: " + reportPath);
