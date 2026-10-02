@@ -518,6 +518,10 @@ export function formatSelectionContextForPrompt(
   lines.push(`- 目标工作表: ${ctx.sheetName || '当前工作表'}`);
   lines.push(`- 选区地址: ${ctx.address} (总计 ${ctx.totalRows} 行 × ${ctx.totalColumns} 列，起始单元格: 行 ${ctx.startRow}, 列 ${ctx.startColumn})`);
   lines.push(`- 结构可观察状态: 公式状态=${ctx.formulaStatus}; 合并状态=${ctx.mergeStatus}; 筛选/隐藏行扫描状态=${ctx.visibilityStatus}`);
+  if (ctx.capturedAt) {
+    fields.push('capturedAt');
+    lines.push(`- 选区快照采集时间: ${new Date(ctx.capturedAt).toLocaleTimeString()} (注: 本段内容为采集时的只读快照)`);
+  }
 
   const candidateHeaders = Array.isArray(ctx.candidateHeaders) && ctx.candidateHeaders.length > 0
     ? ctx.candidateHeaders

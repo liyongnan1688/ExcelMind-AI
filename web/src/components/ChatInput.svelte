@@ -15,6 +15,11 @@
   let selectionError = '';
   let showDetails = false;
 
+  // R1b: 刷新原区域状态与并发防护序列号
+  let isRefreshingArea = false;
+  let refreshError = '';
+  let refreshSeq = 0;
+
   let sendOptions: SelectionSendOptions = {
     includeStructure: true,
     includeSamples: false, // 默认不勾选样本
@@ -22,38 +27,109 @@
     firstRowAsHeader: true, // 默认首行为候选表头
   };
 
+  function formatCaptureTime(ts?: number): string {
+    if (!ts) return '';
+    const d = new Date(ts);
+    const pad = (n: number) => (n < 10 ? '0' + n : n);
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+
+  // 【附加当前选区】（替换动作：读取当前 Excel 活动选区）
   async function handleAttachSelection() {
-    if (disabled || isLoadingSelection) return;
+    if (disabled || isLoadingSelection || isRefreshingArea) return;
     isLoadingSelection = true;
     selectionError = '';
+    refreshError = '';
+    const currentSeq = ++refreshSeq;
+
     try {
       const res = await bridge.getSelectionContext(5, 15);
       if (res.ok && res.data) {
-        selectionContext = res.data;
-        sendOptions = {
-          includeStructure: true,
-          includeSamples: false,
-          includeFormulas: false,
-          firstRowAsHeader: true,
-        };
+        if (currentSeq >= refreshSeq) {
+          selectionContext = res.data;
+          sendOptions = {
+            includeStructure: true,
+            includeSamples: false,
+            includeFormulas: false,
+            firstRowAsHeader: true,
+          };
+          refreshError = '';
+        }
       } else {
-        selectionError = res.error || '获取选区失败';
+        if (currentSeq >= refreshSeq) {
+          selectionError = res.error || '获取选区失败';
+        }
       }
     } catch (err: any) {
-      selectionError = err.message || '获取选区异常';
+      if (currentSeq >= refreshSeq) {
+        selectionError = err.message || '获取选区异常';
+      }
     } finally {
-      isLoadingSelection = false;
+      if (currentSeq >= refreshSeq) {
+        isLoadingSelection = false;
+      }
+    }
+  }
+
+  // 【刷新原区域】（定向动作：读取该附件保存的原工作簿、原工作表和原区域地址）
+  async function handleRefreshOriginalArea() {
+    if (disabled || isRefreshingArea || isLoadingSelection || !selectionContext) return;
+    const currentAttId = selectionContext.attachmentId;
+    const currentSeq = ++refreshSeq;
+
+    isRefreshingArea = true;
+    refreshError = '';
+
+    try {
+      const res = await bridge.getSelectionContext({
+        sampleRows: selectionContext.sampleRowCount || 5,
+        sampleCols: selectionContext.sampleColumnCount || 15,
+        targetWorkbookFullName: selectionContext.workbookFullName,
+        targetWorkbookName: selectionContext.workbookName,
+        targetSheetName: selectionContext.sheetName,
+        targetAddress: selectionContext.address,
+        attachmentId: currentAttId,
+      });
+
+      // 1. 若当前卡片已被移除或被新选区替换，丢弃过时结果，绝不重新挂回已移除卡片
+      if (!selectionContext || selectionContext.attachmentId !== currentAttId) {
+        return;
+      }
+
+      // 2. 若序列号小于当前最新序列号，丢弃迟到响应
+      if (currentSeq < refreshSeq) {
+        return;
+      }
+
+      if (res.ok && res.data) {
+        // 刷新成功：更新数据、样本与采集时间，保留用户现有的勾选项
+        selectionContext = res.data;
+        refreshError = '';
+      } else {
+        // 刷新失败：保留旧快照数据与旧采集时间，仅展示失败提示
+        refreshError = res.error || '刷新原区域失败';
+      }
+    } catch (err: any) {
+      if (selectionContext && selectionContext.attachmentId === currentAttId && currentSeq >= refreshSeq) {
+        refreshError = err.message || '刷新原区域异常';
+      }
+    } finally {
+      if (currentSeq >= refreshSeq) {
+        isRefreshingArea = false;
+      }
     }
   }
 
   function removeSelection() {
     selectionContext = null;
     selectionError = '';
+    refreshError = '';
     showDetails = false;
+    ++refreshSeq; // 废弃正在途中的刷新响应
   }
 
   function handleSubmit(overrideMode?: 'AUTOMATION' | 'CHAT') {
-    if (!inputText.trim() || disabled) return;
+    if (!inputText.trim() || disabled || isRefreshingArea) return;
     const text = inputText.trim();
     const modeToSend = overrideMode || currentMode;
     if (overrideMode && overrideMode !== currentMode) {
@@ -75,9 +151,11 @@
       inputText = '';
       onSend(text, modeToSend, snapshot);
 
-      // 发送后清空本次挂载的选区，保持单次请求固定独立性
+      // 发送瞬间冻结并清空本次挂载的选区，保持单次请求固定独立性，后续刷新绝不影响已发送内容
       selectionContext = null;
       showDetails = false;
+      refreshError = '';
+      ++refreshSeq;
     } catch (err: any) {
       console.error('[ChatInput] 组装发送请求异常:', err);
       selectionError = '发送请求异常: ' + (err?.message || err);
@@ -126,18 +204,18 @@
       </button>
     </div>
 
-    <!-- 附加当前选区按钮 (双模式均可用) -->
+    <!-- 附加当前选区按钮 (双模式均可用，用于首次添加或替换附件) -->
     <button
       class="attach-selection-btn {selectionContext ? 'has-attached' : ''}"
       on:click={handleAttachSelection}
-      disabled={disabled || isLoadingSelection}
+      disabled={disabled || isLoadingSelection || isRefreshingArea}
       type="button"
-      title="只读读取当前选中的单元格区域元数据与样本"
+      title="只读读取当前 Excel 选中的单元格区域（用于替换现有附件）"
     >
       <svg class="btn-icon {isLoadingSelection ? 'spin' : ''}" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
       </svg>
-      <span>{isLoadingSelection ? '读取中...' : (selectionContext ? '已附选区 (点击刷新)' : '附加当前选区')}</span>
+      <span>{isLoadingSelection ? '读取中...' : (selectionContext ? '替换为当前选区' : '附加当前选区')}</span>
     </button>
   </div>
 
@@ -157,25 +235,46 @@
     <div class="selection-card">
       <div class="card-header">
         <div class="card-title-group">
-          <span class="badge-tag">📎 已附加选区</span>
-          <span class="target-wb-sheet" title="{selectionContext.workbookName} - {selectionContext.sheetName}">
+          <span class="badge-tag">📎 选区快照</span>
+          <span class="target-wb-sheet" title="{selectionContext.workbookName} - {selectionContext.sheetName}!{selectionContext.address}">
             <strong>{selectionContext.sheetName}</strong>!{selectionContext.address}
           </span>
           <span class="dim-badge">
             {selectionContext.totalRows}行 × {selectionContext.totalColumns}列
           </span>
+          {#if selectionContext.capturedAt}
+            <span class="time-badge" title="采集时系统时间: {formatCaptureTime(selectionContext.capturedAt)}">
+              {formatCaptureTime(selectionContext.capturedAt)} 采集
+            </span>
+          {/if}
         </div>
         <div class="card-actions-group">
           <button class="text-action-btn" type="button" on:click={() => (showDetails = !showDetails)}>
             {showDetails ? '收起详情 ▲' : '查看/设置 ▼'}
           </button>
-          <button class="text-action-btn" type="button" on:click={handleAttachSelection} title="重新读取 Excel 当前选区">
-            🔄
+          <!-- 刷新原区域按钮：定向读取该附件保存的原工作簿/表/地址，不影响当前活动选区 -->
+          <button
+            class="text-action-btn refresh-btn {isRefreshingArea ? 'refreshing' : ''}"
+            type="button"
+            on:click={handleRefreshOriginalArea}
+            disabled={isRefreshingArea || disabled}
+            title="读取并刷新原区域（{selectionContext.sheetName}!{selectionContext.address}）最新数据，不改变当前光标"
+          >
+            <span class="refresh-icon {isRefreshingArea ? 'spin' : ''}">🔄</span>
+            <span>{isRefreshingArea ? '读取中...' : '刷新原区域'}</span>
           </button>
-          <button class="text-action-btn remove-btn" type="button" on:click={removeSelection} title="移除本次附加">
+          <button class="text-action-btn remove-btn" type="button" on:click={removeSelection} disabled={isRefreshingArea} title="移除本次附加">
             ✕
           </button>
         </div>
+      </div>
+
+      <!-- 快照提示条与错误状态 -->
+      <div class="snapshot-status-bar">
+        <span class="snapshot-tip-text">ℹ️ 采集时快照；修改原区域后请点击【刷新原区域】</span>
+        {#if refreshError}
+          <span class="refresh-err-text" title={refreshError}>⚠️ {refreshError} (旧数据仍保留)</span>
+        {/if}
       </div>
 
       <!-- 发送选项复选框 -->
@@ -267,8 +366,8 @@
         <button
           class="mode-action-btn {currentMode === 'CHAT' ? 'primary-chat' : 'secondary-chat'}"
           on:click={() => handleSubmit('CHAT')}
-          disabled={disabled || !inputText.trim()}
-          title="以【对话】发送：仅解答，不改动表格"
+          disabled={disabled || !inputText.trim() || isRefreshingArea}
+          title={isRefreshingArea ? "选区正在刷新原区域，请稍候完成后再发送" : "以【对话】发送：仅解答，不改动表格"}
           type="button"
         >
           <MessageSquare size={13} />
@@ -279,8 +378,8 @@
         <button
           class="mode-action-btn {currentMode === 'AUTOMATION' ? 'primary-auto' : 'secondary-auto'}"
           on:click={() => handleSubmit('AUTOMATION')}
-          disabled={disabled || !inputText.trim()}
-          title="以【操作】发送：直接修改表格并自动备份"
+          disabled={disabled || !inputText.trim() || isRefreshingArea}
+          title={isRefreshingArea ? "选区正在刷新原区域，请稍候完成后再发送" : "以【操作】发送：直接修改表格并自动备份"}
           type="button"
         >
           <Zap size={13} />
@@ -485,6 +584,15 @@
     font-size: 10px;
   }
 
+  .time-badge {
+    background: #e7f3ec;
+    color: #107c41;
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-family: var(--font-family-mono, monospace);
+  }
+
   .card-actions-group {
     display: flex;
     align-items: center;
@@ -502,8 +610,60 @@
     border-radius: 2px;
   }
 
-  .text-action-btn:hover {
+  .text-action-btn:hover:not(:disabled) {
     background: #e1dfdd;
+  }
+
+  .refresh-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    background: #eef6f1;
+    color: #107c41;
+    font-weight: 500;
+    padding: 1px 5px;
+    border-radius: 3px;
+    border: 1px solid #c7e0d2;
+  }
+
+  .refresh-btn:hover:not(:disabled) {
+    background: #dff0e6;
+  }
+
+  .refresh-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .refresh-icon {
+    display: inline-block;
+    font-size: 10px;
+  }
+
+  .snapshot-status-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    font-size: 10px;
+    color: #605e5c;
+    background: #f3f5f4;
+    padding: 2px 6px;
+    border-radius: 2px;
+  }
+
+  .snapshot-tip-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .refresh-err-text {
+    color: #a80000;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .remove-btn {

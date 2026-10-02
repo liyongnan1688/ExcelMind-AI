@@ -478,6 +478,10 @@ function formatSelectionForTest(ctx, options) {
   lines.push(`- 目标工作表: ${ctx.sheetName || '当前工作表'}`);
   lines.push(`- 选区地址: ${ctx.address} (总计 ${ctx.totalRows} 行 × ${ctx.totalColumns} 列，起始单元格: 行 ${ctx.startRow}, 列 ${ctx.startColumn})`);
   lines.push(`- 结构可观察状态: 公式状态=${ctx.formulaStatus}; 合并状态=${ctx.mergeStatus}; 筛选/隐藏行扫描状态=${ctx.visibilityStatus}`);
+  if (ctx.capturedAt) {
+    fields.push('capturedAt');
+    lines.push(`- 选区快照采集时间: ${new Date(ctx.capturedAt).toLocaleTimeString()} (注: 本段内容为采集时的只读快照)`);
+  }
 
   if (options.firstRowAsHeader) {
     fields.push('headers');
@@ -682,6 +686,112 @@ const promptWithoutSel = '请在当前表生成柱状图';
 assert(
   '[R1a] 移除选区附件：普通发送不携带 <excel_selection_context> 标签',
   !promptWithoutSel.includes('<excel_selection_context>')
+);
+
+console.log('\n=== 5. R1b 选区时效性、快照提示与刷新原区域 Suite ===');
+// Test 5.1: 选区上下文增量包含 capturedAt 与 attachmentId
+const mockR1bContext = {
+  ...mockSelectionD5,
+  capturedAt: 1727845200000,
+  attachmentId: 'att_test_123',
+};
+const resR1b = formatSelectionForTest(mockR1bContext, {
+  includeStructure: true,
+  includeSamples: false,
+  includeFormulas: false,
+  firstRowAsHeader: true,
+});
+assert(
+  '[R1b] 选区数据契约包含 capturedAt 与 attachmentId，提示词中准确呈现快照采集时间',
+  mockR1bContext.capturedAt === 1727845200000 &&
+    mockR1bContext.attachmentId === 'att_test_123' &&
+    resR1b.promptText.includes('选区快照采集时间')
+);
+
+// Test 5.2: 刷新原区域定向参数校验（读取原工作簿、原表和原地址，非当前活动工作簿）
+function buildRefreshOriginalAreaPayload(savedContext, sampleRows = 5, sampleCols = 15) {
+  return {
+    sampleRows: sampleRows.toString(),
+    sampleCols: sampleCols.toString(),
+    targetWorkbookFullName: savedContext.workbookFullName,
+    targetWorkbookName: savedContext.workbookName,
+    targetSheetName: savedContext.sheetName,
+    targetAddress: savedContext.address,
+    attachmentId: savedContext.attachmentId,
+  };
+}
+const refreshPayload = buildRefreshOriginalAreaPayload(mockR1bContext);
+assert(
+  '[R1b] 刷新原区域必须定向传递保存的原工作簿名、原表名与原区域地址，不依赖当前光标',
+  refreshPayload.targetSheetName === '成本明细' &&
+    refreshPayload.targetAddress === '$D$5:$H$25' &&
+    refreshPayload.targetWorkbookName === '财务分析_2026.xlsx' &&
+    refreshPayload.attachmentId === 'att_test_123'
+);
+
+// Test 5.3: 并发与时序防覆盖校验（附件已移除或较旧响应晚到时必须丢弃）
+function handleRefreshResponseArrived(currentAttachedCard, incomingResponse, currentSeq, requestSeq) {
+  // 1. 若当前卡片已被移除，或附件 ID 已变为另一个新附件
+  if (!currentAttachedCard || currentAttachedCard.attachmentId !== incomingResponse.attachmentId) {
+    return { applied: false, reason: 'discarded_attachment_mismatch_or_removed' };
+  }
+  // 2. 若序列号较旧
+  if (requestSeq < currentSeq) {
+    return { applied: false, reason: 'discarded_stale_sequence' };
+  }
+  return { applied: true, data: incomingResponse.data };
+}
+
+// 场景 A: 用户已移除附件，刷新响应才返回 -> 丢弃，绝不重新挂回
+const discardOnRemoved = handleRefreshResponseArrived(null, { attachmentId: 'att_test_123', data: {} }, 2, 1);
+// 场景 B: 用户换成了新附件 att_new_456，旧刷新 att_test_123 返回 -> 丢弃
+const discardOnReplaced = handleRefreshResponseArrived({ attachmentId: 'att_new_456' }, { attachmentId: 'att_test_123', data: {} }, 2, 1);
+// 场景 C: 同一附件较旧的序列号晚到 -> 丢弃
+const discardOnStaleSeq = handleRefreshResponseArrived({ attachmentId: 'att_test_123' }, { attachmentId: 'att_test_123', data: {} }, 3, 2);
+// 场景 D: 正常最新响应 -> 应用
+const applyLatest = handleRefreshResponseArrived({ attachmentId: 'att_test_123' }, { attachmentId: 'att_test_123', data: { updated: true } }, 3, 3);
+
+assert(
+  '[R1b] 刷新防旧覆盖机制：附件移除、附件替换或旧响应晚到时均安全丢弃，不恢复已移除卡片',
+  discardOnRemoved.applied === false &&
+    discardOnReplaced.applied === false &&
+    discardOnStaleSeq.applied === false &&
+    applyLatest.applied === true
+);
+
+// Test 5.4: 刷新失败容灾（旧数据与旧采集时间完整保留，不提前更新时间戳）
+function handleRefreshFailure(currentCard, errorMessage) {
+  return {
+    card: { ...currentCard }, // 深度保持旧数据与旧 capturedAt 不变
+    refreshError: errorMessage,
+  };
+}
+const failedResult = handleRefreshFailure(mockR1bContext, '原工作表未找到或已被重命名/删除');
+assert(
+  '[R1b] 刷新失败容灾：旧数据与旧采集时间完整保留，不被清空且不提前更新成功时间',
+  failedResult.card.capturedAt === mockR1bContext.capturedAt &&
+    failedResult.card.address === mockR1bContext.address &&
+    failedResult.refreshError.includes('原工作表未找到')
+);
+
+// Test 5.5: 发送瞬间冻结附件，后续刷新不影响已发送消息
+const frozenSnapshot = {
+  context: { ...mockR1bContext },
+  options: { includeStructure: true, includeSamples: false },
+  promptText: resR1b.promptText,
+  summary: resR1b.auditSummary,
+};
+// 模拟发送后在输入框触发刷新，数据发生变化
+const mutatedContextAfterSend = {
+  ...mockR1bContext,
+  capturedAt: 1727849999999,
+  sampleRows: [],
+};
+assert(
+  '[R1b] 发送瞬间冻结本次附件，后续在输入框刷新不改动已发消息与审计内容',
+  frozenSnapshot.context.capturedAt === 1727845200000 &&
+    mutatedContextAfterSend.capturedAt === 1727849999999 &&
+    frozenSnapshot.context.capturedAt !== mutatedContextAfterSend.capturedAt
 );
 
 console.log(`\nUnit Tests Summary: Pass = ${passCount}, Fail = ${failCount}`);

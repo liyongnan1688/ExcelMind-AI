@@ -719,7 +719,25 @@ namespace LeeExcel
                 if (int.TryParse(req["sampleCols"], out c)) sampleCols = c;
             }
 
-            var result = SelectionContextService.GetSelectionContext(app, sampleRows, sampleCols);
+            string attachmentId = req.ContainsKey("attachmentId") ? req["attachmentId"] : null;
+            string targetSheetName = req.ContainsKey("targetSheetName") ? req["targetSheetName"] : null;
+            string targetAddress = req.ContainsKey("targetAddress") ? req["targetAddress"] : null;
+            string targetWbFullName = req.ContainsKey("targetWorkbookFullName") ? req["targetWorkbookFullName"] : null;
+            string targetWbName = req.ContainsKey("targetWorkbookName") ? req["targetWorkbookName"] : null;
+
+            SelectionContextResult result;
+            if (!string.IsNullOrEmpty(targetSheetName) && !string.IsNullOrEmpty(targetAddress))
+            {
+                // 刷新原区域：严格定向读取原工作簿、原工作表和原地址，不激活、不改选区
+                result = SelectionContextService.GetSpecificRangeContext(
+                    app, targetWbFullName, targetWbName, targetSheetName, targetAddress, sampleRows, sampleCols, attachmentId);
+            }
+            else
+            {
+                // 附加当前选区：读取当前活动选区
+                result = SelectionContextService.GetSelectionContext(app, sampleRows, sampleCols, attachmentId);
+            }
+
             if (!result.ok)
             {
                 return new BridgeResponse

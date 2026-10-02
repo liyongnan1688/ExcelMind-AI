@@ -386,7 +386,52 @@ R1a 阶段代码与构建已完成，离线与单元测试 100% 通过；`TASK-R
   - R1a 选区感知功能（`TASK-R1a-01` ~ `TASK-R1a-03`）状态统一锁定为：`accepted`。
   - 焦点交接缺陷（`TASK-FIX-FOCUS-01` / `BUG-FOCUS-01`）状态统一锁定为：`accepted`（正式关闭）。
 - **事实边界保留**：其他未深度覆盖边界（中文输入法组合、公式栏、双击编辑、极端长流式前台表现）如实标记为待验，绝不泛化为“全部交互通过”。
-- **下一阶段准入**：R1b 进入 `planned` 状态，已产出最小设计文档，严禁在此阶段编码，等待用户明确授权启动。
+- **下一阶段准入**：R1b 切片 1（选区采集时间、快照提示及刷新原区域）已获得用户明确授权启动并完成开发。
+
+---
+
+## Session: 2026-10-02 (R1b 切片 1: 选区采集时间、快照提示与刷新原区域)
+
+### 1. 目标与实现范围
+- **目标切片**：仅限实施选区采集时间、快照提示及【🔄 刷新原区域】；坚决不实现宏引用与 Token 估算。
+- **开发分支**：独立分支 `feat/r1b-refresh-selection`。
+- **数据契约增量**：
+  - 增量引入 `capturedAt: number`（Unix 毫秒时间戳）与 `attachmentId: string`（唯一附件标识）。
+  - 保留 R1a 全部字段：`headers`、`candidateHeaders`、`sampleRows` 二维单元格结构、`formulaStatus`、`mergeStatus`、`visibilityStatus`、`unscannedNotes`。
+- **定向刷新原区域机制**：
+  - 卡片【🔄 刷新原区域】：宿主通过 `targetWorkbookName`、`targetWorkbookFullName`、`targetSheetName`、`targetAddress` 查找原对象。
+  - 严格不猜测同名表、不回退到 ActiveWorkbook / 当前 Selection，不擅自激活工作簿或改变用户当前选区。若原表找不到报错 `sheet_not_found`，原区域找不到报错 `range_not_found`。
+  - 【附加当前选区】：大按钮明确标注用于捕获当前活动选区或替换附件。
+- **采集时间与快照提示**：
+  - 卡片清晰展示采集时间与提示：“ℹ️ 采集时快照；修改原区域后请点击【刷新原区域】”。
+  - 客观展示时间，不后台轮询、不自动刷新、不把 60 秒作为失效判定依据。
+- **并发与防覆盖**：
+  - 刷新期间卡片禁用重复刷新并显示“读取中...”，禁用发送；
+  - 前端维护 `refreshSeq` 与 `attachmentId`；若卡片已被用户移除或替换，晚到结果直接丢弃，不恢复已移除卡片；较旧序列号晚到直接丢弃；
+  - 刷新失败保留旧快照数据与旧时间戳，不被清空；
+  - 发送瞬间冻结附件快照，后续刷新不影响已发送内容与审计记录。
+
+### 2. 代码交付与修改清单
+- **C# 宿主**：
+  - `src/SelectionContextService.cs`：扩充 `SelectionContextData` (`capturedAt`, `attachmentId`)，抽取公共逻辑 `ExtractContextFromRange`，实现 `GetSpecificRangeContext`（定向读取指定工作簿/表/地址）。
+  - `src/NativeBridge.cs`：`HandleGetSelectionContext` 支持解析定向刷新参数并分发。
+- **前端 Web**：
+  - `web/src/services/bridge.ts`：更新 `SelectionContextData` 接口；`getSelectionContext` 支持定向刷新参数。
+  - `web/src/services/llm.ts`：`formatSelectionContextForPrompt` 增加快照采集时间提示。
+  - `web/src/components/ChatInput.svelte`：支持【🔄 刷新原区域】按钮、读取中状态、并发序列号防覆盖校验、刷新失败容灾与发送冻结机制。
+
+### 3. 门禁与自动化验证结果
+- **C# 插件编译**：`powershell build_addin.ps1` 成功生成 `bin/LeeExcel.dll`（0 Error, 0 Warning）。
+- **前端构建**：`npm --prefix web run build` 成功，更新 `bin/dist/`。
+- **离线单元测试**：
+  - `node test_suite_unit.cjs`：**41/41 PASS (100%)**（包含 5 项 R1b 专项自动化测试：数据契约、定向刷新参数校验、并发时序丢弃校验、失败容灾保留、发送瞬间冻结）。
+  - `node test_regex_counter_example.cjs`：**3/3 PASS (100%)**。
+  - `.artifacts/tests/focus_handover/VerifyFocusHandover.exe`：**13/13 PASS (100%)**（焦点机制无回归）。
+
+### 4. 当前状态与下一步
+- **状态判定**：`TASK-R1b-01` 标记为 `automated_verified`。
+- **停点**：停止编码，向用户提交交付报告与 5 步人工验收指南，等待用户人工实测验收。
+
 
 
 

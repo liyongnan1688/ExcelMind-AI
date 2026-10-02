@@ -43,6 +43,8 @@ export interface SelectionContextData {
   isColumnTruncated: boolean;
   maxTextLengthLimit: number;
   unscannedNotes: string;
+  capturedAt: number;
+  attachmentId?: string;
 }
 
 export interface SelectionSendOptions {
@@ -433,7 +435,9 @@ class NativeBridgeClient {
           isRowTruncated: true,
           isColumnTruncated: false,
           maxTextLengthLimit: 100,
-          unscannedNotes: '选区共 10 行 × 6 列。本次仅安全抽样前 3 行 × 前 6 列。未扫描其余单元格内容，未扫描全表筛选/隐藏行状态。'
+          unscannedNotes: '选区共 10 行 × 6 列。本次仅安全抽样前 3 行 × 前 6 列。未扫描其余单元格内容，未扫描全表筛选/隐藏行状态。',
+          capturedAt: Date.now(),
+          attachmentId: 'att_mock_001'
         } as any,
       };
     }
@@ -447,13 +451,33 @@ class NativeBridgeClient {
   }
 
   public async getSelectionContext(
-    sampleRows: number = 5,
-    sampleCols: number = 15
+    paramsOrRows?: {
+      sampleRows?: number;
+      sampleCols?: number;
+      targetWorkbookName?: string;
+      targetWorkbookFullName?: string;
+      targetSheetName?: string;
+      targetAddress?: string;
+      attachmentId?: string;
+    } | number,
+    sampleColsParam?: number
   ): Promise<{ ok: boolean; data?: SelectionContextData; error?: string; errorType?: string }> {
-    const res = await this.send<SelectionContextData>('get_selection_context', {
-      sampleRows: sampleRows.toString(),
-      sampleCols: sampleCols.toString(),
-    });
+    const payload: Record<string, string> = {};
+
+    if (typeof paramsOrRows === 'object' && paramsOrRows !== null) {
+      payload.sampleRows = (paramsOrRows.sampleRows ?? 5).toString();
+      payload.sampleCols = (paramsOrRows.sampleCols ?? 15).toString();
+      if (paramsOrRows.targetWorkbookName) payload.targetWorkbookName = paramsOrRows.targetWorkbookName;
+      if (paramsOrRows.targetWorkbookFullName) payload.targetWorkbookFullName = paramsOrRows.targetWorkbookFullName;
+      if (paramsOrRows.targetSheetName) payload.targetSheetName = paramsOrRows.targetSheetName;
+      if (paramsOrRows.targetAddress) payload.targetAddress = paramsOrRows.targetAddress;
+      if (paramsOrRows.attachmentId) payload.attachmentId = paramsOrRows.attachmentId;
+    } else {
+      payload.sampleRows = (paramsOrRows ?? 5).toString();
+      payload.sampleCols = (sampleColsParam ?? 15).toString();
+    }
+
+    const res = await this.send<SelectionContextData>('get_selection_context', payload);
     if (res.ok && res.data) {
       return { ok: true, data: res.data };
     }

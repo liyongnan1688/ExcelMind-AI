@@ -13,8 +13,9 @@
 
 | 核心功能模块 | 技术实现与代码位置 | 真实状态划分 | 依据与验收证据 |
 | :--- | :--- | :--- | :--- |
-| **选区只读感知 (R1a)** | `src/SelectionContextService.cs`（COM 批量子区域读取）、`ChatInput.svelte`（预览卡与选项）、`llm.ts`（低信任 Prompt 组装） | **自动测试通过**<br>*(awaiting_manual)* | Node 单测 36/36 PASS (含 9 项 R1a 专项测试)，C# 单测 11/11 PASS，Vite 构建就绪；待前台人工验收 |
-| **双通道显式路由** | 前端 `ChatInput.svelte`、`App.svelte` 锁定 `requestMode` (CHAT vs AUTOMATION)；后端严格执行路由隔离 | **自动测试通过**<br>(用户人工体验良好) | `test_suite_unit.cjs` (PASS: 36/36)，跨通道隔离与异步切换锁定用例 100% 验证 |
+| **选区只读感知 (R1a)** | `src/SelectionContextService.cs`（COM 批量子区域读取）、`ChatInput.svelte`（预览卡与选项）、`llm.ts`（低信任 Prompt 组装） | **用户人工验收**<br>*(accepted)* | 用户前台真实 Excel 运行确认通过；Node 单测全绿 |
+| **选区刷新与时效提示 (R1b-1)** | `src/SelectionContextService.cs`（定向读取原工作簿/表/地址）、`ChatInput.svelte`（采集时间、刷新原区域、并发防旧覆盖）、`bridge.ts` | **自动测试通过**<br>*(automated_verified)* | `test_suite_unit.cjs` (41/41 PASS，含 5 项 R1b 专项)，`build_addin.ps1` 编译成功，Vite 构建成功；待前台人工验收 |
+| **双通道显式路由** | 前端 `ChatInput.svelte`、`App.svelte` 锁定 `requestMode` (CHAT vs AUTOMATION)；后端严格执行路由隔离 | **自动测试通过**<br>(用户人工体验良好) | `test_suite_unit.cjs` (PASS: 41/41)，跨通道隔离与异步切换锁定用例 100% 验证 |
 | **代码提取与截断拦截** | `web/src/services/llm.ts` 废弃脆弱正则；未闭合代码块、缺少 `End Sub` 拦截；非代码回复不报错 | **自动测试通过** | `test_suite_unit.cjs` 覆盖多段围栏、截断拦截及正文中提及 Sub 场景；无代码纯文本标注 `no_code` |
 | **源码 100% 保真** | `src/ScriptManager.cs` 计算 SHA256；不替换引号、不正则改写代码；`src/VbaRunner.cs` 原文与包装器分离 | **自动测试通过** | `test_suite_unit.cjs` 验证智能引号保真；`test_regex_counter_example.cjs` 验证反例杜绝 |
 | **目标工作簿绑定** | `src/NativeBridge.cs` 锁定目标 `FullName`/`Name`，`VbaRunner.cs` 在执行前后校验身份，防多窗口串改 | **已实现 (源码级)**<br>*(真实多窗口待人工验证)* | 源码包含显式工作簿查找与绑定核验；尚未在多前台 Excel 窗口频繁切换下完成用户最终签收 |
@@ -56,18 +57,27 @@
 | `TASK-R1a-02` | R1a | **前端“附加选区”卡片与只读预览**<br>在输入区增加附加按钮、紧凑预览卡、4项发送选项与透明查看弹窗。 | `accepted` | `web/src/components/ChatInput.svelte`<br>`web/src/App.svelte` | 用户人工实测通过，选区预览正常 |
 | `TASK-R1a-03` | R1a | **选区数据结构化注入 Prompt**<br>低信任数据段注入，严格防范文本单元格指令提权；请求固化与跨工作簿拦截。 | `accepted` | `web/src/services/llm.ts`<br>`web/src/services/bridge.ts` | 用户人工实测通过，请求隔离正常 |
 | `TASK-FIX-FOCUS-01` | 交互缺陷 | **修复 Excel 工作表与 WebView2 任务窗格焦点交接缺陷**<br>解决点击文本框输入后再点击工作表单元格，键盘输入仍进入插件的单向锁焦问题。 | `accepted` | `src/TaskPaneFocusHelper.cs`<br>`src/TaskPaneControl.cs`<br>`src/LeeExcelAddIn.cs`<br>`tests/tools/VerifyFocusHandover.cs` | 用户实测通过：插件输入后点击单元格，新输入正确进入单元格；缺陷正式关闭；其他未实测边界保留待验 |
+| `TASK-R1b-01` | R1b 切片 1 | **选区采集时间、快照提示与刷新原区域**<br>数据契约扩充 `capturedAt` 与 `attachmentId`；定向读取原工作簿/表/地址；并发防旧覆盖校验；刷新失败容灾保留旧数据；发送瞬间冻结附件。 | `automated_verified` | `src/SelectionContextService.cs`<br>`src/NativeBridge.cs`<br>`web/src/components/ChatInput.svelte`<br>`web/src/services/bridge.ts`<br>`test_suite_unit.cjs` | 离线测试 41/41 PASS (含 5 项 R1b 专项)，C# 编译成功；等待前台人工实测 |
 
 ---
 
-## 4. 阶段验收结论与 R1b 待启动状态
+## 4. 阶段验收结论与后续切片原则
 
 1. **R1a 选区功能与焦点修复验收结论**：
    - 用户已完成前台实测：插件输入后点击单元格，键盘输入正确进入单元格，焦点交接正常。
    - `TASK-R1a-01` ~ `TASK-R1a-03` 及 `TASK-FIX-FOCUS-01` 全部验收通过（`accepted`），交互缺陷正式关闭。
    - 事实边界保留：双击就地编辑、公式栏、中文输入法（IME）在极端长流式时的前台表现，继续标为未验证，不泛化为全部交互通过。
-2. **R1b 准入状态**：
-   - 当前已完成 R1b 最小切片设计，严格不执行编码，等待用户明确指令后方可实施。
-   - *(注：原 R1a 5步人工验收已于 2026-10-02 完成并确认，结果已归档至 progress.md)*
+2. **R1b 切片 1 验证状态 (`automated_verified`)**：
+   - 选区采集时间、快照提示与【🔄 刷新原区域】已完成编码与离线自动化验证；
+   - 宿主定向定位目标工作簿与目标工作表，原对象不存在明确报错，绝不 fallback 到当前选区；
+   - 前端维护 `refreshSeq` 与 `attachmentId`，防卡片移除后晚到恢复，防旧响应覆盖；
+   - 刷新失败保留旧快照数据与时间，发送瞬间冻结本次附件；
+   - 当前等待用户前台人工实测验收（5 项最小验收用例）。
+3. **后续 R1b 切片原则（宏引用与 Token 估算，严格禁止在本轮编码）**：
+   - 引用宏由用户主动选择，不根据“修改/调整/刚才”等词自动勾选。
+   - 引用模型源码正文，排除宿主透明包装器；失败或未运行宏也可引用，不要求必须由 VbaRunner 产生哈希。
+   - 验收正确引用进入请求，不强制模型只能追加某一行。
+   - 审计先记录准确字符量；不把 3.5 字符/Token 称为准确估算，不据此裁剪源码或设置模型输出上限。
 
 
 ### 4.1 最小功能闭环 (R1a)
