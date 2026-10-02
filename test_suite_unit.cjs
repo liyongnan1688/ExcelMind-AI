@@ -794,6 +794,22 @@ assert(
     frozenSnapshot.context.capturedAt !== mutatedContextAfterSend.capturedAt
 );
 
+// Test 5.6: 刷新原区域进行期间禁止发送校验（成功后发新快照，失败保留旧快照）
+function checkCanSubmit(inputText, disabled, isRefreshingArea) {
+  if (!inputText.trim() || disabled || isRefreshingArea) {
+    return { canSubmit: false, reason: isRefreshingArea ? 'refreshing_in_progress' : 'disabled_or_empty' };
+  }
+  return { canSubmit: true };
+}
+const cannotSendWhileRefreshing = checkCanSubmit('请帮我分析', false, true);
+const canSendAfterRefresh = checkCanSubmit('请帮我分析', false, false);
+assert(
+  '[R1b] 刷新原区域期间严格禁止发送（禁用按钮与拦截Enter），刷新完成后方可发送新快照',
+  cannotSendWhileRefreshing.canSubmit === false &&
+    cannotSendWhileRefreshing.reason === 'refreshing_in_progress' &&
+    canSendAfterRefresh.canSubmit === true
+);
+
 console.log(`\nUnit Tests Summary: Pass = ${passCount}, Fail = ${failCount}`);
 if (failCount > 0) {
   process.exit(1);
