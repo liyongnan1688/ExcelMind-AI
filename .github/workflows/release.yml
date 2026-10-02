@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: '发布版本号 (例如 v1.1.0)'
+        description: '发布版本号 (例如 v1.2.0)'
         required: false
-        default: 'v1.1.0'
+        default: 'v1.2.0'
 
 permissions:
   contents: write
@@ -55,7 +55,7 @@ jobs:
               $v = $env:GITHUB_REF_NAME
               $isPre = $false
           } else {
-              $v = "v1.1.0"
+              $v = "v1.2.0"
               $isPre = $false
           }
           echo "version=$v" >> $env:GITHUB_OUTPUT
