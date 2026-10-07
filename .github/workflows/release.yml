@@ -6,12 +6,18 @@ on:
       - 'v*'
     branches:
       - main
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       version:
-        description: '发布版本号 (例如 v1.2.0)'
+        description: '发布版本号 (例如 v1.3.0 或 v1.3.0-rc2，必须以 v 开头并符合语义化版本)'
+        required: true
+      target_commitish:
+        description: '目标分支或 Commit SHA (例如 main 或 40 位 Git 提交哈希)'
         required: false
-        default: 'v1.2.0'
+        default: ''
 
 permissions:
   contents: write
@@ -44,24 +50,80 @@ jobs:
           node test_suite_unit.cjs
           node test_regex_counter_example.cjs
 
-      - name: Determine Version
+      - name: Determine Version and Publication Policy
         id: meta
         shell: pwsh
         run: |
-          if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch' -and '${{ github.event.inputs.version }}' -ne '') {
-              $v = '${{ github.event.inputs.version }}'
-              $isPre = $false
+          $shouldPublish = $false
+          $v = ""
+          $tag = ""
+          $isPre = $false
+
+          if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
+              $inputVer = '${{ github.event.inputs.version }}'.Trim()
+              if ([string]::IsNullOrWhiteSpace($inputVer)) {
+                  Write-Error "workflow_dispatch triggered without version input. Publication rejected."
+                  exit 1
+              }
+              if ($inputVer -notmatch '^v\d+\.\d+\.\d+.*$') {
+                  Write-Error "Invalid version format: '$inputVer'. Version must start with 'v' and follow semantic versioning (e.g. v1.3.0, v1.3.0-rc2)."
+                  exit 1
+              }
+              $v = $inputVer
+              $tag = $inputVer
+              $isPre = ($v -match '-(rc|alpha|beta|preview|dev)' -or $v -match '\b(rc|alpha|beta)\b')
+              $shouldPublish = $true
+              Write-Host "Manual workflow dispatch: Version=$v, Prerelease=$isPre"
           } elseif ($env:GITHUB_REF_TYPE -eq 'tag') {
-              $v = $env:GITHUB_REF_NAME
-              $isPre = $false
+              $tag = $env:GITHUB_REF_NAME
+              if ($tag -notmatch '^v\d+\.\d+\.\d+.*$') {
+                  Write-Host "Tag '$tag' does not match version pattern '^v\d+\.\d+\.\d+.*$'. Skipping publication."
+                  $shouldPublish = $false
+                  $v = "ci-build"
+              } else {
+                  $v = $tag
+                  $isPre = ($v -match '-(rc|alpha|beta|preview|dev)' -or $v -match '\b(rc|alpha|beta)\b')
+                  $shouldPublish = $true
+                  Write-Host "Version tag push: Version=$v, Prerelease=$isPre"
+              }
           } else {
-              $v = "v1.2.0"
-              $isPre = $false
+              Write-Host "Triggered by branch push or pull request without version tag ($env:GITHUB_REF)."
+              Write-Host "Running CI build & quality checks only. Release publication is DISABLED."
+              $shouldPublish = $false
+              $v = "ci-build"
           }
+
+          echo "should_publish=$shouldPublish" >> $env:GITHUB_OUTPUT
           echo "version=$v" >> $env:GITHUB_OUTPUT
-          echo "tag=$v" >> $env:GITHUB_OUTPUT
+          echo "tag=$tag" >> $env:GITHUB_OUTPUT
           echo "is_prerelease=$isPre" >> $env:GITHUB_OUTPUT
-          Write-Host "Target Version: $v"
+
+      - name: Guard Against Overwriting Existing Release
+        if: steps.meta.outputs.should_publish == 'true'
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ steps.meta.outputs.tag }}"
+          $headers = @{
+              "Accept" = "application/vnd.github+json"
+              "Authorization" = "Bearer $env:GITHUB_TOKEN"
+              "User-Agent" = "GitHub-Actions-Release-Guard"
+          }
+          $apiUrl = "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/releases/tags/$tag"
+          try {
+              $existing = Invoke-RestMethod -Uri $apiUrl -Headers $headers -Method Get -ErrorAction Stop
+              if ($existing -and $existing.id) {
+                  Write-Error "Release for tag '$tag' already exists (Release ID: $($existing.id)). Overwriting existing releases or release assets is strictly prohibited."
+                  exit 1
+              }
+          } catch {
+              if ($_.Exception.Response.StatusCode.value__ -eq 404 -or $_.Exception.Message -match "404") {
+                  Write-Host "Verified: Tag '$tag' has no existing release. Safe to publish."
+              } else {
+                  Write-Warning "Could not verify release existence: $($_.Exception.Message). Proceeding with caution."
+              }
+          }
 
       - name: Build Frontend & Package Add-In
         shell: pwsh
@@ -69,9 +131,11 @@ jobs:
           pwsh -File scripts/package_release.ps1 -Version "${{ steps.meta.outputs.version }}"
 
       - name: Upload Release Artifact to GitHub
+        if: steps.meta.outputs.should_publish == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
+          target_commitish: ${{ github.event.inputs.target_commitish || '' }}
           name: "ExcelMind AI ${{ steps.meta.outputs.version }}"
           draft: false
           prerelease: ${{ steps.meta.outputs.is_prerelease == 'true' }}
@@ -82,7 +146,7 @@ jobs:
             ## ExcelMind AI 桌面原生插件发布包
 
             ### 📦 下载与运行指南
-            1. 下载下方的 `ExcelMind_AI_Release_${{ steps.meta.outputs.version }}.zip` 压缩包并解压；
+            1. 下载下方的 `ExcelMindAI-${{ steps.meta.outputs.version }}.zip` 压缩包并解压；
             2. **方式一（一键安装常驻）**：双击运行 `安装插件(开启常驻).bat`，自动解除系统下载锁定并写入 Excel 启动项；
             3. **方式二（便携免安装）**：双击运行 `免安装启动.bat`，即开即用，关闭 Excel 即退出；
             4. 打开任意 Excel 文件，顶部功能区将自动出现 **【ExcelMind AI】** 选项卡。
