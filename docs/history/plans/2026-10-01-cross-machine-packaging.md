@@ -1,5 +1,9 @@
 # Lee-Excel 跨机器分发与全版本 Excel 兼容实施计划
 
+> **历史资料，不代表当前版本**  
+> **归档日期**：2026-10-01（对应基线 v1.1.0/v1.2.0）  
+> **当前入口/替代文档**：[docs/product-roadmap.md](file:///c:/Users/35651/Desktop/Google/lee-excle/docs/product-roadmap.md)、[docs/CURRENT_STATE.md](file:///c:/Users/35651/Desktop/Google/lee-excle/docs/CURRENT_STATE.md)  
+>
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 构建 Lee-Excel 跨机器全自动打包流水线与分发套件，实现 32位/64位 Excel 与 Office 2010~365 全版本兼容，开箱即用。

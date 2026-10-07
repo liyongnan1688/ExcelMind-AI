@@ -1,8 +1,12 @@
 # Lee-Excel 跨机器分发与全版本 Excel 兼容设计规范
 
-> **文档版本**：v1.0  
+> **历史资料，不代表当前版本**  
+> **归档日期**：2026-10-01（对应基线 v1.1.0/v1.2.0）  
+> **当前入口/替代文档**：[docs/product-roadmap.md](file:///c:/Users/35651/Desktop/Google/lee-excle/docs/product-roadmap.md)、[docs/CURRENT_STATE.md](file:///c:/Users/35651/Desktop/Google/lee-excle/docs/CURRENT_STATE.md)  
+>
+> **文档版本**：v1.0 (历史)  
 > **编写日期**：2026-10-01  
-> **状态**：已批准待实施 (Approved)  
+> **状态**：历史设计归档 (Archived)  
 > **适用目标**：实现 Lee-Excel 插件在任意 Windows 目标机（新/老版本 Excel、32位/64位）开箱即用加载与全自动打包分发。
 
 ---

@@ -30,4 +30,12 @@
 
 ## 4. 交付与验证标准
 - 任何代码或配置修改后，必须运行现有的离线核心门禁（`node test_suite_unit.cjs` 和 `node test_regex_counter_example.cjs`），确保 100% PASS。
+- **按影响范围测试策略**：
+  - 仅修改文档（docs-only）或辅助说明：仅运行离线门禁核对，严禁重新构建应用或启动全套 Excel 桌面验收；
+  - 仅修改特定模块代码：运行核心离线门禁与该模块直接相关的定向测试；
+  - 涉及发行包与打包流程：通过 `tests/diagnostics/run_isolated_release_smoke.ps1` 运行独立解压冒烟。
+- **CI 触发与发布保护**：
+  - 仓库 `.github/workflows/release.yml` 包含 `branches: [main]` 触发器；为防止文档整理提交意外触发构建或覆盖发布资产，推送到 main 的 docs/chore 提交**必须在 commit message 中包含 `[skip ci]`**；
+  - 严禁通过创建新 tag 或 workflow_dispatch 覆盖已发布的 Release。
 - 绝不轻言“全部功能正常”，未实际在真实 Excel 宿主运行验证的，必须明确说明待验证范围。
+- 当前系统真实基线与唯一规划入口请务必参阅 [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md) 与 [docs/product-roadmap.md](docs/product-roadmap.md)。

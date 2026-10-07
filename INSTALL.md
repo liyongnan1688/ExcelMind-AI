@@ -1,7 +1,8 @@
 # ExcelMind AI 安装与升级指南 (INSTALL.md)
 
-> **版本**：v1.2.0-rc1 (发布候选版本 / Release Candidate)  
+> **版本**：v1.3.0-rc1 (发布候选版本 / Release Candidate)  
 > **状态**：未签名发布候选构建 (Unsigned Release Candidate)  
+> **当前状态入口**：参见 [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md)  
 > **适用环境**：Windows 10 / Windows 11 (32 位 / 64 位)，Microsoft Excel 2010 / 2013 / 2016 / 2019 / 2021 / Microsoft 365 (桌面版)
 
 ---
@@ -30,7 +31,8 @@ ExcelMind AI 在底层实现上坚决遵守**三态物理绝对隔离**原则：
 2. **加载项自启动注册**（注册表）：
    仅在当前用户注册表 `HKCU:\Software\Microsoft\Office\<版本>\Excel\Options` 中注入 `OPEN` 自启动键。
 3. **用户专属数据目录**（`%APPDATA%\ExcelMindAI\`）：
-   独立存放用户的宏库源码（`Scripts/`）、工作流流水线定义（`Workflows/`）、任务运行记录、物理快照备份（`Backups/`）以及当前 Windows 用户范围 DPAPI 保护 (`DataProtectionScope.CurrentUser`) 凭据。
+   独立存放用户的宏库源码（`Scripts/`）、工作流流水线定义（`Workflows/`）、任务运行记录、物理快照备份（`Backups/`）以及外部数据源凭据。
+   - **凭据保护区别说明**：大模型 API Key 保存于内置 WebView2 的前端 LocalStorage 中（未采用 DPAPI）；外部数据源连接凭据（如受保护的 HTTP 接口 Token）独立采用 Windows DPAPI (`DataProtectionScope.CurrentUser`) 加密保存于数据目录中。二者机制不同，不能将 DPAPI 保护外推到模型 Key。
 
 > **无损铁律**：无论进行全新安装、版本升级还是卸载，安装脚本**100% 绝不覆盖、重置、篡改或清理用户数据目录**！所有既有宏脚本与历史资产升级后原样保留。
 
@@ -57,7 +59,7 @@ ExcelMind AI 在底层实现上坚决遵守**三态物理绝对隔离**原则：
 
 ## 4. 版本升级与失败补偿回滚机制
 
-从旧版本（如 v1.0 / v1.1.0）升级至 v1.2.0-rc1 时：
+从旧版本（如 v1.1.0 / v1.2.0）升级至 v1.3.0-rc1 时：
 
 1. **正常升级步骤**：
    - 保存所有已打开的工作簿并**完全退出 Microsoft Excel**；

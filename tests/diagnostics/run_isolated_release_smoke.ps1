@@ -3,7 +3,8 @@
 # ==============================================================================
 
 param(
-    [string]$RunId = ""
+    [string]$RunId = "",
+    [string]$ZipPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -20,7 +21,9 @@ if (-not (Test-Path $ArtifactsDir)) {
     New-Item -ItemType Directory -Force -Path $ArtifactsDir | Out-Null
 }
 
-$ZipPath = Join-Path $ProjectRoot ".artifacts\release\ExcelMindAI-v1.2.0-rc1.zip"
+if ([string]::IsNullOrEmpty($ZipPath)) {
+    $ZipPath = Join-Path $ProjectRoot ".artifacts\release\ExcelMindAI-v1.3.0-rc1.zip"
+}
 if (-not (Test-Path $ZipPath)) {
     Write-Host "[ERROR] Release ZIP not found: $ZipPath" -ForegroundColor Red
     Write-Host "Please run scripts/package_release.ps1 first!" -ForegroundColor Yellow

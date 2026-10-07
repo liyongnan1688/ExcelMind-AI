@@ -1,5 +1,9 @@
 # 待确认排查草稿脚本清单 (共 174 项)
 
+> **历史资料，不代表当前版本**  
+> **归档日期**：2026-10-01  
+> **当前入口/替代文档**：[tests/README.md](file:///c:/Users/35651/Desktop/Google/lee-excle/tests/README.md)、[docs/CURRENT_STATE.md](file:///c:/Users/35651/Desktop/Google/lee-excle/docs/CURRENT_STATE.md)  
+>
 > **说明**：经全量静态审计，以下 174 个脚本均无未提交修改（isGitModified: false），无任何生产业务代码引用，全部为当时排查特定历史问题时遗留的单点实验草稿。按用户授权原则，**本轮暂不执行物理删除，全部保持原位**，待用户审阅后统一确认。
 
 ## 模型Prompt与返回格式探测脚本 (16 项)

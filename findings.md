@@ -443,3 +443,42 @@
   - 32 位文件已打包（`LeeExcel.xll`、`LeeExcel.dna`、`runtimes/win-x86/`），但由于测试机为 64 位 Office 16.0，实际运行未验证；
   - “阻断问题 0 项”严格限定为当前已执行的 6 项解压冒烟检查未发现阻断。
 
+---
+
+## 17. 真实发布资产核对与双构建包关系发现 (2026-10-07 v1.3.0-rc1 发布核验)
+
+- **双包哈希差异与逐字节比对根因**：
+  - 报告中出现的两个不同 SHA-256 哈希值：
+    - GitHub CI 官方 Release 下载包：`445ef8b481491bc99b31dcd286b1ac109ae6b519fafc51fc456aaa22687ff25e`；
+    - 本地流水线构建包（`.artifacts/release/ExcelMindAI-v1.3.0-rc1.zip`）：`f544108d73ad8cfc60723b49b2306a225a93db82e89419065fe11991bce83515`。
+  - **核实结论**：
+    1. 经实际下载 GitHub Release 物理 ZIP 计算，`445ef...` 确为 GitHub 官方 Release 下载包的物理文件哈希（而非外层 actions artifact digest），是用户下载校验的唯一权威对象；
+    2. 解压两包对比表明，包内 26 个文件清单完全一致；
+    3. 包内 6 个第三方与运行库 DLL（`ExcelDna.Integration.dll`、`LeeExcel.xll`、`LeeExcel64.xll`、`Microsoft.Web.WebView2.*.dll`、`WebView2Loader.dll`）SHA-256 100% 完全相同；
+    4. 所有文本脚本与 Markdown（`.bat`、`.dna`、`README.md`、`index.html`、`index-*.js`、`index-*.css`）在归一化换行符（CRLF vs LF）后正文内容 100% 相同；
+    5. `LeeExcel.dll` 大小均为 590,336 字节，逐字节对比仅 44 字节不同（0.0075%），具体为 PE 头部编译时间戳与 .NET 4.0 编译器自动生成的随机 MVID GUID；所有 IL 逻辑与资源 100% 完全相同；
+    6. 两份包运行载荷完全等价，在本地构建包上执行通过的 6 项独立解压冒烟测试证据（`.artifacts/tests/smoke_isolated_20261007_203405/`，涵盖解压、反射、资源、服务、Excel 加载、Ribbon 渲染与宏读回）完全有效并被复用。
+- **发布提交与 Tag 关系核实**：
+  - 远端 main 发布提交为 `b4402a9ead90d8e74c451ccb6683a22e20da3ae4`（历史报告曾有全量哈希笔误误记为 `...0518be4b9`，实测前7位 `b4402a9` 正确，已更正）；
+  - Annotated Tag `v1.3.0-rc1` 解引用 Commit 正好指向 `b4402a9`；
+  - GitHub Release 存在但 API 显示 `prerelease: false`（因 `release.yml` 在 tag 触发时脚本写死 `$isPre = $false`，记录为已知事实）。
+
+---
+
+## 18. 凭据存储、安全边界与 Ribbon 终态事实澄清 (2026-10-07 审计纠偏)
+
+- **大模型 API Key 存储与 DPAPI 关系澄清**：
+  - 大模型 API Key 存储于内置 WebView2 的前端 `LocalStorage`（键名 `excelmind_ai_llm_config`），纯本地直连，绝不上报或中转第三方；
+  - **该路径未采用 Windows DPAPI 保护**；历史报告中曾出现将 DPAPI 外推为模型 Key 保护的表述，确认为错误历史表述，在此正式推翻并更正；
+  - 外部数据源凭据独立采用 Windows DPAPI (`DataProtectionScope.CurrentUser`) 加密保存于 `%APPDATA%\ExcelMindAI\`，两者存储与保护机制不同，不能外推。
+- **32 位 Office 宿主与真实商业 API 运行边界**：
+  - 32 位加载项与运行时已打包入库；真实桌面自动化验收套件在 64 位 Office 宿主上完成全量回归；
+  - 32 位 Office 宿主运行环境及真实商业大模型 API 线上调用明确为“运行未验证”，不得使用“尚未全量回归”等模糊措辞替代。
+- **工作簿快照回滚能力与安全沙箱边界**：
+  - 快照机制在宏执行前对目标工作簿进行整本物理备份，可完全还原目标工作簿的数据与工作表结构；
+  - **工作副本不是任意 VBA 的安全沙箱**：快照无法撤销宏代码执行产生的外部系统级副作用（如外部文件删除、系统命令、网络请求或第三方数据库修改）。
+- **功能区 (Ribbon) 终态确立与历史演进归档**：
+  - 最终确立方案：顶部选项卡为 `ExcelMind AI`；第一分组 label 为 `ExcelMind AI`；主按钮仅显示 32×32 品牌大图标，无按钮 label 或 getLabel 回调，Tooltip 提示“打开或收起 ExcelMind AI 工作台”；
+  - 历史演进方案（包含：大按钮加“打开”标签、按钮与分组双重展示“ExcelMind AI”、多按钮单字竖排等方案）均已废弃并归档为历史探索过程。
+
+
