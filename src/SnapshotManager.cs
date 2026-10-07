@@ -13,6 +13,14 @@ namespace LeeExcel
         public string timeDisplay { get; set; }
         public string fileName { get; set; }
         public string originalPath { get; set; }
+        public string filePath
+        {
+            get
+            {
+                if (string.IsNullOrEmpty(originalPath) || string.IsNullOrEmpty(fileName)) return string.Empty;
+                return Path.Combine(SnapshotManager.GetBackupFolderForWorkbook(originalPath), fileName);
+            }
+        }
         public string promptSummary { get; set; }
         public string vbaPreview { get; set; }
     }
@@ -68,6 +76,31 @@ namespace LeeExcel
                 }
             }
             return folder;
+        }
+
+        public static bool SnapshotExists(string fullPath, string snapshotId)
+        {
+            if (string.IsNullOrEmpty(snapshotId)) return false;
+            try
+            {
+                if (!string.IsNullOrEmpty(fullPath))
+                {
+                    string folder = GetBackupFolderForWorkbook(fullPath);
+                    if (Directory.Exists(folder))
+                    {
+                        var matches = Directory.GetFiles(folder, snapshotId + ".*");
+                        if (matches.Length > 0 && new FileInfo(matches[0]).Length > 0) return true;
+                    }
+                }
+
+                if (Directory.Exists(BaseBackupDir))
+                {
+                    var all = Directory.GetFiles(BaseBackupDir, snapshotId + ".*", SearchOption.AllDirectories);
+                    return all.Length > 0 && new FileInfo(all[0]).Length > 0;
+                }
+            }
+            catch { }
+            return false;
         }
 
         public static List<SnapshotItem> LoadSnapshots(string fullPath)

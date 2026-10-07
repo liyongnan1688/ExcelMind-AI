@@ -162,8 +162,9 @@
 
 ### 4.5 R4：批量文件任务引擎
 - **阶段范围**：
-  - **R4a**：用户选择多个 Excel 文件与一个固定版本的入库宏，后台以单 Excel 实例串行方式逐个打开副本、试运行并另存至新输出目录；任务面板实时展示每个文件的进度、状态、耗时与错误。
-  - **R4b**：多文件列名对齐汇总工具，自动对齐不同工作簿中的同名列，追加“来源文件”与“来源工作表”两列。
+  - **R4a**：批量宏任务队列底层引擎与隔离调度。用户选择多个 Excel 文件与一个固定版本的入库宏，后台以单 Excel 实例串行方式逐个打开副本、试运行并另存至新输出目录。*(状态: `accepted`)*
+  - **R4b**：批量宏任务前端可视化面板与执行进度交互。可视化向导配置、预检固化、主动风险确认、STA 受控线程异步轮询、六态进度卡片、运行中取消、重载纯状态恢复、打开输出目录。*(状态: `accepted`)*
+  - **R4c**：多文件列名对齐汇总工具，自动对齐不同工作簿中的同名列，追加“来源文件”与“来源工作表”两列。*(状态: `planned`)*
 - **不做项**：
   - 绝不并行跨线程调用同一个 Excel COM 实例；
   - 绝不默认覆盖原始文件（强制输出到独立目录）；
@@ -234,22 +235,23 @@
 | `TASK-R0-02` | R0 | **可用版本基线固定与最小回归清单**<br>锁定 v1.2.0 基线，防后续迭代破坏存量。 | `accepted` | `docs/product-roadmap.md`<br>`task_plan.md` | N/A (基线固化) | Git Commit `231ae3a`，8项最小回归清单 |
 | `TASK-R0-03` | R0 | **统一主规划路线图建立**<br>建立唯一主规划，统领 R0–R7，消除矛盾多份计划。 | `accepted` | `docs/product-roadmap.md` | 路线图与铁律体系 | 本规划文件正式生效 |
 | `TASK-R0-04` | R0 | **R1a 最小切片接口与文件映射预备**<br>定义选区只读服务接口与交互规范，不提前编码。 | `accepted` | `docs/product-roadmap.md`<br>`task_plan.md` | `get_selection_context`<br>`SelectionContextDto` | 接口规格设计完成，等待授权 |
-| `TASK-R1a-01` | R1a | **C# 宿主选区只读上下文服务**<br>批量读取选区 Value2/Formula/结构，绝不逐格跨 COM。 | `awaiting_manual` | `src/NativeBridge.cs`<br>`src/SelectionContextService.cs` | action: `get_selection_context`<br>输出: `SelectionContextData` | 内存数组处理，多区域友好降级；C# 单元测试 11/11 PASS |
-| `TASK-R1a-02` | R1a | **前端“附加选区”卡片与只读预览**<br>用户显式点击附加、预览数据与脱敏选择。 | `awaiting_manual` | `web/src/components/ChatInput.svelte`<br>`web/src/App.svelte` | 组件状态: `selectionContext`<br>支持一键取消附加与查看发送内容 | 前端纯组件隔离，不影响原有发送逻辑；Vite 构建通过 |
-| `TASK-R1a-03` | R1a | **选区数据结构化注入 Prompt**<br>以只读数据注入，严格防范文本单元格指令注入提权。 | `awaiting_manual` | `web/src/services/llm.ts` | 函数: `formatSelectionContextForPrompt`<br>边界标签隔离 | Node 单元测试 36/36 PASS (含 9 项 R1a 专项测试) |
-| `TASK-R1b-01` | R1b | **选区按需抽样与 Token 预算可见**<br>选区超限提示、样本裁剪、上一份宏引用展示。 | `planned` | `web/src/services/llm.ts`<br>`web/src/components/ExecutionCard.svelte` | 预算模型: `TokenBudget` | 自动化边界测试 |
-| `TASK-R2a-01` | R2a | **宏库检索、标签与运行历史溯源**<br>支持搜索与历史回溯，执行绑定快照与版本哈希。 | `planned` | `src/ScriptManager.cs`<br>`web/src/components/ScriptDrawer.svelte` | `RunRecordDto`<br>关联 `snapshotId` | 不改写原 `.bas`，元数据向后兼容 |
-| `TASK-R2b-01` | R2b | **Ribbon“常用宏”收藏动态菜单**<br>从功能区快速调起收藏宏，显式提示目标表。 | `planned` | `src/LeeExcelRibbon.cs`<br>`src/LeeExcelAddIn.cs` | Ribbon 动态 XML 回调 | Ribbon 自动化探测验证 |
-| `TASK-R2c-01` | R2c | **显式类型参数化宏契约与执行**<br>对声明参数的宏提供表单输入，拒绝 eval。 | `planned` | `src/VbaRunner.cs`<br>`web/src/components/ScriptDrawer.svelte` | `ScriptParameterDef` | 参数化宏在非活动工作簿隔离实测 |
-| `TASK-R3a-01` | R3a | **快捷工具：按键去重工具**<br>内存哈希极速去重，支持复合键，标出重复或去重。 | `planned` | `src/DataTools.cs` (新增)<br>`web/src/components/DataToolModal.svelte` | action: `execute_dedup` | 纯内存计算，批量读写，源表备份 |
-| `TASK-R3b-01` | R3b | **快捷工具：两表主键差异对账**<br>工单号/前导零保真，输出独立差异表，不碰源表。 | `planned` | `src/DataTools.cs`<br>`web/src/components/DataToolModal.svelte` | action: `execute_reconciliation` | 19位长数字、前导零、空键对比单测 |
-| `TASK-R4a-01` | R4a | **批量文件宏任务队列**<br>多文件串行 COM 调度、副本试跑、输出隔离、支持取消。 | `planned` | `src/BatchRunner.cs` (新增)<br>`web/src/components/BatchModal.svelte` | action: `start_batch_job` | 20个文件容错回归测试 |
-| `TASK-R4b-01` | R4b | **列名对齐多文件汇总**<br>多表同名列对齐合并，追加来源文件与 Sheet 列。 | `planned` | `src/BatchRunner.cs` | action: `execute_multi_merge` | 离线 ClosedXML 兼容性评估 |
-| `TASK-R5a-01` | R5a | **双步骤流水线轻量串联**<br>清洗→对账→汇总步骤串联，执行前任务级快照。 | `planned` | `src/WorkflowManager.cs` (新增)<br>`web/src/components/WorkflowDrawer.svelte` | `WorkflowDefinition` | 阶段失败原子阻断与整本回滚 |
-| `TASK-R5b-01` | R5b | **自选区域汇总与图表生成**<br>自由模型生成为主，可选预设模板，防旧结果叠加。 | `planned` | `web/src/services/llm.ts`<br>`src/VbaRunner.cs` | 报表生成协议 | 图表覆盖度与坐标核验 |
-| `TASK-R6a-01` | R6a | **只读外部数据接入 (HTTP/CSV/JSON)**<br>参数安全独立存储，严禁写入宏源码，URL 白名单。 | `planned` | `src/DataConnector.cs` (新增) | action: `fetch_external_data` | 网络异常/超时/401/429 容错单测 |
-| `TASK-R6b-01` | R6b | **无凭据宏包导入/导出**<br>包含 manifest 与源码哈希，不含 Key、会话与业务数据。 | `planned` | `src/ScriptManager.cs` | `.exmpack` 打包与解包 | 跨机导入测试，防路径穿越 |
-| `TASK-R6c-01` | R6c | **无损安装升级与脱敏诊断导出**<br>保护用户 Profile 与宏库，一键导出脱敏日志。 | `planned` | `scripts/core/install_addin.ps1`<br>`src/NativeBridge.cs` | action: `export_diagnostics` | 升级安装无覆盖回归验证 |
+| `TASK-R1a-01` | R1a | **C# 宿主选区只读上下文服务**<br>批量读取选区 Value2/Formula/结构，绝不逐格跨 COM。 | `accepted` | `src/NativeBridge.cs`<br>`src/SelectionContextService.cs` | action: `get_selection_context`<br>输出: `SelectionContextData` | 内存数组处理，多区域友好降级；用户人工实测确认 |
+| `TASK-R1a-02` | R1a | **前端“附加选区”卡片与只读预览**<br>用户显式点击附加、预览数据与脱敏选择。 | `accepted` | `web/src/components/ChatInput.svelte`<br>`web/src/App.svelte` | 组件状态: `selectionContext`<br>支持一键取消附加与查看发送内容 | 用户人工实测确认；Vite 构建通过 |
+| `TASK-R1a-03` | R1a | **选区数据结构化注入 Prompt**<br>以只读数据注入，严格防范文本单元格指令注入提权。 | `accepted` | `web/src/services/llm.ts` | 函数: `formatSelectionContextForPrompt`<br>边界标签隔离 | 用户人工实测确认；Node 单元测试全绿 |
+| `TASK-R1b-01` | R1b 切片 1 | **选区采集时间、快照提示与刷新原区域**<br>定向读取原区域、并发防旧覆盖、刷新失败容灾保留旧数据。 | `accepted`<br>*(按授权自动签收)* | `src/SelectionContextService.cs`<br>`web/src/components/ChatInput.svelte` | 数据契约: `capturedAt`, `attachmentId` | 桌面端自动化验收 4 项真实 UI 全部 PASS，记录观测地址/样本值/时间戳 |
+| `TASK-R1b-02` | R1b 切片 2 | **前序宏显式引用与字符量客观透明化**<br>主动引用此宏、模型原始正文来源保真、超窗注入、客观字符审计、门禁拦截保护。 | `accepted`<br>*(按授权自动签收)* | `web/src/services/conversationManager.ts`<br>`web/src/services/llm.ts`<br>`web/src/components/ExecutionCard.svelte`<br>`web/src/components/ChatInput.svelte` | 数据结构: `MacroReferenceData`<br>审计: `characterCountAudit` | 离线待发送组装拦截 8/8 PASS，桌面端自动化集成验收 (TC-R1b-08 ~ 13) 100% 通过；当前版本真实 API 多轮端到端未验证 |
+| `TASK-R2a-01` | R2a | **宏库检索、标签与运行历史溯源**<br>支持搜索与历史回溯，执行绑定快照与版本哈希。 | `accepted`<br>*(按授权自动签收)* | `src/ScriptManager.cs`<br>`web/src/components/ScriptDrawer.svelte` | `RunRecordDto`<br>关联 `snapshotId` | 离线单测 10/10 PASS，真实桌面集成 6/6 PASS，不改写原 .bas，元数据向后兼容 |
+| `TASK-R2b-01` | R2b | **Ribbon“常用宏”收藏动态菜单与确认**<br>从功能区快速调起收藏宏，显式提示入口与目标。 | `accepted`<br>*(按授权自动签收)* | `src/LeeExcelRibbon.cs`<br>`src/LeeExcelAddIn.cs`<br>`web/src/components/ScriptDrawer.svelte` | Ribbon 动态 XML 回调<br>稳定 Tag 寻址 | 离线单测 83/83 PASS，桌面端真实自动化 6/6 PASS (5真实UI+21集成+1门禁)，防串选防失效，取消零执行 |
+| `TASK-R2c-01` | R2c | **显式类型参数化宏契约与执行**<br>对声明参数的宏提供表单输入，拒绝 eval。 | `accepted`<br>*(按授权自动签收)* | `src/VbaSignatureParser.cs`<br>`src/VbaRunner.cs`<br>`src/NativeBridge.cs`<br>`web/src/components/ScriptDrawer.svelte` | `VbaSignatureParser`<br>`ScriptParameterDef`<br>独立包装器调度 | 离线单测 91/91 PASS，反例 3/3 PASS；自动化测试 32 项 100% 通过（6 项真实桌面 UI 验收、25 项处理层/集成测试、1 项存量核心门禁），源码哈希恒定，取消零执行零快照 |
+| `TASK-R3a-01` | R3a | **快捷工具：按键去重工具**<br>内存哈希极速去重，支持复合键，标出重复或去重。 | `accepted`<br>*(按授权自动签收)* | `src/DataToolsService.cs`<br>`src/NativeBridge.cs`<br>`web/src/components/DataToolModal.svelte`<br>`web/src/components/Header.svelte`<br>`web/src/App.svelte` | action: `analyze_dedup`, `apply_dedup`<br>结构化键: `StructuredKey` | 离线单测 100/100 PASS，反例 3/3 PASS；桌面端自动化验收 37 项 100% 通过（9项真实桌面UI+27项处理层集成+1项存量门禁）；严格遵守确定性规则与统计恒等式，高亮不外扩，输出新表源表无损，写入前强制快照，取消零写入 |
+| `TASK-R3b-01` | R3b | **快捷工具：两表主键差异对账**<br>工单号/前导零保真，输出独立差异表，不碰源表。 | `accepted`<br>*(按授权自动签收)* | `src/DataToolsService.cs`<br>`src/NativeBridge.cs`<br>`web/src/components/DataToolModal.svelte`<br>`web/src/services/bridge.ts` | action: `analyze_reconcile`, `apply_reconcile`<br>结构化键: `StructuredKey`<br>模型: `ReconcileAnalysisResult` | 离线单测 120/120 PASS，反例 3/3 PASS；桌面端自动化验收 43 项 100% 通过（11项真实桌面UI+31项处理层集成+1项存量门禁）；严格遵守确定性比较、19位长编号/前导零/等号开头保真、重复键整组隔离与双端严格恒等式自洽，新建独立结果表，强制前置快照，源表数据及格式 100% 零修改 |
+| `TASK-R4a-01` | R4a | **批量宏任务队列底层引擎与隔离调度**<br>单实例串行调度、隔离工作副本执行、原文件只读保真、同名防覆盖递增、遇错即停、任务边界取消。 | `accepted`<br>*(按授权自动签收)* | `src/BatchRunnerService.cs`<br>`src/NativeBridge.cs`<br>`test_suite_unit.cjs`<br>`tests/tools/DesktopAcceptanceRunner.cs` | action: `validate_batch_job`, `start_batch_job`, `cancel_batch_job`, `get_batch_job_status`<br>状态模型: `BatchJobSummary` | 离线核心单测 143/143 PASS，反例 3/3 PASS；真实桌面自动化验收全绿（12 项真实 UI + 37 项集成 + 1 项门禁全部通过）；底层队列引擎与隔离执行已闭环，前端面板尚未交付 |
+| `TASK-R4c-01` | R4c | **快捷数据工具：多文件列名对齐汇总工具**<br>确定性精确同名列对齐（大小写敏感、非对齐列留空）、异常表头阻断、自动加权父目录区分同名异径文件、来源元数据列注入与业务重名避让（`来源文件_元数据`）、19位/前导零/公式文本逐字符保真、安全输出独立新工作簿及真机读回核验。 | `accepted`<br>*(按授权自动签收)* | `src/DataToolsService.cs`<br>`src/NativeBridge.cs`<br>`web/src/components/DataToolModal.svelte`<br>`web/src/services/bridge.ts`<br>`tests/tools/DesktopAcceptanceRunner.cs` | action: `analyze_consolidation`, `apply_consolidation`<br>模型: `ConsolidationAnalysisResult`<br>执行: `ConsolidationExecutionResult` | 离线核心单测 153/153 PASS，反例 3/3 PASS；真实桌面端全量自动化验收全绿（18 项真实桌面 UI + 44 项处理层集成 + 1 项存量门禁 100% 通过，报告：`.artifacts/tests/desktop_acceptance_20261002_203118/`）；确定性同名列对齐、大小写敏感、空/重表头阻断、同名异径区分、元数据避让、19位/前导零/公式文本保真、新工作簿输出与真机 COM 读回严格自洽。 |
+| `TASK-R5a-01` | R5a | **双步骤流水线轻量串联**<br>清洗→对账→汇总步骤串联，执行前任务级快照。 | `accepted`<br>*(按授权自动签收)* | `src/WorkflowManager.cs`<br>`web/src/components/WorkflowModal.svelte` | `WorkflowDefinition` | 阶段失败原子阻断与整本回滚 |
+| `TASK-R5b-01` | R5b | **自选区域汇总与图表生成**<br>自由模型生成为主，可选预设模板，防旧结果叠加。 | `accepted`<br>*(按授权自动签收)* | `src/ChartService.cs`<br>`web/src/components/DataToolModal.svelte` | `ChartService` | 快捷图表三类契约、防旧结果叠加 |
+| `TASK-R6a-01` | R6a | **只读外部数据接入 (HTTP/CSV/JSON)**<br>参数安全独立存储，严禁写入宏源码，URL 白名单。 | `accepted`<br>*(按授权自动签收)* | `src/ExternalDataService.cs`<br>`web/src/components/DataToolModal.svelte` | `ExternalDataService` | CSV/JSON数字保真、HTTP安全阻断 |
+| `TASK-R6b-01` | R6b | **无凭据宏包导入/导出**<br>包含 manifest 与源码哈希，不含 Key、会话与业务数据。 | `accepted`<br>*(按授权自动签收)* | `src/MacroPackageManager.cs`<br>`web/src/components/ScriptDrawer.svelte` | `.exmpack` 打包与解包 | 原始字节保真、白名单过滤、敏感拦截、防穿越、防炸弹、同名避让、原子回滚与零宏执行 |
+| `TASK-R6c-01` | R6c | **无损安装升级与脱敏诊断导出**<br>保护用户 Profile 与宏库，一键导出脱敏日志。 | `accepted`<br>*(按授权自动签收)* | `scripts/core/install_addin.ps1`<br>`src/DiagnosticsService.cs`<br>`src/NativeBridge.cs`<br>`web/src/components/SettingsModal.svelte`<br>`web/src/services/bridge.ts`<br>`test_suite_unit.cjs`<br>`tests/diagnostics/run_r6c_targeted_verification.ps1` | action: `preview_diagnostics`, `export_diagnostics`<br>模型: `DiagnosticsEnvironmentSummary`, `DiagnosticsPreviewResult`, `DiagnosticsExportResult`<br>安装参数: `-SourceDir`, `-TargetInstallDir`, `-UserDataDir`, `-RegistryRoot` | 定向验收 9 项 100% PASS（8 项处理层/集成测试 + 1 项核心门禁 204 单测 + 3 反例，报告：`.artifacts/tests/r6c_targeted_20261003_085240/`）；三态物理隔离、文件占用安全退出、旧版应用升级备份回退补偿、环境白名单采集、8 类排除项、两道脱敏防线与纯本地无网络 Zip 导出 |
 
 ---
 

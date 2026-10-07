@@ -26,6 +26,29 @@ namespace LeeExcel
         public string affectedWorkbooksWarning { get; set; }
     }
 
+    public class VbaParameterInput
+    {
+        public string name { get; set; }
+        public string type { get; set; }
+        public object value { get; set; }
+    }
+
+    public class ParameterPrecheckResult
+    {
+        public bool isOk { get; set; }
+        public string error { get; set; }
+        public string failureStage { get; set; }
+        public VbaEntryPointInfo matchedProc { get; set; }
+        public List<string> paramTypes { get; set; }
+        public Dictionary<string, string> sanitizedSummary { get; set; }
+
+        public ParameterPrecheckResult()
+        {
+            paramTypes = new List<string>();
+            sanitizedSummary = new Dictionary<string, string>();
+        }
+    }
+
     public class VbaExecutionResult
     {
         public bool success { get; set; }
@@ -144,7 +167,377 @@ namespace LeeExcel
             }
         }
 
+        public static void ExtractRangeInfo(object val, out string sheetName, out string address)
+        {
+            sheetName = "";
+            address = "";
+            if (val == null) return;
+
+            var dict = val as Dictionary<string, object>;
+            if (dict != null)
+            {
+                if (dict.ContainsKey("sheetName") && dict["sheetName"] != null) sheetName = dict["sheetName"].ToString().Trim();
+                else if (dict.ContainsKey("sheet") && dict["sheet"] != null) sheetName = dict["sheet"].ToString().Trim();
+                if (dict.ContainsKey("address") && dict["address"] != null) address = dict["address"].ToString().Trim();
+                return;
+            }
+
+            string str = val.ToString().Trim();
+            if (str.StartsWith("{") && str.EndsWith("}"))
+            {
+                try
+                {
+                    var flatSub = SimpleJson.ParseFlatObject(str);
+                    if (flatSub != null)
+                    {
+                        if (flatSub.ContainsKey("sheetName")) sheetName = flatSub["sheetName"].Trim();
+                        else if (flatSub.ContainsKey("sheet")) sheetName = flatSub["sheet"].Trim();
+                        if (flatSub.ContainsKey("address")) address = flatSub["address"].Trim();
+                        return;
+                    }
+                }
+                catch { }
+            }
+
+            if (str.Contains("!"))
+            {
+                int exIdx = str.IndexOf('!');
+                sheetName = str.Substring(0, exIdx).Trim('\'', ' ');
+                address = str.Substring(exIdx + 1).Trim();
+            }
+            else
+            {
+                address = str;
+            }
+        }
+
+        public static VbaParameterInput FindInputParam(List<VbaParameterInput> parameters, string name)
+        {
+            if (parameters == null || string.IsNullOrEmpty(name)) return null;
+            foreach (var p in parameters)
+            {
+                if (string.Equals(p.name, name, StringComparison.OrdinalIgnoreCase)) return p;
+            }
+            return null;
+        }
+
+        public static bool HasNonTargetWorkbookParam(List<ScriptParameterDef> parameters)
+        {
+            if (parameters == null) return false;
+            foreach (var p in parameters)
+            {
+                if (!p.isTargetWorkbook) return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// 执行前参数与入口过程严格预检 (零快照、零执行拦截点)
+        /// </summary>
+        public static ParameterPrecheckResult PrecheckParameters(dynamic app, dynamic targetWorkbook, string vbaCode, string selectedEntryPoint, List<VbaParameterInput> parameters)
+        {
+            var res = new ParameterPrecheckResult
+            {
+                isOk = true,
+                paramTypes = new List<string>(),
+                sanitizedSummary = new Dictionary<string, string>()
+            };
+
+            if (string.IsNullOrWhiteSpace(vbaCode))
+            {
+                res.isOk = false;
+                res.failureStage = "empty_code";
+                res.error = "VBA 代码为空";
+                return res;
+            }
+
+            var allProcs = VbaSignatureParser.ParseSignatures(vbaCode);
+            if (allProcs.Count == 0)
+            {
+                res.isOk = false;
+                res.failureStage = "entry_unidentified";
+                res.error = "未在代码中检测到可作为宏执行的有效 Sub 过程。";
+                return res;
+            }
+
+            VbaEntryPointInfo targetProc = null;
+
+            if (!string.IsNullOrEmpty(selectedEntryPoint))
+            {
+                foreach (var p in allProcs)
+                {
+                    if (string.Equals(p.name, selectedEntryPoint, StringComparison.OrdinalIgnoreCase))
+                    {
+                        targetProc = p;
+                        break;
+                    }
+                }
+
+                if (targetProc == null)
+                {
+                    res.isOk = false;
+                    res.failureStage = "entry_unidentified";
+                    res.error = "未在代码中找到指定的入口过程 '" + selectedEntryPoint + "'。请核对过程名称。";
+                    return res;
+                }
+            }
+            else
+            {
+                // 自动查找规则
+                // 1. 名为 Main 的 Sub
+                var mainSubs = allProcs.FindAll(p => string.Equals(p.name, "Main", StringComparison.OrdinalIgnoreCase) && string.Equals(p.kind, "Sub", StringComparison.OrdinalIgnoreCase));
+                if (mainSubs.Count == 1)
+                {
+                    targetProc = mainSubs[0];
+                }
+                else if (mainSubs.Count > 1)
+                {
+                    res.isOk = false;
+                    res.failureStage = "entry_conflict";
+                    res.error = "代码中存在多个名为 Main 的 Sub 过程定义，存在语法冲突。";
+                    return res;
+                }
+                else
+                {
+                    // 2. 筛选所有候选公共 Sub 过程
+                    var candidateSubs = allProcs.FindAll(p => string.Equals(p.kind, "Sub", StringComparison.OrdinalIgnoreCase) && !string.Equals(p.visibility, "Private", StringComparison.OrdinalIgnoreCase));
+                    if (candidateSubs.Count == 1)
+                    {
+                        targetProc = candidateSubs[0];
+                    }
+                    else if (candidateSubs.Count > 1)
+                    {
+                        var names = new List<string>();
+                        foreach (var ep in candidateSubs) names.Add(ep.name);
+                        res.isOk = false;
+                        res.failureStage = "entry_ambiguous";
+                        res.error = "代码中包含多个候选过程 (" + string.Join(", ", names.ToArray()) + ")。为防止调用错误过程，必须由用户明确选择要执行的入口过程。";
+                        return res;
+                    }
+                    else
+                    {
+                        res.isOk = false;
+                        res.failureStage = "entry_unidentified";
+                        res.error = "未找到可作为宏执行的公共 Sub 过程。";
+                        return res;
+                    }
+                }
+            }
+
+            res.matchedProc = targetProc;
+
+            // 检查过程本身是否可作为宏执行 (非 Function, 非 Private, 参数类型均支持)
+            if (!targetProc.isExecutable)
+            {
+                res.isOk = false;
+                res.failureStage = "entry_unsupported";
+                res.error = !string.IsNullOrEmpty(targetProc.unsupportedReason) ? targetProc.unsupportedReason : ("过程 '" + targetProc.name + "' 无法作为宏入口直接运行。");
+                return res;
+            }
+
+            // 检查参数
+            var explicitParams = new List<ScriptParameterDef>();
+            foreach (var p in targetProc.parameters)
+            {
+                if (!p.isTargetWorkbook)
+                {
+                    explicitParams.Add(p);
+                }
+            }
+
+            // 记录参数类型清单
+            foreach (var p in targetProc.parameters)
+            {
+                res.paramTypes.Add(p.type ?? p.rawType ?? "Unknown");
+            }
+
+            if (explicitParams.Count == 0)
+            {
+                // 无额外参数需求，直接通过
+                return res;
+            }
+
+            // 有显式参数需求，必须校验用户提供的参数
+            if (parameters == null || parameters.Count == 0)
+            {
+                res.isOk = false;
+                res.failureStage = "parameter_missing";
+                var missingNames = new List<string>();
+                foreach (var p in explicitParams) if (!p.isOptional) missingNames.Add(p.name + "(" + p.type + ")");
+                res.error = "过程 '" + targetProc.name + "' 包含必需参数 [" + string.Join(", ", missingNames.ToArray()) + "]，必须填写参数后方可执行。";
+                return res;
+            }
+
+            for (int i = 0; i < explicitParams.Count; i++)
+            {
+                var pDef = explicitParams[i];
+                VbaParameterInput input = null;
+
+                // 优先按名称匹配
+                foreach (var pi in parameters)
+                {
+                    if (string.Equals(pi.name, pDef.name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        input = pi;
+                        break;
+                    }
+                }
+
+                // 其次按位置顺序匹配
+                if (input == null && i < parameters.Count)
+                {
+                    input = parameters[i];
+                }
+
+                object val = input != null ? input.value : null;
+
+                if (val == null || (val is string && string.IsNullOrEmpty((string)val)))
+                {
+                    if (!pDef.isOptional)
+                    {
+                        res.isOk = false;
+                        res.failureStage = "parameter_missing";
+                        res.error = "必需参数 '" + pDef.name + "' (" + pDef.type + ") 未提供或为空。";
+                        return res;
+                    }
+                }
+
+                if (val != null)
+                {
+                    string pType = pDef.type ?? "String";
+                    if (string.Equals(pType, "Long", StringComparison.OrdinalIgnoreCase))
+                    {
+                        long l;
+                        if (!long.TryParse(val.ToString(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out l))
+                        {
+                            res.isOk = false;
+                            res.failureStage = "parameter_invalid";
+                            res.error = "参数 '" + pDef.name + "' 必须为有效整数，输入为: '" + val + "'";
+                            return res;
+                        }
+                        res.sanitizedSummary[pDef.name] = l.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    }
+                    else if (string.Equals(pType, "Double", StringComparison.OrdinalIgnoreCase))
+                    {
+                        double d;
+                        if (!double.TryParse(val.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out d))
+                        {
+                            res.isOk = false;
+                            res.failureStage = "parameter_invalid";
+                            res.error = "参数 '" + pDef.name + "' 必须为有效数值，输入为: '" + val + "'";
+                            return res;
+                        }
+                        res.sanitizedSummary[pDef.name] = d.ToString("G", System.Globalization.CultureInfo.InvariantCulture);
+                    }
+                    else if (string.Equals(pType, "Boolean", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string s = val.ToString().Trim().ToLowerInvariant();
+                        if (s != "true" && s != "false" && s != "1" && s != "0")
+                        {
+                            res.isOk = false;
+                            res.failureStage = "parameter_invalid";
+                            res.error = "参数 '" + pDef.name + "' 必须为布尔值 (True/False)，输入为: '" + val + "'";
+                            return res;
+                        }
+                        res.sanitizedSummary[pDef.name] = (s == "true" || s == "1") ? "True" : "False";
+                    }
+                    else if (string.Equals(pType, "Date", StringComparison.OrdinalIgnoreCase))
+                    {
+                        DateTime dt;
+                        string s = val.ToString().Trim();
+                        if (!DateTime.TryParseExact(s, new[] { "yyyy-MM-dd", "yyyy-MM-dd HH:mm:ss", "yyyy/MM/dd", "yyyy/MM/dd HH:mm:ss" }, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out dt))
+                        {
+                            if (!DateTime.TryParse(s, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out dt))
+                            {
+                                res.isOk = false;
+                                res.failureStage = "parameter_invalid";
+                                res.error = "参数 '" + pDef.name + "' 日期格式无效（请使用 YYYY-MM-DD 或 YYYY-MM-DD HH:mm:ss 格式），输入为: '" + val + "'";
+                                return res;
+                            }
+                        }
+                        res.sanitizedSummary[pDef.name] = dt.ToString("yyyy-MM-dd");
+                    }
+                    else if (string.Equals(pType, "Worksheet", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string wsName = val.ToString().Trim();
+                        if (string.IsNullOrEmpty(wsName))
+                        {
+                            res.isOk = false;
+                            res.failureStage = "parameter_invalid";
+                            res.error = "工作表参数 '" + pDef.name + "' 不能为空。";
+                            return res;
+                        }
+                        if (targetWorkbook != null)
+                        {
+                            bool exists = false;
+                            try
+                            {
+                                foreach (dynamic sh in targetWorkbook.Worksheets)
+                                {
+                                    if (string.Equals((string)sh.Name, wsName, StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        exists = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            catch { }
+                            if (!exists)
+                            {
+                                res.isOk = false;
+                                res.failureStage = "worksheet_not_found";
+                                res.error = "工作表参数 '" + pDef.name + "' 指定的工作表【" + wsName + "】在目标工作簿中不存在。";
+                                return res;
+                            }
+                        }
+                        res.sanitizedSummary[pDef.name] = VbaSignatureParser.SanitizeParameterValue(pType, wsName);
+                    }
+                    else if (string.Equals(pType, "Range", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string rWsName;
+                        string rAddr;
+                        ExtractRangeInfo(val, out rWsName, out rAddr);
+                        if (string.IsNullOrEmpty(rAddr))
+                        {
+                            res.isOk = false;
+                            res.failureStage = "parameter_invalid";
+                            res.error = "单元格区域参数 '" + pDef.name + "' 地址不能为空。";
+                            return res;
+                        }
+                        if (targetWorkbook != null)
+                        {
+                            try
+                            {
+                                dynamic sh = !string.IsNullOrEmpty(rWsName) ? targetWorkbook.Worksheets[rWsName] : targetWorkbook.ActiveSheet;
+                                dynamic testRng = sh.Range[rAddr];
+                            }
+                            catch (Exception exRng)
+                            {
+                                res.isOk = false;
+                                res.failureStage = "range_invalid";
+                                res.error = "单元格区域参数 '" + pDef.name + "' 无效: " + exRng.Message;
+                                return res;
+                            }
+                        }
+                        string summaryRange = (!string.IsNullOrEmpty(rWsName) ? (rWsName + "!") : "") + rAddr;
+                        res.sanitizedSummary[pDef.name] = VbaSignatureParser.SanitizeParameterValue(pType, summaryRange);
+                    }
+                    else if (string.Equals(pType, "String", StringComparison.OrdinalIgnoreCase))
+                    {
+                        res.sanitizedSummary[pDef.name] = VbaSignatureParser.SanitizeParameterValue(pType, val.ToString());
+                    }
+                }
+            }
+
+            return res;
+        }
+
         public static VbaExecutionResult RunVbaCode(dynamic app, dynamic targetWorkbook, string vbaCode, string rawModelResponse = "", string selectedEntryPoint = null)
+        {
+            return RunVbaCode(app, targetWorkbook, vbaCode, rawModelResponse, selectedEntryPoint, null);
+        }
+
+        public static VbaExecutionResult RunVbaCode(dynamic app, dynamic targetWorkbook, string vbaCode, string rawModelResponse = "", string selectedEntryPoint = null, List<VbaParameterInput> parameters = null)
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
             var transformSteps = new List<string>();
@@ -252,32 +645,18 @@ namespace LeeExcel
             }
 
             // 3. 识别过程与严格判定主入口（坚决拒绝盲猜与误判）
-            var subMatches = new List<Match>();
-            var funcMatches = new List<Match>();
-            foreach (Match m in procMatches)
-            {
-                string pType = m.Groups[1].Value;
-                if (string.Equals(pType, "Sub", StringComparison.OrdinalIgnoreCase))
-                {
-                    subMatches.Add(m);
-                }
-                else if (string.Equals(pType, "Function", StringComparison.OrdinalIgnoreCase))
-                {
-                    funcMatches.Add(m);
-                }
-            }
-
-            if (subMatches.Count == 0)
+            var precheck = PrecheckParameters(app, targetWorkbook, vbaCode, selectedEntryPoint, parameters);
+            if (!precheck.isOk)
             {
                 return new VbaExecutionResult
                 {
                     success = false,
-                    precheckStatus = "entry_unidentified",
-                    executionPhase = "extract_failed",
-                    failureStage = "extract_failed",
-                    summary = "提取失败：未解析到有效的 VBA Sub 过程",
-                    error = "大模型回复中仅包含 Function 函数过程或无过程定义，缺少可作为宏执行入口的 Sub 过程。已安全拦截以防调用失败。",
-                    riskNotice = "【提取失败拦截】宏执行必须包含明确的 Sub 过程（如 Sub Main）。宿主绝不猜测调用 Function 函数。",
+                    precheckStatus = precheck.failureStage ?? "blocked_before_run",
+                    executionPhase = "blocked_before_run",
+                    failureStage = precheck.failureStage ?? "blocked_before_run",
+                    summary = "执行已拒绝：" + precheck.error,
+                    error = precheck.error,
+                    riskNotice = "【参数安全拦截】宿主不填入猜测参数，不改写源码绕过限制。",
                     rawModelResponse = rawModelResponse ?? "",
                     originalVbaCode = vbaCode,
                     executedVbaCode = vbaCode,
@@ -296,236 +675,9 @@ namespace LeeExcel
                 };
             }
 
-            Match targetProcMatch = null;
-            string mainProcName = null;
-            bool isNativeWbParam = false;
-
-            if (!string.IsNullOrEmpty(selectedEntryPoint))
-            {
-                // 用户显式指定了执行入口 (例如从宏列表中选定)
-                Match chosenSub = null;
-                foreach (Match m in subMatches)
-                {
-                    if (string.Equals(m.Groups[2].Value, selectedEntryPoint, StringComparison.OrdinalIgnoreCase))
-                    {
-                        chosenSub = m;
-                        break;
-                    }
-                }
-
-                if (chosenSub == null)
-                {
-                    return new VbaExecutionResult
-                    {
-                        success = false,
-                        precheckStatus = "entry_unidentified",
-                        executionPhase = "blocked_before_run",
-                        failureStage = "entry_unidentified",
-                        summary = "执行已拒绝：未在代码中找到指定的入口过程【" + selectedEntryPoint + "】",
-                        error = "代码中不存在名为 '" + selectedEntryPoint + "' 的 Sub 过程。请在宏管理中选择有效的过程入口。",
-                        riskNotice = "【指定入口无效】宿主拒绝执行未定义或不存在的过程。",
-                        rawModelResponse = rawModelResponse ?? "",
-                        originalVbaCode = vbaCode,
-                        executedVbaCode = vbaCode,
-                        wrapperCode = null,
-                        originalCodeHash = ComputeSha256(vbaCode),
-                        executedCodeHash = ComputeSha256(vbaCode),
-                        isSourceIdentical = true,
-                        transformSteps = transformSteps,
-                        elapsedMs = sw.ElapsedMilliseconds,
-                        origScreenUpdating = origScreenUpdating,
-                        origDisplayAlerts = origDisplayAlerts,
-                        origEnableEvents = origEnableEvents,
-                        origCalculation = origCalculation,
-                        hostStateRestored = true,
-                        hostStateRestoreDetails = "运行前拦截阶段，未变更宿主全局状态"
-                    };
-                }
-
-                string p = chosenSub.Groups[3].Value;
-                if (string.IsNullOrEmpty(p) || Regex.IsMatch(p, @"^(?:\s*|\s*'.*)$"))
-                {
-                    mainProcName = chosenSub.Groups[2].Value;
-                    isNativeWbParam = false;
-                    targetProcMatch = chosenSub;
-                }
-                else if (Regex.IsMatch(p, @"^\s*(?:targetWb|wb|workbook)\s+As\s+(?:Workbook|Object)\s*$", RegexOptions.IgnoreCase))
-                {
-                    mainProcName = chosenSub.Groups[2].Value;
-                    isNativeWbParam = true;
-                    targetProcMatch = chosenSub;
-                }
-                else
-                {
-                    return new VbaExecutionResult
-                    {
-                        success = false,
-                        precheckStatus = "entry_unidentified",
-                        executionPhase = "blocked_before_run",
-                        failureStage = "entry_unidentified",
-                        summary = "执行已拒绝：指定入口过程包含必填参数，无法直接作为宏运行",
-                        error = "过程 '" + selectedEntryPoint + "' 包含必填参数 (" + p.Trim() + ")。宿主不填入猜测参数，拒绝执行。请使用无参 Sub 或接收 targetWb As Workbook 的过程作为入口。",
-                        riskNotice = "【参数不支持拦截】宿主不填入猜测参数，不改写源码绕过限制。",
-                        rawModelResponse = rawModelResponse ?? "",
-                        originalVbaCode = vbaCode,
-                        executedVbaCode = vbaCode,
-                        wrapperCode = null,
-                        originalCodeHash = ComputeSha256(vbaCode),
-                        executedCodeHash = ComputeSha256(vbaCode),
-                        isSourceIdentical = true,
-                        transformSteps = transformSteps,
-                        elapsedMs = sw.ElapsedMilliseconds,
-                        origScreenUpdating = origScreenUpdating,
-                        origDisplayAlerts = origDisplayAlerts,
-                        origEnableEvents = origEnableEvents,
-                        origCalculation = origCalculation,
-                        hostStateRestored = true,
-                        hostStateRestoreDetails = "运行前拦截阶段，未变更宿主全局状态"
-                    };
-                }
-            }
-            else
-            {
-                // 未显式指定入口时，执行严格的自动推导规则
-                // 规则 1：寻找名为 Main 的 Sub 过程
-                var mainSubs = new List<Match>();
-                foreach (Match m in subMatches)
-                {
-                    if (string.Equals(m.Groups[2].Value, "Main", StringComparison.OrdinalIgnoreCase))
-                    {
-                        mainSubs.Add(m);
-                    }
-                }
-
-                if (mainSubs.Count == 1)
-                {
-                    mainProcName = mainSubs[0].Groups[2].Value;
-                    string p = mainSubs[0].Groups[3].Value;
-                    if (Regex.IsMatch(p, @"(?:targetWb|wb|workbook)\s+As\s+(?:Workbook|Object)", RegexOptions.IgnoreCase))
-                    {
-                        targetProcMatch = mainSubs[0];
-                        isNativeWbParam = true;
-                    }
-                }
-                else if (mainSubs.Count > 1)
-                {
-                    return new VbaExecutionResult
-                    {
-                        success = false,
-                        precheckStatus = "entry_conflict",
-                        executionPhase = "blocked_before_run",
-                        summary = "执行已拒绝：检测到多个名为 Main 的重复过程定义",
-                        error = "代码中存在多个名为 Main 的 Sub 过程定义，存在语法冲突，已在运行前安全拦截。",
-                        riskNotice = "【过程冲突拦截】代码存在重复定义的 Sub Main，已阻止注入以防编译错误。",
-                        rawModelResponse = rawModelResponse ?? "",
-                        originalVbaCode = vbaCode,
-                        executedVbaCode = vbaCode,
-                        wrapperCode = null,
-                        originalCodeHash = ComputeSha256(vbaCode),
-                        executedCodeHash = ComputeSha256(vbaCode),
-                        isSourceIdentical = true,
-                        transformSteps = transformSteps,
-                        elapsedMs = sw.ElapsedMilliseconds,
-                        origScreenUpdating = origScreenUpdating,
-                        origDisplayAlerts = origDisplayAlerts,
-                        origEnableEvents = origEnableEvents,
-                        origCalculation = origCalculation,
-                        hostStateRestored = true,
-                        hostStateRestoreDetails = "运行前拦截阶段，未变更宿主全局状态"
-                    };
-                }
-                else
-                {
-                    // 无 Sub Main 时：
-                    // 规则 2：寻找显式接收 targetWb As Workbook 的 Sub 过程
-                    var targetParamSubs = new List<Match>();
-                    foreach (Match m in subMatches)
-                    {
-                        string p = m.Groups[3].Value;
-                        if (Regex.IsMatch(p, @"(?:targetWb|wb|workbook)\s+As\s+(?:Workbook|Object)", RegexOptions.IgnoreCase))
-                        {
-                            targetParamSubs.Add(m);
-                        }
-                    }
-
-                    if (targetParamSubs.Count == 1)
-                    {
-                        targetProcMatch = targetParamSubs[0];
-                        mainProcName = targetParamSubs[0].Groups[2].Value;
-                        isNativeWbParam = true;
-                    }
-                    else if (targetParamSubs.Count > 1)
-                    {
-                        var pNames = new List<string>();
-                        foreach (Match m in targetParamSubs) pNames.Add(m.Groups[2].Value);
-                        return new VbaExecutionResult
-                        {
-                            success = false,
-                            precheckStatus = "entry_ambiguous",
-                            executionPhase = "blocked_before_run",
-                            summary = "执行已拒绝：存在多个接收 Workbook 参数的过程，无法唯一确定主入口",
-                            error = "代码中包含多个接收 Workbook 参数的过程 (" + string.Join(", ", pNames) + ") 且无 Sub Main。宿主拒绝猜测执行。",
-                            riskNotice = "【入口歧义拦截】为防误调辅助过程，宿主已拒绝执行。",
-                            rawModelResponse = rawModelResponse ?? "",
-                            originalVbaCode = vbaCode,
-                            executedVbaCode = vbaCode,
-                            wrapperCode = null,
-                            originalCodeHash = ComputeSha256(vbaCode),
-                            executedCodeHash = ComputeSha256(vbaCode),
-                            isSourceIdentical = true,
-                            transformSteps = transformSteps,
-                            elapsedMs = sw.ElapsedMilliseconds,
-                            origScreenUpdating = origScreenUpdating,
-                            origDisplayAlerts = origDisplayAlerts,
-                            origEnableEvents = origEnableEvents,
-                            origCalculation = origCalculation,
-                            hostStateRestored = true,
-                            hostStateRestoreDetails = "运行前拦截阶段，未变更宿主全局状态"
-                        };
-                    }
-                    else
-                    {
-                        // 无 Sub Main，且无接收 targetWb 参数的 Sub
-                        // 规则 3：若代码中【有且仅有 1 个】Sub 过程，可以确定其为唯一无参入口
-                        if (subMatches.Count == 1)
-                        {
-                            mainProcName = subMatches[0].Groups[2].Value;
-                            isNativeWbParam = false;
-                        }
-                        else
-                        {
-                            // 规则 4：存在多个无参 Sub 过程，且没有任何一个叫 Main，入口完全不明确！坚决拒绝盲猜！
-                            var subNames = new List<string>();
-                            foreach (Match m in subMatches) subNames.Add(m.Groups[2].Value);
-
-                            return new VbaExecutionResult
-                            {
-                                success = false,
-                                precheckStatus = "entry_unidentified",
-                                executionPhase = "blocked_before_run",
-                                summary = "执行已拒绝：代码包含多个过程且无法明确确定主入口",
-                                error = "代码中包含多个 Sub 过程 (" + string.Join(", ", subNames) + ")，未指定主入口 Sub Main 亦无明确的 targetWb 参数过程。为防止盲目猜测调用辅助过程导致不可控后果，宿主已拒绝执行。请在宏管理中明确选定要运行的入口过程。",
-                                riskNotice = "【入口歧义拦截】宿主不猜测、不改写模型源码。请在宏管理中指定入口过程或命名为 Sub Main。",
-                                rawModelResponse = rawModelResponse ?? "",
-                                originalVbaCode = vbaCode,
-                                executedVbaCode = vbaCode,
-                                wrapperCode = null,
-                                originalCodeHash = ComputeSha256(vbaCode),
-                                executedCodeHash = ComputeSha256(vbaCode),
-                                isSourceIdentical = true,
-                                transformSteps = transformSteps,
-                                elapsedMs = sw.ElapsedMilliseconds,
-                                origScreenUpdating = origScreenUpdating,
-                                origDisplayAlerts = origDisplayAlerts,
-                                origEnableEvents = origEnableEvents,
-                                origCalculation = origCalculation,
-                                hostStateRestored = true,
-                                hostStateRestoreDetails = "运行前拦截阶段，未变更宿主全局状态"
-                            };
-                        }
-                    }
-                }
-            }
+            var chosenProc = precheck.matchedProc;
+            string mainProcName = chosenProc.name;
+            bool isNativeWbParam = chosenProc.hasNativeWbParam && chosenProc.parameters.Count == 1;
 
             if (targetWorkbook == null)
             {
@@ -638,6 +790,103 @@ namespace LeeExcel
                 callMacroName = mainProcName;
                 wrapperCode = null;
                 transformSteps.Add("直调主入口: " + callMacroName + " (原生接收目标工作簿参数，源码直接调用，无包装器)");
+            }
+            else if (chosenProc != null && chosenProc.parameters != null && chosenProc.parameters.Count > 0 && HasNonTargetWorkbookParam(chosenProc.parameters))
+            {
+                // 显式类型参数化宏受控包装器生成
+                string wrapperSubName = "LeeHostRunner_" + DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + "_" + Guid.NewGuid().ToString("N").Substring(0, 4);
+                callMacroName = wrapperSubName;
+
+                var sbWrapper = new System.Text.StringBuilder();
+                sbWrapper.AppendLine();
+                sbWrapper.AppendLine("' ===== [LeeExcel 自动生成的受控调用入口包装器 - 保持正文源码零篡改] =====");
+                sbWrapper.AppendLine("Sub " + wrapperSubName + "(targetWb As Workbook)");
+                sbWrapper.AppendLine("    targetWb.Activate");
+
+                var callArgs = new List<string>();
+                int pCounter = 0;
+                foreach (var pDef in chosenProc.parameters)
+                {
+                    pCounter++;
+                    if (pDef.isTargetWorkbook)
+                    {
+                        callArgs.Add("targetWb");
+                        continue;
+                    }
+
+                    var input = FindInputParam(parameters, pDef.name);
+                    object val = input != null ? input.value : null;
+                    string vName = "p_" + pDef.name + "_" + pCounter;
+
+                    if (string.Equals(pDef.type, "Worksheet", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string wsName = val != null ? val.ToString().Trim() : "";
+                        sbWrapper.AppendLine("    Dim " + vName + " As Worksheet");
+                        sbWrapper.AppendLine("    Set " + vName + " = targetWb.Worksheets(" + VbaSignatureParser.EscapeVbaString(wsName) + ")");
+                        callArgs.Add(vName);
+                    }
+                    else if (string.Equals(pDef.type, "Range", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string rWsName;
+                        string rAddr;
+                        ExtractRangeInfo(val, out rWsName, out rAddr);
+                        if (string.IsNullOrEmpty(rWsName))
+                        {
+                            try { rWsName = (string)targetWorkbook.ActiveSheet.Name; } catch { rWsName = "Sheet1"; }
+                        }
+                        sbWrapper.AppendLine("    Dim " + vName + " As Range");
+                        sbWrapper.AppendLine("    Set " + vName + " = targetWb.Worksheets(" + VbaSignatureParser.EscapeVbaString(rWsName) + ").Range(" + VbaSignatureParser.EscapeVbaString(rAddr) + ")");
+                        callArgs.Add(vName);
+                    }
+                    else if (string.Equals(pDef.type, "String", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string sVal = val != null ? val.ToString() : "";
+                        sbWrapper.AppendLine("    Dim " + vName + " As String");
+                        sbWrapper.AppendLine("    " + vName + " = " + VbaSignatureParser.EscapeVbaString(sVal));
+                        callArgs.Add(vName);
+                    }
+                    else if (string.Equals(pDef.type, "Long", StringComparison.OrdinalIgnoreCase))
+                    {
+                        long lVal = Convert.ToInt64(val);
+                        sbWrapper.AppendLine("    Dim " + vName + " As Long");
+                        sbWrapper.AppendLine("    " + vName + " = " + lVal.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                        callArgs.Add(vName);
+                    }
+                    else if (string.Equals(pDef.type, "Double", StringComparison.OrdinalIgnoreCase))
+                    {
+                        double dVal = Convert.ToDouble(val);
+                        sbWrapper.AppendLine("    Dim " + vName + " As Double");
+                        sbWrapper.AppendLine("    " + vName + " = " + dVal.ToString("G", System.Globalization.CultureInfo.InvariantCulture));
+                        callArgs.Add(vName);
+                    }
+                    else if (string.Equals(pDef.type, "Boolean", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string bStr = val != null ? val.ToString().Trim().ToLowerInvariant() : "false";
+                        bool bVal = (bStr == "true" || bStr == "1");
+                        sbWrapper.AppendLine("    Dim " + vName + " As Boolean");
+                        sbWrapper.AppendLine("    " + vName + " = " + (bVal ? "True" : "False"));
+                        callArgs.Add(vName);
+                    }
+                    else if (string.Equals(pDef.type, "Date", StringComparison.OrdinalIgnoreCase))
+                    {
+                        DateTime dt;
+                        string s = val != null ? val.ToString().Trim() : "";
+                        if (!DateTime.TryParseExact(s, new[] { "yyyy-MM-dd", "yyyy-MM-dd HH:mm:ss", "yyyy/MM/dd", "yyyy/MM/dd HH:mm:ss" }, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out dt))
+                        {
+                            dt = DateTime.Parse(s);
+                        }
+                        sbWrapper.AppendLine("    Dim " + vName + " As Date");
+                        sbWrapper.AppendLine("    " + vName + " = DateSerial(" + dt.Year + ", " + dt.Month + ", " + dt.Day + ") + TimeSerial(" + dt.Hour + ", " + dt.Minute + ", " + dt.Second + ")");
+                        callArgs.Add(vName);
+                    }
+                }
+
+                sbWrapper.AppendLine("    Call " + chosenProc.name + "(" + string.Join(", ", callArgs.ToArray()) + ")");
+                sbWrapper.AppendLine("End Sub");
+
+                wrapperCode = sbWrapper.ToString();
+                finalCode = finalCode + "\r\n" + wrapperCode;
+                transformSteps.Add("正文源码保持零改写。宿主独立追加受控参数化包装器: " + wrapperSubName + " -> 调度过程 " + chosenProc.name + " 并传递强类型参数。");
             }
             else
             {

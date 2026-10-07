@@ -4,8 +4,12 @@
   import Header from './components/Header.svelte';
   import SettingsModal from './components/SettingsModal.svelte';
   import ScriptDrawer from './components/ScriptDrawer.svelte';
+  import DataToolModal from './components/DataToolModal.svelte';
+  import BatchModal from './components/BatchModal.svelte';
+  import WorkflowModal from './components/WorkflowModal.svelte';
   import ExecutionCard from './components/ExecutionCard.svelte';
   import ChatInput from './components/ChatInput.svelte';
+  import MacroConfirmCard from './components/MacroConfirmCard.svelte';
   import { bridge, type WorkbookInfo, type ScriptItem, type VbaExecutionData, type SelectionSnapshot } from './services/bridge';
   import {
     callLlmStream,
@@ -13,28 +17,39 @@
     parseStreamOutput,
     verifyExecutionResult,
   } from './services/llm';
-
-  interface ChatMessage {
-    id: string;
-    role: 'user' | 'assistant';
-    content: string; // 纯文本内容/简述
-    mode?: 'AUTOMATION' | 'CHAT'; // 模式标识
-    prompt?: string;
-    streamVbaCode?: string; // 流式生成的代码
-    execution?: VbaExecutionData | null;
-    isExecuting?: boolean;
-    selectionSnapshot?: SelectionSnapshot; // 附加的只读选区快照
-  }
+  import { buildChatHistory, type ChatMessage, type MacroReferenceData } from './services/conversationManager';
 
   let workbook: WorkbookInfo | null = null;
   let messages: ChatMessage[] = [];
   let isProcessing = false;
   let messagesContainer: HTMLElement;
   let inspectingSnapshot: SelectionSnapshot | null = null;
+  let activeMacroReference: MacroReferenceData | null = null;
+
+  // 企业级工作区状态：高频主入口 / 次级工作区 (支持通过 URL 参数精准切入预览，生产默认纯净 assistant)
+  let activeWorkspace: 'assistant' | 'scripts' | 'datatools' = (typeof window !== 'undefined' && window.location.search.includes('ws=datatools')) ? 'datatools' : 'assistant';
+  // 严格隔离：默认生产界面不展示 mock 原型，仅当带有 ?preview=true 时展示
+  let showConfirmCardPrototype = typeof window !== 'undefined' && window.location.search.includes('preview=true');
+
+  // 支持视口仿真参数 ?vw=320&vh=640 或 ?vw=400&vh=640，确保在无头浏览器中进行像素级对齐
+  let simVw: number | null = null;
+  let simVh: number | null = null;
+  let isScrollBottom = false;
+  if (typeof window !== 'undefined') {
+    const match = window.location.search.match(/[?&]vw=(\d+)/);
+    if (match) simVw = parseInt(match[1], 10);
+    const matchH = window.location.search.match(/[?&]vh=(\d+)/);
+    if (matchH) simVh = parseInt(matchH[1], 10);
+    isScrollBottom = window.location.search.includes('scroll=bottom');
+  }
 
   let showSettings = false;
   let showScripts = false;
+  let showDataTools = false;
+  let showBatchModal = false;
+  let showWorkflowModal = false;
   let scriptDrawerRef: any;
+  let chatInputRef: any;
 
   let pollTimer: any = null;
   let unbindWorkbookChange: (() => void) | null = null;
@@ -43,11 +58,24 @@
   let unbindOpenImportMacro: (() => void) | null = null;
   let unbindOpenMyMacros: (() => void) | null = null;
   let unbindOpenMacroLibrary: (() => void) | null = null;
+  let unbindPromptRunMacro: (() => void) | null = null;
+  let unbindOpenBatch: (() => void) | null = null;
+  let unbindOpenDataTools: (() => void) | null = null;
+  let unbindOpenWorkflow: (() => void) | null = null;
 
   onMount(() => {
     // 监听 C# 宿主推送的工作簿激活变更
     unbindWorkbookChange = bridge.onWorkbookChange((info) => {
       workbook = info;
+    });
+
+    // 监听 Ribbon 动态菜单触发“收藏宏”运行前确认
+    unbindPromptRunMacro = bridge.onAction('prompt_run_macro', async (payload: any) => {
+      showScripts = true;
+      showSettings = false;
+      await tick();
+      const scriptId = typeof payload === 'string' ? payload : (payload?.scriptId || '');
+      scriptDrawerRef?.promptRunMacro(scriptId);
     });
 
     // 监听 Ribbon 菜单打开“宏库”/“我的脚本”抽屉
@@ -77,7 +105,24 @@
       scriptDrawerRef?.openTab('import');
     });
 
-    // 监听 Ribbon 菜单打开“API配置”弹窗
+    // 监听 Ribbon 菜单直达“数据工具”工作区
+    unbindOpenDataTools = bridge.onAction('open_data_tools', () => {
+      activeWorkspace = 'datatools';
+      showScripts = false;
+      showSettings = false;
+    });
+
+    // 监听 Ribbon 菜单打开“批量宏处理”面板
+    unbindOpenBatch = bridge.onAction('open_batch_modal', () => {
+      showBatchModal = true;
+    });
+
+    // 监听 Ribbon 菜单打开“双步骤流水线”面板
+    unbindOpenWorkflow = bridge.onAction('open_workflow_modal', () => {
+      showWorkflowModal = true;
+    });
+
+    // 监听 Ribbon 菜单打开“API配置与设置”弹窗
     unbindOpenSettings = bridge.onAction('open_settings', () => {
       showSettings = true;
       showScripts = false;
@@ -91,15 +136,15 @@
       refreshWorkbookInfo();
     }, 2500);
 
-    // 默认添加欢迎引导语
+    // AI 欢迎区按规范缩为单行核心指令，释放窄窗格宝贵纵向空间
     messages = [
       {
         id: 'msg_welcome',
         role: 'assistant',
-        content:
-          '你好！我是你的 ExcelMind AI 助手。已自动绑定当前目标工作簿。\n你可以用自然语言下达表格操作、数据汇总或进行 Excel 技巧咨询。普通问答直接解答；操作指令在每次运行前自动保存整本物理副本，支持一键回滚。',
+        content: '描述你的需求，或附加选区开始。',
       },
     ];
+
 
     if (typeof window !== 'undefined') {
       (window as any).__openScripts = () => {
@@ -120,6 +165,15 @@
       (window as any).__openSettings = () => {
         showSettings = true;
         showScripts = false;
+        showDataTools = false;
+      };
+      (window as any).__openDataTools = () => {
+        showDataTools = true;
+        showScripts = false;
+        showSettings = false;
+      };
+      (window as any).__openBatch = () => {
+        showBatchModal = true;
       };
 
       (window as any).__addTestExecutionMessage = (promptText: string, executionData: any) => {
@@ -136,6 +190,14 @@
           },
         ];
       };
+
+      (window as any).__promptRunMacro = (scriptId: string) => {
+        showScripts = true;
+        showSettings = false;
+        setTimeout(() => {
+          scriptDrawerRef?.promptRunMacro(scriptId);
+        }, 50);
+      };
     }
   });
 
@@ -143,10 +205,14 @@
     if (pollTimer) clearInterval(pollTimer);
     if (unbindWorkbookChange) unbindWorkbookChange();
     if (unbindOpenMacroLibrary) unbindOpenMacroLibrary();
+    if (unbindPromptRunMacro) unbindPromptRunMacro();
     if (unbindOpenScripts) unbindOpenScripts();
     if (unbindOpenSettings) unbindOpenSettings();
     if (unbindOpenImportMacro) unbindOpenImportMacro();
     if (unbindOpenMyMacros) unbindOpenMyMacros();
+    if (unbindOpenDataTools) unbindOpenDataTools();
+    if (unbindOpenBatch) unbindOpenBatch();
+    if (unbindOpenWorkflow) unbindOpenWorkflow();
   });
 
   async function refreshWorkbookInfo() {
@@ -164,7 +230,12 @@
   }
 
   // 核心交互：用户显式入口驱动、请求生命周期固定、通道响应分流、目标锁定与写后核验
-  async function handleSend(text: string, userSelectedMode?: 'AUTOMATION' | 'CHAT', selectionSnapshot?: SelectionSnapshot) {
+  async function handleSend(
+    text: string,
+    userSelectedMode?: 'AUTOMATION' | 'CHAT',
+    selectionSnapshot?: SelectionSnapshot,
+    macroReference?: MacroReferenceData
+  ) {
     if (!text.trim() || isProcessing) return;
 
     // 工作簿一致性核验：若附加了选区，且为操作模式，核对目标工作簿
@@ -174,7 +245,7 @@
       const attachedWbName = (selectionSnapshot.context.workbookName || '').trim();
       if (currentWbName && attachedWbName && currentWbName.toLowerCase() !== attachedWbName.toLowerCase()) {
         alert(`⚠️ 附加选区来自工作簿【${attachedWbName}】，但当前活动工作簿为【${currentWbName}】。\n\n为避免跨工作簿误操作，请重新附加当前工作簿选区或移除附件后再发送。`);
-        return;
+        return false;
       }
     }
 
@@ -185,7 +256,7 @@
     const userMsgId = 'user_' + requestId;
     const assistantMsgId = 'ai_' + requestId;
 
-    // 发送瞬间锁定当前目标工作簿上下文
+    // 发送瞬间锁定当前目标工作簿上下文与附加状态
     const targetWbName = workbook?.name || '';
     const targetWbFullName = workbook?.fullName || '';
     const sheets = workbook?.sheets || [];
@@ -203,9 +274,10 @@
       activeSheet,
       usedRange,
       selectionSnapshot,
+      macroReference,
     };
 
-    // 1. 添加用户消息（显示发送瞬间锁定的模式标签与选区快照）
+    // 1. 添加用户消息（显示发送瞬间锁定的模式标签、选区快照与显式引用的前序宏）
     messages = [
       ...messages,
       {
@@ -214,6 +286,7 @@
         content: text,
         mode: currentRequest.requestMode,
         selectionSnapshot: currentRequest.selectionSnapshot,
+        macroReference: currentRequest.macroReference,
       },
     ];
     await scrollToBottom();
@@ -223,6 +296,7 @@
       id: currentRequest.assistantMsgId,
       role: 'assistant',
       content: currentRequest.requestMode === 'CHAT' ? '正在思考解答...' : '正在准备自动化方案...',
+      rawContent: '',
       prompt: text,
       streamVbaCode: '',
       isExecuting: true,
@@ -231,12 +305,21 @@
     messages = [...messages, assistantMsg];
     await scrollToBottom();
 
-    try {
-      const chatHistory = messages
-        .filter((m) => m.id !== currentRequest.assistantMsgId && m.id !== currentRequest.userMsgId && m.id !== 'msg_welcome')
-        .map((m) => ({ role: m.role, content: m.content }));
+    // 3. 异步启动大模型流式调用与宏执行流（不阻塞前端捕获确认）
+    runSendWorkflow(currentRequest, assistantMsg);
+    return true;
+  }
 
-      // 调用大模型流式生成 (严格使用本次请求锁定的 requestMode)
+  async function runSendWorkflow(currentRequest: any, assistantMsg: ChatMessage) {
+    const text = currentRequest.text || assistantMsg.prompt || '';
+    try {
+      // 提取多轮历史上下文：优先取各轮助手消息的 rawContent（大模型真实原始回复），执行摘要不污染历史
+      const chatHistory = buildChatHistory(messages, {
+        userMsgId: currentRequest.userMsgId,
+        assistantMsgId: currentRequest.assistantMsgId,
+      });
+
+      // 调用大模型流式生成 (严格使用本次请求锁定的 requestMode，按用户主动要求注入选区与显式引用宏)
       const streamRes = await callLlmStream(
         text,
         currentRequest.targetWbName,
@@ -245,6 +328,7 @@
         currentRequest.usedRange,
         currentRequest.requestMode,
         (partialText) => {
+          assistantMsg.rawContent = partialText;
           if (currentRequest.requestMode === 'AUTOMATION') {
             const parsed = parseStreamOutput(partialText);
             if (parsed.hasCode) {
@@ -262,16 +346,20 @@
           messages = [...messages];
         },
         chatHistory,
-        currentRequest.selectionSnapshot
+        currentRequest.selectionSnapshot,
+        currentRequest.macroReference
       );
 
       let rawResponse = streamRes.fullText;
       let finishReason = streamRes.finishReason;
       let currentApiAudit = streamRes.audit;
+      // 固化原始回复，用于后续多轮对话上下文传递
+      assistantMsg.rawContent = rawResponse;
 
       // 四、处理 CHAT 通道：完整展示模型回答，绝对不进入自动化执行链
       if (currentRequest.requestMode === 'CHAT') {
         assistantMsg.content = rawResponse;
+        assistantMsg.rawContent = rawResponse;
         assistantMsg.streamVbaCode = '';
         assistantMsg.execution = null;
         assistantMsg.isExecuting = false;
@@ -285,6 +373,7 @@
       // 分支 1: 模型返回普通文字，未提供 VBA（如输入“你是”返回了自我介绍）
       if (extracted.status === 'no_code') {
         assistantMsg.content = rawResponse + '\n\n（本次未执行：模型未返回可执行 VBA）';
+        assistantMsg.rawContent = rawResponse;
         assistantMsg.streamVbaCode = '';
         assistantMsg.execution = null; // 绝不创建宏执行失败卡！
         assistantMsg.isExecuting = false;
@@ -299,6 +388,7 @@
         assistantMsg.content = parsed.explanation
           ? `${parsed.explanation}\n\n（代码未执行：${errorReason}）`
           : `（代码未执行：${errorReason}）`;
+        assistantMsg.rawContent = rawResponse;
         assistantMsg.streamVbaCode = extracted.code || '';
         assistantMsg.execution = {
           summary: `代码未执行：${errorReason}`,
@@ -320,6 +410,7 @@
       // 分支 3: 提取成功且结构完整：才进入执行链路 (显式绑定目标工作簿)
       let parsed = parseStreamOutput(rawResponse);
       assistantMsg.streamVbaCode = extracted.code;
+      assistantMsg.rawContent = rawResponse;
 
       let execRes = await bridge.send<VbaExecutionData>('execute_vba', {
         code: extracted.code,
@@ -352,6 +443,7 @@
             currentRequest.usedRange,
             'AUTOMATION',
             (partialText) => {
+              assistantMsg.rawContent = partialText;
               const p = parseStreamOutput(partialText);
               if (p.hasCode) {
                 assistantMsg.content = '正在重新编译并执行新版代码...';
@@ -369,6 +461,7 @@
             extracted = repairedExtracted;
             parsed = parseStreamOutput(repairedResponse);
             assistantMsg.streamVbaCode = repairedExtracted.code;
+            assistantMsg.rawContent = repairedResponse;
 
             const secondExecRes = await bridge.send<VbaExecutionData>('execute_vba', {
               code: repairedExtracted.code,
@@ -410,9 +503,21 @@
             ? `${parsed.explanation}（${verification.note}）${repairBadge}`
             : `已在【${targetWbName}】执行宏，${verification.note}${repairBadge}`;
         }
+
+        // 历史回复始终保留模型完整原始输出，绝对不含宿主包装器
+        assistantMsg.rawContent = rawResponse;
+
+        // 若检测到用户引用超窗宏，界面展示明确警示
+        if (currentApiAudit?.macroContextWarning) {
+          assistantMsg.content += `\n\n⚠️ ${currentApiAudit.macroContextWarning}`;
+        }
       } else {
         const errMsg = execRes.error || '执行遇到阻断';
         assistantMsg.content = `执行中断：${errMsg}`;
+        assistantMsg.rawContent = rawResponse;
+        if (currentApiAudit?.macroContextWarning) {
+          assistantMsg.content += `\n\n⚠️ ${currentApiAudit.macroContextWarning}`;
+        }
         assistantMsg.execution = execRes.data
           ? {
               ...execRes.data,
@@ -449,7 +554,7 @@
   }
 
   // 从“我的宏”直接运行
-  async function handleRunScript(script: ScriptItem, entryPoint?: string) {
+  async function handleRunScript(script: ScriptItem, entryPoint?: string, parameters?: Record<string, any>) {
     if (isProcessing) return;
     isProcessing = true;
 
@@ -458,12 +563,20 @@
     const entryLabel = chosenEntryPoint ? ` (入口: ${chosenEntryPoint})` : '';
 
     const userMsgId = 'user_script_' + Date.now();
+    let promptText = `运行宏: 【${macroDisplayName}】${entryLabel}`;
+    if (parameters && Object.keys(parameters).length > 0) {
+      const pSummary = Object.entries(parameters)
+        .map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`)
+        .join(', ');
+      promptText += ` [参数: ${pSummary}]`;
+    }
+
     messages = [
       ...messages,
       {
         id: userMsgId,
         role: 'user',
-        content: `运行宏: 【${macroDisplayName}】${entryLabel}`,
+        content: promptText,
       },
     ];
 
@@ -490,6 +603,7 @@
         targetWorkbookFullName: targetWbFullName,
         entryPoint: chosenEntryPoint,
         scriptId: script.id || script.fileName,
+        parameters: parameters ? JSON.stringify(parameters) : '',
       });
 
       if (execRes.ok && execRes.data) {
@@ -497,7 +611,12 @@
         execRes.data.verificationStatus = verification.status;
         execRes.data.verificationNote = verification.note;
         assistantMsg.execution = execRes.data;
-        assistantMsg.content = `宏【${macroDisplayName}】已运行完成。${verification.note}`;
+        let contentMsg = `宏【${macroDisplayName}】已运行完成。${verification.note}`;
+        const metaErr = execRes.data.metaSaveError || execRes.metaSaveError;
+        if (metaErr) {
+          contentMsg += `\n⚠️ 运行记录保存失败: ${metaErr}`;
+        }
+        assistantMsg.content = contentMsg;
       } else {
         assistantMsg.content = `宏执行失败：${execRes.error}`;
         assistantMsg.execution = {
@@ -524,19 +643,36 @@
       await scrollToBottom();
     }
   }
+
+  function handleCancelWithQuestion(data: { script: ScriptItem; entryPoint: string; questionText: string }) {
+    showScripts = false;
+    if (chatInputRef && chatInputRef.setDraftText) {
+      chatInputRef.setDraftText(data.questionText, 'CHAT');
+    }
+  }
 </script>
 
-<div class="app-layout">
-  <!-- 顶部状态栏 -->
+<div class="app-layout" style={`${simVw ? `width: ${simVw}px; max-width: ${simVw}px;` : ''} ${simVh ? `height: ${simVh}px; max-height: ${simVh}px;` : ''} margin: 0; box-sizing: border-box; overflow-x: hidden;`}>
+  <!-- 顶部状态与工作区导航栏 -->
   <Header
     {workbook}
+    {activeWorkspace}
+    onSelectWorkspace={(ws) => {
+      activeWorkspace = ws;
+      if (ws === 'scripts') {
+        showScripts = true;
+      }
+    }}
     onOpenSettings={() => (showSettings = true)}
-    onOpenScripts={() => (showScripts = true)}
+    onOpenBatch={() => (showBatchModal = true)}
+    onOpenWorkflow={() => (showWorkflowModal = true)}
     onRefresh={refreshWorkbookInfo}
   />
 
-  <!-- 消息流区域 -->
-  <main class="chat-area" bind:this={messagesContainer}>
+  {#if activeWorkspace === 'assistant'}
+    <div class="workspace-view assistant-view">
+      <!-- 消息流区域 -->
+      <main class="chat-area {isScrollBottom ? 'scroll-to-bottom' : ''}" bind:this={messagesContainer}>
     {#each messages as msg (msg.id)}
       {#if msg.role === 'user'}
         <div class="message-row user-row">
@@ -572,6 +708,16 @@
                 </button>
               </div>
             {/if}
+
+            <!-- 若随请求显式引用了前序宏，在用户气泡下方显示紧凑标识 -->
+            {#if msg.macroReference}
+              <div class="user-selection-badge macro-ref-badge">
+                <span class="badge-icon">🏷️</span>
+                <span class="badge-text">
+                  显式引用前序宏: {msg.macroReference.procedureName || 'Sub Main'} ({msg.macroReference.charCount} 字符, {msg.macroReference.lineCount} 行)
+                </span>
+              </div>
+            {/if}
           </div>
         </div>
       {:else}
@@ -591,15 +737,49 @@
               onSaveScriptSuccess={() => scriptDrawerRef?.refreshScripts()}
               on:restored={refreshWorkbookInfo}
               on:expand={scrollToBottom}
+              on:referenceMacro={(e) => {
+                activeMacroReference = e.detail;
+              }}
             />
           {/if}
         </div>
       {/if}
     {/each}
-  </main>
 
-  <!-- 底部紧凑输入栏 -->
-  <ChatInput disabled={isProcessing} onSend={handleSend} />
+        <!-- 宏运行安全确认卡片 (第一阶段事实边界与单列布局原型) -->
+        {#if showConfirmCardPrototype}
+          <div class="prototype-card-wrapper">
+            <MacroConfirmCard
+              targetWorkbook={workbook?.name || 'Sales_2026.xlsx'}
+              activeSheetName={workbook?.activeSheet || 'Sheet1'}
+              onConfirmExecute={() => refreshWorkbookInfo()}
+              onSwitchToChat={(draft) => {
+                activeWorkspace = 'assistant';
+                showConfirmCardPrototype = false;
+                chatInputRef?.setDraftText(draft, 'CHAT');
+              }}
+              onCancel={() => (showConfirmCardPrototype = false)}
+            />
+          </div>
+        {/if}
+      </main>
+
+      <!-- 底部紧凑输入栏 -->
+      <ChatInput bind:this={chatInputRef} disabled={isProcessing} bind:referencedMacro={activeMacroReference} onSend={handleSend} />
+    </div>
+
+  <!-- 工作区 2: 数据工具工作区 (代表性原型 2，独立视图，彻底解决弹窗遮罩与裸按钮) -->
+  {:else if activeWorkspace === 'datatools'}
+    <div class="workspace-view datatools-view">
+      <DataToolModal
+        isOpen={true}
+        isWorkspaceView={true}
+        {workbook}
+        onClose={() => (activeWorkspace = 'assistant')}
+        onExecuted={refreshWorkbookInfo}
+      />
+    </div>
+  {/if}
 
   <!-- 查看发送内容弹窗 (脱敏展示，绝不暴露 API Key) -->
   {#if inspectingSnapshot}
@@ -635,8 +815,37 @@
     bind:this={scriptDrawerRef}
     isOpen={showScripts}
     {workbook}
-    onClose={() => (showScripts = false)}
+    onClose={() => {
+      showScripts = false;
+      if (activeWorkspace === 'scripts') activeWorkspace = 'assistant';
+    }}
     onRunScript={handleRunScript}
+    onCancelWithQuestion={handleCancelWithQuestion}
+  />
+
+  <!-- 快捷数据工具弹窗（旧接口兼容：如果在 assistant 模式下被外部命令强行触发，转入 datatools 工作区） -->
+  {#if showDataTools}
+    <DataToolModal
+      isOpen={true}
+      isWorkspaceView={false}
+      {workbook}
+      onClose={() => (showDataTools = false)}
+      onExecuted={refreshWorkbookInfo}
+    />
+  {/if}
+
+  <!-- 批量宏处理面板 (TASK-R4b) -->
+  <BatchModal
+    isOpen={showBatchModal}
+    onClose={() => (showBatchModal = false)}
+  />
+
+  <!-- 双步骤任务流水线面板 (TASK-R5a) -->
+  <WorkflowModal
+    isOpen={showWorkflowModal}
+    {workbook}
+    onClose={() => (showWorkflowModal = false)}
+    onExecuted={refreshWorkbookInfo}
   />
 </div>
 
@@ -650,6 +859,77 @@
     overflow: hidden;
   }
 
+  .workspace-view {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .assistant-view {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .datatools-view {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  /* 原型 3 展示包装器 */
+  .prototype-card-wrapper {
+    margin-top: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .prototype-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #eef5f0;
+    border: 1px solid var(--excel-light-border);
+    padding: 4px 8px;
+    border-radius: var(--office-radius-sm);
+    font-size: var(--font-size-xs);
+  }
+
+  .proto-tag {
+    font-weight: 700;
+    color: var(--excel-green);
+    margin-right: 6px;
+  }
+
+  .proto-title {
+    color: var(--office-text-secondary);
+    font-size: 11px;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .proto-dismiss-btn {
+    border: none;
+    background: transparent;
+    color: var(--office-muted);
+    cursor: pointer;
+    font-size: 11px;
+    padding: 0 4px;
+  }
+
+  .proto-dismiss-btn:hover {
+    color: var(--office-text);
+  }
+
   .chat-area {
     flex: 1;
     overflow-y: auto;
@@ -658,6 +938,17 @@
     flex-direction: column;
     gap: 12px;
     scroll-behavior: smooth;
+  }
+
+  .chat-area.scroll-to-bottom {
+    justify-content: flex-end;
+  }
+
+  @media (max-width: 360px) {
+    .chat-area {
+      padding: 8px;
+      gap: 8px;
+    }
   }
 
   .message-row {

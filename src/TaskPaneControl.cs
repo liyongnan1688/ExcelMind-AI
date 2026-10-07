@@ -140,7 +140,14 @@ namespace LeeExcel
                     {
                         try
                         {
-                            _webView.CoreWebView2.PostWebMessageAsString("{\"action\":\"" + _pendingAction + "\"}");
+                            if (_pendingAction.StartsWith("{"))
+                            {
+                                _webView.CoreWebView2.PostWebMessageAsString(_pendingAction);
+                            }
+                            else
+                            {
+                                _webView.CoreWebView2.PostWebMessageAsString("{\"action\":\"" + _pendingAction + "\"}");
+                            }
                         }
                         catch { }
                         _pendingAction = null;
@@ -335,6 +342,95 @@ namespace LeeExcel
         public void OpenMyMacros()
         {
             OpenMacroLibrary();
+        }
+
+        public void PromptRunFavoriteMacro(string scriptId)
+        {
+            if (this.InvokeRequired)
+            {
+                try
+                {
+                    this.BeginInvoke(new Action<string>(PromptRunFavoriteMacro), scriptId);
+                }
+                catch { }
+                return;
+            }
+
+            string payload = "{\"action\":\"prompt_run_macro\",\"scriptId\":\"" + (scriptId ?? "") + "\"}";
+            if (_webView != null && _webView.CoreWebView2 != null)
+            {
+                _webView.CoreWebView2.PostWebMessageAsString(payload);
+            }
+            else
+            {
+                _pendingAction = payload;
+            }
+        }
+
+        public void OpenDataTools()
+        {
+            if (this.InvokeRequired)
+            {
+                try
+                {
+                    this.BeginInvoke(new Action(OpenDataTools));
+                }
+                catch { }
+                return;
+            }
+
+            if (_webView != null && _webView.CoreWebView2 != null)
+            {
+                _webView.CoreWebView2.PostWebMessageAsString("{\"action\":\"open_data_tools\"}");
+            }
+            else
+            {
+                _pendingAction = "open_data_tools";
+            }
+        }
+
+        public void OpenBatch()
+        {
+            if (this.InvokeRequired)
+            {
+                try
+                {
+                    this.BeginInvoke(new Action(OpenBatch));
+                }
+                catch { }
+                return;
+            }
+
+            if (_webView != null && _webView.CoreWebView2 != null)
+            {
+                _webView.CoreWebView2.PostWebMessageAsString("{\"action\":\"open_batch_modal\"}");
+            }
+            else
+            {
+                _pendingAction = "open_batch_modal";
+            }
+        }
+
+        public void OpenWorkflow()
+        {
+            if (this.InvokeRequired)
+            {
+                try
+                {
+                    this.BeginInvoke(new Action(OpenWorkflow));
+                }
+                catch { }
+                return;
+            }
+
+            if (_webView != null && _webView.CoreWebView2 != null)
+            {
+                _webView.CoreWebView2.PostWebMessageAsString("{\"action\":\"open_workflow_modal\"}");
+            }
+            else
+            {
+                _pendingAction = "open_workflow_modal";
+            }
         }
     }
 }

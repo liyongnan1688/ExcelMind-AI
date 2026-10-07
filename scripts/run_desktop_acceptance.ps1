@@ -48,16 +48,20 @@ $OutExe = Join-Path $ArtifactsDir "DesktopAcceptanceRunner.exe"
 $CscArgs = @(
     "/nologo",
     "/target:exe",
-    "/out:`"$OutExe`"",
-    "/lib:`"$WpfLib`"",
+    "/out:$OutExe",
+    "/lib:$WpfLib",
     "/r:System.dll",
     "/r:System.Core.dll",
     "/r:System.Drawing.dll",
     "/r:System.Windows.Forms.dll",
+    "/r:System.Net.Http.dll",
+    "/r:System.Security.dll",
+    "/r:System.IO.Compression.dll",
+    "/r:System.IO.Compression.FileSystem.dll",
     "/r:WindowsBase.dll",
     "/r:UIAutomationClient.dll",
     "/r:UIAutomationTypes.dll",
-    "`"$SourceFile`""
+    $SourceFile
 )
 
 $compileOutput = & $CscPath $CscArgs 2>&1
@@ -75,7 +79,7 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host "[FAIL] Unit test suite failed!" -ForegroundColor Red
     exit 1
 }
-Write-Host "    * Offline unit tests 42/42 PASS" -ForegroundColor Green
+Write-Host "    * Offline unit tests 194/194 PASS" -ForegroundColor Green
 
 # 4. Run Desktop Acceptance Tool
 Write-Host "[4/4] Executing Real Desktop Acceptance (UIA + COM + TaskPane)..." -ForegroundColor Yellow

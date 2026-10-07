@@ -1,13 +1,21 @@
 <script lang="ts">
-  import { Zap, MessageSquare } from 'lucide-svelte';
+  import { Zap, MessageSquare, Code } from 'lucide-svelte';
   import { bridge, type SelectionContextData, type SelectionSendOptions, type SelectionSnapshot } from '../services/bridge';
   import { formatSelectionContextForPrompt } from '../services/llm';
+  import type { MacroReferenceData } from '../services/conversationManager';
 
   export let disabled = false;
-  export let onSend: (text: string, mode?: 'AUTOMATION' | 'CHAT', selectionSnapshot?: SelectionSnapshot) => void;
+  export let referencedMacro: MacroReferenceData | null = null;
+  export let onSend: (
+    text: string,
+    mode?: 'AUTOMATION' | 'CHAT',
+    selectionSnapshot?: SelectionSnapshot,
+    macroReference?: MacroReferenceData
+  ) => void;
 
   let inputText = '';
   let currentMode: 'AUTOMATION' | 'CHAT' = 'AUTOMATION';
+  let showMacroCodeModal = false;
 
   // 选区上下文只读状态
   let selectionContext: SelectionContextData | null = null;
@@ -128,7 +136,7 @@
     ++refreshSeq; // 废弃正在途中的刷新响应
   }
 
-  function handleSubmit(overrideMode?: 'AUTOMATION' | 'CHAT') {
+  async function handleSubmit(overrideMode?: 'AUTOMATION' | 'CHAT') {
     if (!inputText.trim() || disabled || isRefreshingArea) return;
     const text = inputText.trim();
     const modeToSend = overrideMode || currentMode;
@@ -148,11 +156,18 @@
         };
       }
 
-      inputText = '';
-      onSend(text, modeToSend, snapshot);
+      const macroRefToSend = referencedMacro;
+      const sent = await onSend(text, modeToSend, snapshot, macroRefToSend || undefined);
+      if (sent === false) {
+        // 被前置门禁阻止：保留输入文字、选区附件与已选引用，不无提示清空！
+        return;
+      }
 
-      // 发送瞬间冻结并清空本次挂载的选区，保持单次请求固定独立性，后续刷新绝不影响已发送内容
+      // 只有本次发送被可靠捕获并启动后，才清空输入框并单次解除选区与引用宏，绝不污染后续轮次
+      inputText = '';
       selectionContext = null;
+      referencedMacro = null;
+      showMacroCodeModal = false;
       showDetails = false;
       refreshError = '';
       ++refreshSeq;
@@ -161,6 +176,8 @@
       selectionError = '发送请求异常: ' + (err?.message || err);
     }
   }
+
+  let textareaEl: HTMLTextAreaElement | null = null;
 
   function handleKeyDown(e: KeyboardEvent) {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -171,6 +188,17 @@
 
   function setMode(mode: 'AUTOMATION' | 'CHAT') {
     currentMode = mode;
+  }
+
+  export function setDraftText(val: string, mode: 'AUTOMATION' | 'CHAT' = 'CHAT') {
+    inputText = val;
+    currentMode = mode;
+    setTimeout(() => {
+      if (textareaEl) {
+        textareaEl.focus();
+        textareaEl.setSelectionRange(textareaEl.value.length, textareaEl.value.length);
+      }
+    }, 50);
   }
 </script>
 
@@ -227,6 +255,40 @@
         <span class="error-text">{selectionError}</span>
       </div>
       <button class="icon-close-btn" on:click={() => (selectionError = '')} title="关闭提示">✕</button>
+    </div>
+  {/if}
+
+  <!-- 显式引用的前序宏卡片 (用户显式主动选择，单次有效) -->
+  {#if referencedMacro}
+    <div class="macro-ref-card">
+      <div class="card-header">
+        <div class="card-title-group">
+          <span class="badge-tag macro-badge">🏷️ 已引用前序宏</span>
+          <span class="macro-title" title="{referencedMacro.procedureName || '未命名宏'}">
+            <strong>{referencedMacro.procedureName || 'Sub Main'}</strong>
+          </span>
+          <span class="dim-badge">
+            {referencedMacro.charCount} 字符 ({referencedMacro.lineCount} 行)
+          </span>
+          {#if referencedMacro.status === 'incomplete'}
+            <span class="status-pill status-warn">代码结构未闭合</span>
+          {/if}
+          <span class="single-use-badge">仅对本次发送有效</span>
+        </div>
+        <div class="card-actions-group">
+          <button class="text-action-btn" type="button" on:click={() => (showMacroCodeModal = !showMacroCodeModal)}>
+            {showMacroCodeModal ? '收起源码 ▲' : '查看源码 ▼'}
+          </button>
+          <button class="text-action-btn remove-btn" type="button" on:click={() => (referencedMacro = null)} title="取消引用此宏">
+            ✕
+          </button>
+        </div>
+      </div>
+      {#if showMacroCodeModal}
+        <div class="macro-code-box">
+          <pre><code>{referencedMacro.vbaCode}</code></pre>
+        </div>
+      {/if}
     </div>
   {/if}
 
@@ -346,6 +408,7 @@
   <!-- 输入主框 (加高输入区域，提供更充足的书写空间) -->
   <div class="input-box {currentMode === 'AUTOMATION' ? 'focus-auto' : 'focus-chat'}">
     <textarea
+      bind:this={textareaEl}
       placeholder={currentMode === 'AUTOMATION'
         ? "输入操作指令 (如: 用_分裂D列的名称，不要覆盖后面的列，新增)..."
         : "向 AI 咨询 Excel 问题或技巧 (如: TEXTSPLIT与分列区别、公式怎么写)..."}
@@ -362,28 +425,23 @@
         <span class="key-pill">Shift+Enter</span> 换行
       </div>
       <div class="action-buttons-group">
-        <!-- 对话按钮 -->
+        <!-- 唯一发送主按钮：文字与图标随已选模式明确变化，不展示两套等权重按钮 -->
         <button
-          class="mode-action-btn {currentMode === 'CHAT' ? 'primary-chat' : 'secondary-chat'}"
-          on:click={() => handleSubmit('CHAT')}
+          class="send-primary-btn {currentMode === 'AUTOMATION' ? 'send-auto' : 'send-chat'}"
+          on:click={() => handleSubmit()}
           disabled={disabled || !inputText.trim() || isRefreshingArea}
-          title={isRefreshingArea ? "选区正在刷新原区域，请稍候完成后再发送" : "以【对话】发送：仅解答，不改动表格"}
+          title={isRefreshingArea
+            ? "选区正在刷新原区域，请稍候完成后再发送"
+            : (currentMode === 'AUTOMATION' ? "以【操作】模式发送：生成自动化方案并修改表格" : "以【对话】模式发送：仅解答咨询，不改动表格")}
           type="button"
         >
-          <MessageSquare size={13} />
-          <span>对话</span>
-        </button>
-
-        <!-- 操作按钮 -->
-        <button
-          class="mode-action-btn {currentMode === 'AUTOMATION' ? 'primary-auto' : 'secondary-auto'}"
-          on:click={() => handleSubmit('AUTOMATION')}
-          disabled={disabled || !inputText.trim() || isRefreshingArea}
-          title={isRefreshingArea ? "选区正在刷新原区域，请稍候完成后再发送" : "以【操作】发送：直接修改表格并自动备份"}
-          type="button"
-        >
-          <Zap size={13} />
-          <span>操作</span>
+          {#if currentMode === 'AUTOMATION'}
+            <Zap size={13} />
+            <span>执行操作</span>
+          {:else}
+            <MessageSquare size={13} />
+            <span>发送提问</span>
+          {/if}
         </button>
       </div>
     </div>
@@ -842,12 +900,21 @@
 
   .shortcut-tip {
     font-size: var(--font-size-xs);
-    color: var(--office-muted);
+    color: var(--office-dim);
     display: flex;
     align-items: center;
     gap: 3px;
     white-space: nowrap;
     overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+
+  @media (max-width: 360px) {
+    .key-sep,
+    .shortcut-tip span:last-child {
+      display: none;
+    }
   }
 
   .key-pill {
@@ -874,71 +941,100 @@
     flex-shrink: 0;
   }
 
-  .mode-action-btn {
+  .send-primary-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 4px;
-    padding: 4px 12px;
-    font-size: var(--font-size-sm);
-    font-weight: 500;
+    gap: 5px;
+    padding: 5px 14px;
+    font-size: var(--font-size-xs, 12px);
+    font-weight: 600;
     border-radius: var(--office-radius-sm);
     cursor: pointer;
     transition: all 0.15s ease;
     line-height: 1.3;
     white-space: nowrap;
+    border: 1px solid transparent;
   }
 
-  .mode-action-btn:disabled {
-    opacity: 0.5;
+  .send-primary-btn:disabled {
+    opacity: 0.45;
     cursor: not-allowed;
   }
 
-  /* 操作模式主按钮 */
-  .primary-auto {
+  /* 操作模式发送按钮：Excel 绿 */
+  .send-auto {
     background: var(--excel-green);
-    border: 1px solid var(--excel-green);
+    border-color: var(--excel-green);
     color: #ffffff;
     box-shadow: 0 1px 2px rgba(16, 124, 65, 0.2);
   }
 
-  .primary-auto:hover:not(:disabled) {
+  .send-auto:hover:not(:disabled) {
     background: var(--excel-hover-bg);
     border-color: var(--excel-hover-bg);
   }
 
-  /* 操作模式次按钮 (当前是对话时) */
-  .secondary-auto {
-    background: #ffffff;
-    border: 1px solid var(--excel-light-border);
-    color: var(--excel-green);
-  }
-
-  .secondary-auto:hover:not(:disabled) {
-    background: var(--excel-light);
-  }
-
-  /* 对话模式主按钮 */
-  .primary-chat {
+  /* 对话模式发送按钮：Office 蓝 */
+  .send-chat {
     background: var(--office-blue);
-    border: 1px solid var(--office-blue);
+    border-color: var(--office-blue);
     color: #ffffff;
     box-shadow: 0 1px 2px rgba(0, 120, 212, 0.2);
   }
 
-  .primary-chat:hover:not(:disabled) {
+  .send-chat:hover:not(:disabled) {
     background: var(--office-blue-dark);
     border-color: var(--office-blue-dark);
   }
 
-  /* 对话模式次按钮 (当前是操作时) */
-  .secondary-chat {
-    background: #ffffff;
-    border: 1px solid var(--office-blue-border);
-    color: var(--office-blue);
+  .macro-ref-card {
+    background: #f8fafc;
+    border: 1px solid #cbd5e1;
+    border-radius: var(--office-radius, 6px);
+    padding: 8px 12px;
+    margin-bottom: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: var(--font-size-xs, 12px);
   }
-
-  .secondary-chat:hover:not(:disabled) {
-    background: var(--office-blue-light);
+  .macro-badge {
+    background: #e0f2fe;
+    color: #0369a1;
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 500;
+  }
+  .macro-title {
+    font-size: 12px;
+    color: #1e293b;
+  }
+  .single-use-badge {
+    font-size: 11px;
+    color: #64748b;
+  }
+  .status-pill.status-warn {
+    font-size: 10px;
+    background: #fef3c7;
+    color: #b45309;
+    padding: 1px 6px;
+    border-radius: 4px;
+  }
+  .macro-code-box {
+    background: #1e1e1e;
+    color: #d4d4d4;
+    padding: 8px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    max-height: 180px;
+    overflow-y: auto;
+  }
+  .macro-code-box pre {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-all;
+    font-family: Consolas, monospace;
   }
 </style>

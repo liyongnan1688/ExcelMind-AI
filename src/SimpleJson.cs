@@ -308,22 +308,177 @@ namespace LeeExcel
                 string objJson = json.Substring(start, i - start);
                 var dict = ParseFlatObject(objJson);
                 T item = new T();
-                foreach (var p in typeof(T).GetProperties(BindingFlags.Public | BindingFlags.Instance))
+                PopulateObject(item, dict);
+                list.Add(item);
+            }
+            return list;
+        }
+
+        public static T Deserialize<T>(string json) where T : new()
+        {
+            if (string.IsNullOrEmpty(json)) return default(T);
+            object obj = Deserialize(json, typeof(T));
+            return obj != null ? (T)obj : default(T);
+        }
+
+        public static object Deserialize(string json, Type targetType)
+        {
+            if (string.IsNullOrEmpty(json) || targetType == null) return null;
+            json = json.Trim();
+            if (!json.StartsWith("{")) return null;
+
+            var dict = ParseFlatObject(json);
+            if (dict == null) return null;
+
+            object item = Activator.CreateInstance(targetType);
+            PopulateObject(item, dict);
+            return item;
+        }
+
+        public static void PopulateObject(object item, Dictionary<string, string> dict)
+        {
+            if (item == null || dict == null) return;
+            foreach (var p in item.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
+            {
+                if (dict.ContainsKey(p.Name) && p.CanWrite)
                 {
-                    if (dict.ContainsKey(p.Name) && p.CanWrite)
+                    string rawVal = dict[p.Name];
+                    if (rawVal == null) continue;
+
+                    if (p.PropertyType == typeof(string))
                     {
-                        if (p.PropertyType == typeof(string))
-                            p.SetValue(item, dict[p.Name], null);
-                        else if (p.PropertyType == typeof(bool))
-                            p.SetValue(item, dict[p.Name].ToLower() == "true", null);
-                        else if (p.PropertyType == typeof(int))
+                        p.SetValue(item, rawVal, null);
+                    }
+                    else if (p.PropertyType == typeof(bool))
+                    {
+                        p.SetValue(item, string.Equals(rawVal, "true", StringComparison.OrdinalIgnoreCase), null);
+                    }
+                    else if (p.PropertyType == typeof(int))
+                    {
+                        int iv;
+                        if (int.TryParse(rawVal, out iv)) p.SetValue(item, iv, null);
+                    }
+                    else if (p.PropertyType == typeof(long))
+                    {
+                        long lv;
+                        if (long.TryParse(rawVal, out lv)) p.SetValue(item, lv, null);
+                    }
+                    else if (p.PropertyType == typeof(double))
+                    {
+                        double dv;
+                        if (double.TryParse(rawVal, out dv)) p.SetValue(item, dv, null);
+                    }
+                    else if (p.PropertyType == typeof(List<string>))
+                    {
+                        p.SetValue(item, ParseStringList(rawVal), null);
+                    }
+                    else if (p.PropertyType == typeof(List<int>))
+                    {
+                        p.SetValue(item, ParseIntList(rawVal), null);
+                    }
+                    else if (p.PropertyType == typeof(Dictionary<string, string>))
+                    {
+                        p.SetValue(item, ParseFlatObject(rawVal), null);
+                    }
+                    else if (p.PropertyType.IsGenericType && p.PropertyType.GetGenericTypeDefinition() == typeof(List<>))
+                    {
+                        Type elemType = p.PropertyType.GetGenericArguments()[0];
+                        var mi = typeof(SimpleJson).GetMethod("DeserializeList", BindingFlags.Public | BindingFlags.Static);
+                        if (mi != null)
                         {
-                            int iv;
-                            if (int.TryParse(dict[p.Name], out iv)) p.SetValue(item, iv, null);
+                            var genericMi = mi.MakeGenericMethod(elemType);
+                            object listObj = genericMi.Invoke(null, new object[] { rawVal });
+                            p.SetValue(item, listObj, null);
+                        }
+                    }
+                    else if (p.PropertyType.IsClass && p.PropertyType != typeof(string))
+                    {
+                        if (rawVal.StartsWith("{"))
+                        {
+                            object nested = Deserialize(rawVal, p.PropertyType);
+                            p.SetValue(item, nested, null);
                         }
                     }
                 }
-                list.Add(item);
+            }
+        }
+
+        public static List<int> ParseIntList(string json)
+        {
+            var list = new List<int>();
+            if (string.IsNullOrEmpty(json)) return list;
+            json = json.Trim();
+            if (!json.StartsWith("[") || !json.EndsWith("]")) return list;
+            string inner = json.Substring(1, json.Length - 2);
+            var parts = inner.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var p in parts)
+            {
+                int val;
+                if (int.TryParse(p.Trim(), out val))
+                {
+                    list.Add(val);
+                }
+            }
+            return list;
+        }
+
+        public static List<string> ParseStringList(string json)
+        {
+            var list = new List<string>();
+            if (string.IsNullOrEmpty(json)) return list;
+            json = json.Trim();
+            if (!json.StartsWith("[") || !json.EndsWith("]")) return list;
+
+            int i = 1;
+            int len = json.Length - 1;
+            while (i < len)
+            {
+                while (i < len && (char.IsWhiteSpace(json[i]) || json[i] == ',')) i++;
+                if (i >= len) break;
+                if (json[i] == '"')
+                {
+                    i++;
+                    var sb = new StringBuilder();
+                    while (i < len)
+                    {
+                        if (json[i] == '\\' && i + 1 < len)
+                        {
+                            char next = json[i + 1];
+                            switch (next)
+                            {
+                                case '"': sb.Append('"'); break;
+                                case '\\': sb.Append('\\'); break;
+                                case '/': sb.Append('/'); break;
+                                case 'b': sb.Append('\b'); break;
+                                case 'f': sb.Append('\f'); break;
+                                case 'n': sb.Append('\n'); break;
+                                case 'r': sb.Append('\r'); break;
+                                case 't': sb.Append('\t'); break;
+                                default: sb.Append(next); break;
+                            }
+                            i += 2;
+                        }
+                        else if (json[i] == '"')
+                        {
+                            i++;
+                            break;
+                        }
+                        else
+                        {
+                            sb.Append(json[i]);
+                            i++;
+                        }
+                    }
+                    string val = sb.ToString().Trim();
+                    if (!string.IsNullOrEmpty(val) && !list.Contains(val))
+                    {
+                        list.Add(val);
+                    }
+                }
+                else
+                {
+                    i++;
+                }
             }
             return list;
         }

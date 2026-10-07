@@ -179,6 +179,22 @@
     }
   }
 
+  function handleReferenceMacro() {
+    // 来源保真：优先使用原始模型正文 originalCode，绝不引用执行摘要或宿主包装器
+    const clean = (originalCode || executedCode || streamCode || '').trim();
+    if (!clean) return;
+    const isComplete = !execution?.precheckStatus?.includes('fail') && !execution?.error && /End\s+(?:Sub|Function)/i.test(clean);
+    dispatch('referenceMacro', {
+      id: 'ref_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+      sourceMessageId: execution?.id || undefined,
+      promptSummary: prompt,
+      vbaCode: clean,
+      status: isComplete ? 'complete' : 'incomplete',
+      charCount: clean.length,
+      lineCount: clean.split('\n').length,
+    });
+  }
+
   let showRestoreConfirm = false;
   let restoreTargetId = '';
   let restoreErrorMsg = '';
@@ -358,6 +374,12 @@
               <Save size={12} />
               <span class="btn-label-text">存入脚本库</span>
             </button>
+            {#if (originalCode || executedCode || streamCode)}
+              <button class="btn btn-sm btn-ref-macro" on:click={handleReferenceMacro} title="引用此宏作为下一次发送的附加上下文 (单次有效)">
+                <Code size={12} color="#0068B7" />
+                <span class="btn-label-text">引用此宏</span>
+              </button>
+            {/if}
           {/if}
           <!-- 双模态查看全屏放大按钮 -->
           <button class="btn btn-sm btn-maximize" on:click={() => (isFullscreen = true)} title="全屏放大查看完整详情">

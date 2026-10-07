@@ -1,5 +1,6 @@
 import { loadLlmConfig, type LlmConfig } from './config';
 import type { WorkbookReadback, VbaExecutionData, SelectionContextData, SelectionSendOptions, SelectionSnapshot } from './bridge';
+import { checkMacroReferenceContext, formatMacroReferenceForPrompt, type MacroReferenceData } from './conversationManager';
 
 export type UserIntent = 'CHAT' | 'AUTOMATION' | 'AMBIGUOUS';
 
@@ -471,9 +472,25 @@ export interface ApiAuditInfo {
   thinkingBudgetStatus: string;
   historyCountSent: number;
   totalHistoryAvailable: number;
+  excludedHistoryCount: number;
   historyStrategy: string;
   isHistoryCompressedOrStripped: boolean;
+  macroContextWarning?: string;
   selectionAudit?: SelectionAuditSummary;
+  macroReferenceAudit?: {
+    referencedMacroId?: string;
+    procedureName?: string;
+    status?: 'complete' | 'incomplete';
+    charCount: number;
+    isAlreadyInHistory: boolean;
+  };
+  characterCountAudit?: {
+    totalCharsSent: number;
+    messagesCharBreakdown: { role: string; length: number }[];
+    macroReferenceChars: number;
+    selectionContextChars: number;
+    countingMetric: string;
+  };
   actualPayloadSummary: {
     model: string;
     temperatureSent: boolean;
@@ -593,7 +610,8 @@ export async function callLlmStream(
   intent: UserIntent,
   onChunk: (text: string) => void,
   history: ChatHistoryItem[] = [],
-  selectionSnapshot?: SelectionSnapshot
+  selectionSnapshot?: SelectionSnapshot,
+  macroReference?: MacroReferenceData
 ): Promise<LlmStreamResponse> {
   const config: LlmConfig = loadLlmConfig();
 
@@ -612,20 +630,46 @@ export async function callLlmStream(
       ? buildChatSystemPrompt()
       : buildAutomationSystemPrompt(targetWorkbookName, sheets, activeSheet, usedRange);
 
-  // 历史上下文策略
-  const MAX_HISTORY_TURNS = 6;
+  // 历史上下文策略：保留最近 6 条消息（注：仅在标准一问一答时近似对应 3 轮，实际按消息条数精确截断）
+  const MAX_HISTORY_MESSAGES = 6;
+  const totalHistoryAvailable = history.length;
   const actualHistory = history
-    .slice(-MAX_HISTORY_TURNS)
+    .slice(-MAX_HISTORY_MESSAGES)
     .filter((h) => h && h.content && h.content.trim().length > 0)
     .map((h) => ({
       role: h.role,
       content: h.content,
     }));
 
-  // 组装用户消息：若附加了选区，将只读选区数据段追加在用户文字下方
-  const userContent = selectionSnapshot
-    ? `${prompt}\n\n---\n${selectionSnapshot.formattedText}`
-    : prompt;
+  const excludedHistory = history.slice(0, Math.max(0, history.length - MAX_HISTORY_MESSAGES));
+  const excludedHistoryCount = excludedHistory.length;
+
+  // 检查是否引用了已超出发送窗口的宏（仅作提示，不改变请求模式，不修改用户输入或代码，不自动补造宏）
+  const macroContextCheck = checkMacroReferenceContext(prompt, actualHistory, excludedHistory);
+
+  // 组装用户消息：
+  // 1. 若显式引用了前序宏，将来源保真的只读代码段附加在用户文字下方
+  // 2. 若附加了选区快照，将选区数据段追加在下方
+  let userContent = prompt;
+  let macroRefChars = 0;
+  let macroRefAuditSummary: any = undefined;
+
+  if (macroReference && macroReference.vbaCode) {
+    const formattedRef = formatMacroReferenceForPrompt(macroReference, actualHistory);
+    userContent = `${userContent}\n\n---\n${formattedRef.formattedText}`;
+    macroRefChars = formattedRef.totalChars;
+    macroRefAuditSummary = {
+      referencedMacroId: macroReference.id,
+      procedureName: macroReference.procedureName,
+      status: macroReference.status,
+      charCount: macroReference.charCount,
+      isAlreadyInHistory: formattedRef.isAlreadyInHistory,
+    };
+  }
+
+  if (selectionSnapshot) {
+    userContent = `${userContent}\n\n---\n${selectionSnapshot.formattedText}`;
+  }
 
   const payload: Record<string, any> = {
     model: config.model,
@@ -636,6 +680,13 @@ export async function callLlmStream(
     ],
     stream: true,
   };
+
+  // 准确统计最终发出的各个消息 content 长度及字符总量（统计口径: JavaScript string.length UTF-16 code units，非 Token 估算）
+  const messagesCharBreakdown = payload.messages.map((m: any) => ({
+    role: m.role,
+    length: typeof m.content === 'string' ? m.content.length : 0,
+  }));
+  const totalCharsSent = messagesCharBreakdown.reduce((sum: number, item: any) => sum + item.length, 0);
 
   // 输出预算策略：用户明确配置 maxTokens 时才发送；未配置时不发送，交由模型服务端采用其默认限制
   let maxTokensStatus = '未发送（采用服务端模型默认限制）';
@@ -678,10 +729,20 @@ export async function callLlmStream(
     maxTokensStatus,
     thinkingBudgetStatus,
     historyCountSent: actualHistory.length,
-    totalHistoryAvailable: history.length,
-    historyStrategy: `保留最近 ${MAX_HISTORY_TURNS} 条完整对话原文（含 VBA 代码块，无暗改、无截断剥离）`,
+    totalHistoryAvailable,
+    excludedHistoryCount,
+    historyStrategy: `保留最近 ${MAX_HISTORY_MESSAGES} 条消息（时间倒序截取前 6 条，含完整原始模型代码与文字，按时序排列，无宿主包装器污染、无静默压缩）`,
     isHistoryCompressedOrStripped: false,
+    macroContextWarning: macroContextCheck.warning,
     selectionAudit: selectionSnapshot ? selectionSnapshot.summary : undefined,
+    macroReferenceAudit: macroRefAuditSummary,
+    characterCountAudit: {
+      totalCharsSent,
+      messagesCharBreakdown,
+      macroReferenceChars: macroRefChars,
+      selectionContextChars: selectionSnapshot ? selectionSnapshot.formattedText.length : 0,
+      countingMetric: 'JavaScript string.length (UTF-16 code units, 非 Token 数)',
+    },
     actualPayloadSummary: {
       model: config.model,
       temperatureSent: temperatureVal !== undefined,

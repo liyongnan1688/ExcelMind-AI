@@ -1,3 +1,3 @@
-<DnaLibrary Name="LeeExcel AI Assistant" RuntimeVersion="v4.0">
+<DnaLibrary Name="ExcelMind AI" RuntimeVersion="v4.0">
   <ExternalLibrary Path="LeeExcel.dll" ExplicitExports="false" LoadFromBytes="true" Pack="true" />
 </DnaLibrary>

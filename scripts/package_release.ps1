@@ -2,7 +2,7 @@
 # 职责：编译前端与后端、组织双架构依赖、生成安装卸载套件、打包为独立 ZIP
 
 param(
-    [string]$Version = "v1.0"
+    [string]$Version = "v1.2.0-rc1"
 )
 
 $ErrorActionPreference = "Stop"
@@ -79,6 +79,10 @@ $refs = @(
     "System.Core.dll",
     "System.Windows.Forms.dll",
     "System.Drawing.dll",
+    "System.Security.dll",
+    "System.Net.Http.dll",
+    "System.IO.Compression.dll",
+    "System.IO.Compression.FileSystem.dll",
     "Microsoft.CSharp.dll",
     (Resolve-Path (Join-Path $projectRoot "packages\ExcelDna.Integration.1.9.0\lib\net462\ExcelDna.Integration.dll")).Path,
     (Resolve-Path (Join-Path $projectRoot "packages\Microsoft.Web.WebView2.1.0.4191.47\lib\net462\Microsoft.Web.WebView2.Core.dll")).Path,
@@ -138,42 +142,66 @@ Copy-Item -LiteralPath (Join-Path $projectRoot "scripts\core\install_addin.ps1")
 Copy-Item -LiteralPath (Join-Path $projectRoot "scripts\core\uninstall_addin.ps1") -Destination (Join-Path $coreTarget "uninstall_addin.ps1") -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "scripts\core\launch_portable.ps1") -Destination (Join-Path $coreTarget "launch_portable.ps1") -Force
 
-# 使用说明书
-Copy-Item -LiteralPath (Join-Path $projectRoot "scripts\core\README_template.txt") -Destination (Join-Path $packRoot "README_使用说明.txt") -Force
+# 文档与许可说明
+Copy-Item -LiteralPath (Join-Path $projectRoot "INSTALL.md") -Destination (Join-Path $packRoot "INSTALL.md") -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot "docs\USER_GUIDE.md") -Destination (Join-Path $packRoot "USER_GUIDE.md") -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot "RELEASE_NOTES.md") -Destination (Join-Path $packRoot "RELEASE_NOTES.md") -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot "LICENSE.md") -Destination (Join-Path $packRoot "LICENSE.md") -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot "README.md") -Destination (Join-Path $packRoot "README.md") -Force
 
-Write-Host "      发布目录树组装完成: $packRoot" -ForegroundColor Green
+# 5. 生成发布包 SHA-256 校验清单 (checksums_sha256.txt)
+Write-Host "`n[4/6] 正在计算并生成全文件 SHA-256 校验清单..." -ForegroundColor Yellow
+$checksumFile = Join-Path $packRoot "checksums_sha256.txt"
+$checksumLines = @(
+    "# ExcelMind AI $Version SHA-256 Checksums",
+    "# 构建状态: 未签名发布候选构建 (Unsigned Release Candidate)",
+    "# 构建时间: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",
+    "# 包含范围: R0 至 R6 已实现功能 (不含 R7 远期评估)",
+    "#"
+)
 
-# 5. 压缩为发布 ZIP 包
-$zipName = "ExcelMind_AI_Release_${Version}.zip"
+Get-ChildItem -Path $packRoot -Recurse -File | ForEach-Object {
+    if ($_.FullName -ne $checksumFile) {
+        $hash = (Get-FileHash -Path $_.FullName -Algorithm SHA256).Hash.ToLower()
+        $relPath = $_.FullName.Substring($packRoot.Length).TrimStart('\').Replace('\', '/')
+        $checksumLines += "$hash  $relPath"
+    }
+}
+$checksumLines | Set-Content -Path $checksumFile -Encoding UTF8
+Write-Host "      校验清单已生成: $checksumFile" -ForegroundColor Green
+
+# 6. 生成未压缩的发布候选目录
+$rcTargetDir = Join-Path $releaseDir "ExcelMindAI-$Version"
+if (Test-Path $rcTargetDir) {
+    Remove-Item -Path $rcTargetDir -Recurse -Force
+}
+Copy-Item -Path $packRoot -Destination $rcTargetDir -Recurse -Force
+Write-Host "      发布候选目录已同步: $rcTargetDir" -ForegroundColor Green
+
+# 7. 压缩为发布 ZIP 归档包
+$zipName = "ExcelMindAI-${Version}.zip"
 $zipPath = Join-Path $releaseDir $zipName
 
-Write-Host "`n[4/5] 正在打包压缩发布文件包: $zipName ..." -ForegroundColor Yellow
+Write-Host "`n[5/6] 正在打包压缩发布文件包: $zipName ..." -ForegroundColor Yellow
 if (Test-Path $zipPath) {
     Remove-Item -Path $zipPath -Force
 }
 
-Compress-Archive -Path $packRoot -DestinationPath $zipPath -CompressionLevel Optimal
+Compress-Archive -Path "$packRoot\*" -DestinationPath $zipPath -CompressionLevel Optimal
 
-# 6. 清理临时暂存区
+# 8. 清理临时暂存区
 Remove-Item -Path $tmpStageDir -Recurse -Force
 
-# 7. 校验产物与输出报告
+# 9. 校验产物与输出报告
 $zipItem = Get-Item $zipPath
 $zipSizeMB = [math]::Round($zipItem.Length / 1MB, 2)
+$zipHash = (Get-FileHash -Path $zipPath -Algorithm SHA256).Hash.ToLower()
 
-Write-Host "`n[5/5] 打包成功！" -ForegroundColor Green
+Write-Host "`n[6/6] 发布候选包组装成功！" -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Green
-Write-Host "发布包路径: $zipPath" -ForegroundColor Cyan
-Write-Host "文件大小  : $zipSizeMB MB" -ForegroundColor Cyan
+Write-Host "发布候选目录: $rcTargetDir" -ForegroundColor Cyan
+Write-Host "发布归档路径: $zipPath" -ForegroundColor Cyan
+Write-Host "归档大小    : $zipSizeMB MB" -ForegroundColor Cyan
+Write-Host "归档 SHA-256: $zipHash" -ForegroundColor Cyan
+Write-Host "构建声明    : 未签名发布候选构建 (Unsigned Release Candidate)" -ForegroundColor Yellow
 Write-Host "==========================================================" -ForegroundColor Green
-Write-Host "包含内容清单："
-Write-Host "  - LeeExcel.xll                   (32位 Excel加载项)"
-Write-Host "  - LeeExcel64.xll                 (64位 Excel加载项)"
-Write-Host "  - LeeExcel.dll                   (C# 核心功能库)"
-Write-Host "  - runtimes/win-x64 & win-x86     (双架构 WebView2 原生加载器)"
-Write-Host "  - dist/                          (Svelte 5 前端完整资产)"
-Write-Host "  - 安装插件(开启常驻).bat          (全自动检测与注册工具)"
-Write-Host "  - 卸载插件.bat                   (一键干净注销工具)"
-Write-Host "  - 免安装启动.bat                 (绿色即用启动器)"
-Write-Host "  - README_使用说明.txt            (用户使用手册)"
-Write-Host ""

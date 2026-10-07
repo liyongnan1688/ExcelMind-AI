@@ -156,5 +156,290 @@
   - 若直接将负值传给 `Graphics.CopyFromScreen`，GDI+ 会抛出“句柄无效/参数无效”异常。
   - 解决方案：必须通过 `Math.Max(0, rect.Left)` 裁剪起始坐标，并使用主屏 `SystemInformation.VirtualScreen` 安全边界进行尺寸截取。
 
+---
 
+## 8. 批量宏任务受控执行、异步响应与防漂移前端机制 (2026-10-02 R4b 实施)
+- **Windows 路径反斜杠转义与控制字符冲突修复**：
+  - 过去在 JSON 反序列化或路径列表提取时，若直接对字符串执行通用转义反解，形如 `C:\Users\...\batch_test` 的 Windows 路径中的 `\b` 会被当作 ASCII 退格符（`\u0008`），`\U` 或反斜杠可能丢失，导致文件路径破坏报错。
+  - 正确做法：在 `NativeBridge.cs` 的 `ParseStringList` 中，实现 Windows 路径安全状态机：仅对显式 `\"` 和 `\\` 还原，遇到非特殊转义序列一律保留反斜杠与后续字符，确保 Windows 盘符与路径格式 100% 保真。
+- **批量专属 Excel COM 实例 STA 受控线程管理**：
+  - COM 对象的跨线程调用极易导致 RPC 挂起、死锁或内存泄漏。
+  - 解决方案：为批量任务创建独立专用线程，显式声明 `Thread.SetApartmentState(ApartmentState.STA)`；批量 Excel 实例（`Application`）从创建、打开工作簿、注入运行宏、另存至关闭释放，全生命周期封闭在该 STA 线程内部；执行完毕或异常退出时，在 `finally` 块中严格释放 COM 对象并调用 GC 收集；完全不触碰前台用户的主 Excel COM 实例。
+- **非阻塞异步响应与无 COM 状态快照**：
+  - `start_batch_job` 在校验成功后启动 STA 线程，立即返回初始任务 ID 与 `running` 状态快照，前端 HTTP/Bridge 请求耗时在毫秒级，绝不阻塞等待整个队列运行完毕。
+  - `get_batch_job_status` 仅读取 C# 内存中受 `lock` 保护的 `BatchJobSummary` 浅/深拷贝快照，绝不在此阶段跨 COM 读取 Excel 状态，确保高频轮询零卡顿、零死锁风险。
+  - `cancel_batch_job` 即时将取消标志位置为 `true`，正在执行的单个宏在任务边界检测到标志后立即终止后续项执行，并将剩余未执行文件标记为 `cancelled`。
+- **前端防并发单发轮询与重载纯状态恢复**：
+  - 前端轮询必须采用带 `isQueryInFlight` 互斥锁的单发机制（Promise 链），仅在前一次请求成功/失败返回后才安排下一次，避免定时器请求重叠或旧响应晚到覆盖新状态。
+  - 达到终端态（`completed` / `stopped_on_error` / `cancelled`）或组件销毁、面板关闭时立即注销定时器；关闭面板明确告知“不会中断后台任务”。
+---
+
+## 9. 多文件列名对齐汇总关键工程发现与 COM 保护规范 (2026-10-02 R4c 实施)
+- **中文版 Excel 默认表名机制与测试工件隔离**：
+  - `testApp.Workbooks.Add()` 创建的新工作簿第一张工作表默认名称为 `"工作表1"`（英文环境为 `"Sheet1"`）。若测试请求显式传入 `"Sheet1"` 会因找不到工作表抛出 `sheet_not_found`。
+  - 正确规范：在测试辅助脚本创建临时测试工作簿时，必须显式赋值 `ws.Name = "Sheet1"`；生产代码中若未指定表名，优先读取 `Worksheets[1]` 并提取其实际名称，绝不硬编码表名。
+- **Excel COM `Workbooks.Add` 参数陷阱与 `0x80010114` 根因**：
+  - 在 C# dynamic 中调用 `app.Workbooks.Add(1)` 会导致 Excel 尝试寻找名为 `"1"` 的模板并抛出 `所要求的对象不存在 (HRESULT: 0x80010114)`。必须使用无参调用 `app.Workbooks.Add()`。
+  - 在保存并关闭新工作簿时，`wbOut.SaveAs(path)` 建议使用单参数（依赖文件扩展名自动识别 .xlsx），若显式传入 `51` 会因 dynamic COM 绑定与重载可选参数冲突偶发抛出 RPC 异常；且 `wbOut.Close(false)` 与 `Marshal.ReleaseComObject` 必须在独立 try 块中保护，防止保存后因 COM 瞬态异常误报保存失败。
+- **二维数组 SAFEARRAY 0-based 矩阵与 UsedRange 边界对齐**：
+  - Excel COM 将 C# 二维数组赋值给 Range 时默认从 0 下标读取。若分配 `[rows+1, cols+1]` 且从下标 1 写入，会导致第一行全为空，且破坏 `UsedRange` 边界。
+  - 正确规范：统一采用 0-based 连续矩阵 `[totalMatrixRows, totalMatrixCols]`，第 0 行写入表头，第 1 ~ N 行写入数据，行列尺寸精确等于 `destRange`（从 `Cells[1, 1]` 到 `Cells[totalRows, totalCols]`），赋值后 `UsedRange` 边界严格自洽。
+- **表头行与数据行严格隔离与恒等式自洽**：
+  - 多文件汇总中，`headerRow` 行专属于提取列名，数据行必须严格从 `headerRow + 1` 开始计算，绝不将表头作为数据行纳入，确保严格行数恒等式：`finalOutputRows == Σ includedDataRows + 1` 绝对恒等守恒。
+- **TC-R4c-01 与 TC-R4c-06 输出列数统计口径与元数据开关对应关系**：
+  - 核心归因：纯粹由入参中的 `includeMetadataCols`（是否注入来源元数据列）开关决定，数据行数及业务数据完全一致；
+  - `TC-R4c-01` (`includeMetadataCols: false`)：仅导出 4 个对齐的业务列 `[日期, 姓名, 金额, 部门]`，不包含来源列，因此 `totalMatrixCols = 4`，总规模为 4 行 × 4 列；
+  - `TC-R4c-06` (`includeMetadataCols: true`)：导出了 2 个来源元数据列 `[来源文件, 来源工作表]` + 4 个业务列 `[日期, 姓名, 金额, 部门]`，因此 `totalMatrixCols = 6`，总规模为 4 行 × 6 列；
+  - 两者行数恒等守恒（3 行数据行 + 1 行表头 = 4 行），系统在元数据列开启与关闭两种模式下均满足 100% 确定性，无需修改产品代码。
+
+- **R5a 双步骤流水线轻量串联设计与契约约束事实**：
+  - **白名单调度防线**：首切片严格限制为 2 步骤线性执行，不支持 DAG、分支、循环或通用低代码画布。目前白名单支持组合为 `dedup -> reconcile`、`saved_macro -> saved_macro`、`dedup -> saved_macro`；
+  - **跨工作簿多文件汇总隔离**：多文件汇总（`consolidation`）输出至独立外部新工作簿，其多文件输入与跨工作簿生命周期无法映射至单目标工作簿的任务级前置快照，因此本切片明确阻断且不作单工作簿回滚虚假承诺；
+  - **目标工作簿身份与快照绑定**：执行前通过 `FullName`/`Name` 锁定唯一目标工作簿，严禁隐式回退当前活动工作簿（`ActiveWorkbook`）；前置任务级快照强制绑定该目标工作簿，快照失败零步骤执行；
+  - **故障恢复范围边界**：失败后停止后续步骤，Step 1 失败 Step 2 标记为 `skipped`；Step 2 失败如实保留 Step 1 产物并输出包含快照 ID 的恢复通知，不作整本无损自动回滚的笼统承诺；
+  - **版本化与宏哈希防漂移契约**：定义修改自增 `definitionVersion + 1`，执行记录独立存储于 `Runs/` 目录；运行时固化版本与宏 SHA-256，宏代码修改后阻断执行并要求用户重新确认；
+  - **结构化输出引用传递**：Step 1 通过 `StepOutputReference` 精确传出工作表名与已用区域（通过 COM `UsedRange.Address` 获取真实区域如 `A1:C5`），第二步优先消费确权输出，杜绝猜测新建工作表或使用 `ActiveSheet`。
+
+---
+
+## 10. 自选区域汇总与图表生成双轨架构设计与关键工程发现 (2026-10-03 R5b 实施)
+- **双轨架构定位与主链纯正性保护**：
+  - **模型原生 VBA 主链（Primary Path）**：始终作为图表生成的核心首选。用户自选区域或提出自然语言需求时，插件 Prompt 保持完全中立开放，绝不注入任何“禁止使用某种图表类型”、“只能使用某种固定模板”等负向惩罚词。大模型生成的 VBA 源码通过 `extractVbaCode` 提取后保持 100% 逐字节保真（SHA-256 原文哈希恒定），无任何引号或代码改写，在锁定目标工作簿中调用标准模块运行；模型失败如实报错，绝不将失败静默偷换为预设图表并伪冒模型完成。
+  - **快捷图表工具（Optional Path）**：作为用户主动选用的独立确定性本地 COM 工具（`DataToolModal.svelte` Tab 4）。仅在用户明确点击时调用，绝不作为模型失败的兜底替身。首切片聚焦于 Excel 原生支持的三种高频图表：柱状图（`xlColumnClustered` = 51）、折线图（`xlLineMarkers` = 65）、饼图（`xlPie` = 5），纯基于 Excel COM 原生 API 构建，零第三方图表库依赖。
+- **确定性数据契约与饼图约束**：
+  - 入参明确声明类别列索引（`categoryColumn`）、数值系列列索引集合（`valueSeriesColumns`）、表头行标志（`hasHeader`）、区域边界、图表标题、放置工作表与单元格；
+  - 严禁后台猜测主键、分类或聚合方式；
+  - **饼图单系列约束**：饼图在几何表达上只能反映单一维度的占比分布。入参若传入多数值系列（如 `seriesColIndices.Count > 1`），执行前直接阻断报错 `pie_chart_requires_single_series`，避免在 Excel 中生成重叠失真图表。
+- **数据质量扫描策略**：
+  - 在生成图表前对数值区域进行单元格级数据质量预检。若发现文本、空值或 `#N/A` 等非纯数值：
+    - `reject_on_invalid`：立即阻断并精确定位到脏数据单元格坐标（如 `$B$3`），提示具体错误值；
+    - `coerce_zero`：安全将非数值转换为 0，确保图表绘制不因脏数据抛出 COM 内部崩溃。
+- **防旧结果叠加与对象所有权签名（Anti-Stacking & Signature）**：
+  - **命名规范**：由 ExcelMind AI 托管的图表 Shape 统一分配前缀 `__EM_CHART_<chartId>`；
+  - **元数据签名**：在 Shape 的 `AlternativeText`（可选文字）属性中写入结构化 JSON 元数据（包含 `{"generator":"ExcelMindAI","chartId":"...","managed":true,"createdAt":"..."}`）；
+  - **双向安全防误删**：
+    - 当用户指定 `mode: "replace_existing"` 并传入 `targetChartId` 时，先精确寻址目标 Shape；
+    - 检查该 Shape 的 `AlternativeText` 是否包含 `\"generator\":\"ExcelMindAI\"`；若缺失签名（说明该图表是用户此前手工创建或外部生成的图表），直接抛出 `cannot_replace_user_chart: Target chart is not managed by ExcelMindAI` 阻断执行；
+    - `list_managed_charts` 仅枚举包含有效签名的 Shape，彻底防止插件覆盖或误删用户自己的精美手工报表。
+- **目标工作簿锁定与整本物理快照**：
+  - 严格根据用户绑定的目标工作簿 `FullName`/`Name` 查找锁定；若找不到目标工作簿直接阻断，绝不使用 `ActiveWorkbook` 隐式兜底；
+  - 执行任何绘图操作前，强制调用 `SnapshotManager.CreateSnapshot(targetWb)` 创建整本物理副本；若快照创建失败，图表生成立即中止，零 COM 写入。
+- **COM 真实读回核验（ChartReadbackDto）**：
+  - 图表生成后，不单纯依赖“无抛出异常”，而是通过只读 COM 深入 `Chart` 对象层级提取真实属性：
+    - `chartType`（字符串表示）与 `actualChartTypeNum`（Excel 原生数值枚举如 51, 65, 5）；
+    - `seriesCount`（系列数量）、`seriesNames`（提取 `series.Name`）、`categoryAddress`（`xvalues.Address`）、`valuesAddresses`（各系列的 `values.Address`）；
+    - 验证图表在 Excel 画布中真实挂载并成功绑定指定数据源，生成截图存证。
+- **与 R5a 流水线无缝兼容**：
+  - `WorkflowManager` 引入 `ChartStepParams`，支持 `toolType: "chart"` 作为流水线第二步；
+  - 自动消费第一步生成的 `StepOutputReference`（如 `dedup -> chart` 消费去重导出的 Sheet，或 `reconcile -> chart` 消费对账结果 Sheet），无需用户重复选择输入区域。
+
+---
+
+## 11. R5 既定任务收尾事实审计结论 (2026-10-03 审计核实)
+- **审计点 1：`coerce_zero` 源单元格零改动证明**：
+  - **机制事实**：`coerce_zero` 是用户主动勾选的脏数据容错策略（默认保持严格的 `reject_on_invalid` 拦截）。当选择 `coerce_zero` 时，非数值到 0 的转换**仅发生在内存中的图表系列绑定与绘图数据副本中**，Excel 源工作表中的源单元格数据**100% 保持未修改**。
+  - **断言证据**：在 `DesktopAcceptanceRunner.cs` 的 `TC-R5b-04` 中已加入前置与后置双向 COM 读回断言，实测原单元格 B3 在图表绘制前为 `"INVALID_TEXT"`，在图表绘制后依然为 `"INVALID_TEXT"`，源工作表未发生任何单元格级覆写或静默篡改。
+- **审计点 2：测试统计与分类映射口径说明**：
+  - **机制事实**：对比 R5a（71 项）与 R5b（79 项）的 `test_results.json`，所有 71 项存量用例的唯一 ID 与测试分类映射完全一致，不存在为了凑统计而人为调整存量测试类别的情况。
+  - **差异根因**：新增的 8 项用例（`TC-R5b-01` ~ `TC-R5b-08`）中，实际包含 4 项真实桌面 UI 验收（`TC-R5b-02`、`TC-R5b-08` 等）与 4 项处理层/集成测试。此前文字叙述中出现的“2项UI、6项集成”系文案撰写笔误，机器可读的分类字典与断言逻辑从未变更。
+- **准确表述约束**：
+  - 继续严格使用“无图表专项算法限制、正文保真”的客观描述，绝不向用户夸大宣称整个模型通道零约束；
+  - 真实商业大模型 API 端到端调用依然保持未验证。
+
+---
+
+## 12. TASK-R6a-01 只读外部数据接入 (CSV/JSON/HTTP GET) 关键工程发现与架构防线 (2026-10-03 核验定稿)
+- **路线图与最小切片边界严格锁定**：
+  - 严格遵循 `docs/product-roadmap.md` §3 及 §4.7 规范；
+  - 仅支持用户显式选择的本地 CSV、本地 JSON 文件，以及显式配置受控白名单的 HTTP GET 请求；
+  - 坚决不做自动扫描、不做后台同步、不做分页循环拉取、不做自动重试、不执行外部代码、不触碰真实商业接口。
+- **RFC 4180 CSV 解析与前导零/长编号保真**：
+  - 编码支持：显式支持 UTF-8、GBK、GB2312、Shift-JIS、ASCII、Unicode；
+  - 语法支持：支持标准逗号、制表符、分号、竖线等显式指定分隔符；完美支持带转义双引号（`""`）及单元格内换行符的多行字段；
+  - 保真策略：针对 19 位纯数字工单号（如 `1234567890123456789`）与带前导零编码（如 `00123`），写入 Excel 时前置单引号 `'`，彻底杜绝 Excel 自动将其转换为浮点数引发 IEEE 754 精度丢失或静默剔除前导零。
+- **JSON 词法级数字保真与 RFC 8259 严格语法校验**：
+  - **摒弃反序列化前全局正则改写**：废除“反序列化前用正则包裹长整数”方案，改在词法/解析阶段直接保留数字原始 token；
+  - **原始数值 Token 以文本保真（不等同于 Excel 数值运算精度保证）**：
+    - 长整数、高精度小数及科学计数法的保真，明确指**原始数值 Token 以文本形态（前置单引号）原样写入表格**，保证字符无损与展现一致，**不等同于 Excel 后续参与公式或数值计算时的精度保证**（Excel 原生数值计算受限于 IEEE 754 15 位浮点上限）；
+    - 绝不改动已在字符串中的长数字（如 `"str_num": "9876543210987654321"`）；
+    - 绝不改动属性名（如 `"1234567890123456789": "val"`）；
+    - 绝不改动转义引号及特殊字符（如 `"escaped": "abc\"def,ghi"`）；
+    - 完整核对并保真负整数 token（`-1234567890123456789`）、高精度小数 token（`1234567890123456.789`）与科学计数法完整 token（`1.23456789e18`），COM 真实读回单元格类型为文本且完整字符串一致；
+  - **RFC 8259 语法错误严格阻断（杜绝猜测转换）**：
+    - 前导零数字（如 `0123`）：严格阻断报错，绝不隐式猜测当作八进制或转为合法数字；
+    - 前导加号（如 `+123`）：RFC 8259 明确禁止，严格阻断报错；
+    - 格式错误（如 `123a`、`.5`、`12.`）：严格报语法错误阻断，绝不隐式改写为合法数据。
+- **撤回嵌套结构静默占位与空值规则说明**：
+  - 彻底撤回 `[Object]` / `[Array]` 静默占位伪称支持；
+  - 包含嵌套对象或数组的列，在解析时精准提取为 `unsupportedColumns`，列类型标为 `unsupported_nested`；
+  - 用户若勾选包含不支持列，前端与宿主均严格阻断导入并明确提示原因，要求取消勾选后方可导入标量字段；
+  - **空值、缺失值与空字符串分别处理说明**：
+    - JSON `null`：写入为空白单元格（未赋值），保持网格整洁；
+    - 缺失字段：写入为空白单元格，保持各行数据列结构严格对齐；
+    - 空字符串 `""`：显式写入为空文本字符串（`""`）；
+    - 声明：三者在写入 Excel 单元格后客观上均表现为空白或空文本，不等同于在 Excel 工作表中仍完全可逆区分。
+- **限定范围的 HTTP GET 安全防护与凭据剥离**：
+  - **绝不宣称任意场景全面安全**：安全结论严格限定在实际已验证的受控边界内（协议、主机、端口、路径分段匹配），不扩大为任意域名、DNS解析地址或复杂重定向场景全面安全；
+  - **白名单路径分段严格边界比对**：
+    - 白名单规则为 `http://127.0.0.1:18899/api/data` 时，放行自身及合法子路径 `/api/data/records`；
+    - 严格阻断相似前缀冒领攻击（如 `/api/data_evil`、`/api/data-leak`）；
+    - 严格阻断未授权端口（如 `:9999`）及子域碰撞（如 `127.0.0.1.attacker.com`）；
+  - **跨来源重定向自动剥离敏感凭据**：
+    - 默认禁止自动重定向；显式启用重定向时，逐跳核验目标白名单；
+    - 只要 Scheme、Host 或 Port 任一发生变化，强制在 HttpClient 中剥离 `Authorization` 与 `Cookie` 请求头，目标在白名单也不继承来源凭据；
+  - **敏感 Query 参数与错误信息脱敏**：
+    - URL 查询参数中的敏感项（`token`、`key`、`secret`、`password`、`auth` 等）在只读预览、审计日志及异常消息中统一脱敏为 `***`（如 `token=***`）；
+    - 异常处理中解包 `AggregateException` 并携带脱敏源地址，杜绝日志或前端报错泄漏凭据。
+- **“先预览再导入”同一份数据保证与容量上限**：
+  - **预览快照绑定 (`PreviewCache`)**：用户只读预览成功后，宿主在内存中暂存解析结果，分配唯一 `previewId` 并计算数据源 SHA-256 `dataFingerprint`（缓存有效期 30 分钟）；
+  - **导入强绑定与防篡改**：前端发起导入时强制传入 `previewId` 与 `expectedFingerprint`，宿主优先消费已确认的快照数据；若重新拉取且数据源指纹不一致，立即中止导入；
+  - **透明容量限制与超限阻断**：明确展示文件上限 50MB、HTTP 上限 10MB、行数上限 100,000 行、列数上限 500 列；超限直接阻断，绝不静默截断；
+  - **强制前置快照承诺**：写入前在 `%APPDATA%\ExcelMindAI\Backups\` 创建整本物理副本；快照创建失败承诺绝对零写入并阻断；执行异常输出包含快照 ID 的精准恢复指引。
+- **存量功能零影响与零外部调用**：
+  - 未改动 CSV 引擎、快捷去重、两表对账、多文件汇总、快捷图表或大模型 Prompt 链路；
+  - 零商业 API 调用，网络验证完全基于本地受控测试服务器（`127.0.0.1:18899`）。
+
+---
+
+## 13. TASK-R6b-01 无凭据宏包导入/导出关键工程发现与架构防线 (2026-10-03 核验定稿)
+- **路线图与最小切片边界严格锁定**：
+  - 严格遵循 `docs/product-roadmap.md` §3 及 §4.7 规范；
+  - 采用标准无加密 ZIP 容器，使用 `.exmpack` 扩展名；
+  - 纯离线纯本地架构：零云端依赖、零外部网络请求、零自动执行、零外部脚本/可执行程序依赖。
+- **源码原始字节逐字节保真与 SHA-256 完整性核对**：
+  - 打包写入直接复制磁盘文件的原始二进制字节流，绝不经过字符串重新编码、绝不重置或修改换行符（CRLF/LF）、绝不修改双引号或单引号；
+  - manifest.json 中记录源码文件的真实字节大小（`sourceByteLength`）与 SHA-256 哈希；
+  - 声明：清单 SHA-256 哈希严格用于**传输完整性核验与防篡改排查**，绝不宣称为宏代码的安全证明、信任签名或防恶意代码凭证。
+- **元数据严格字段白名单（“无凭据”核心防线）**：
+  - 导出的 `manifest.json` 严格限制在展示与运行契约所必需的白名单字段（`schemaVersion` 为 "1.0"、`packageId`、`name`、`version`、`description`、`exportedAt`、`exportedBy`，每个 entry 仅包含 `macroId`、`packageRelativePath`、`displayName`、`category`、`description`、`entryPoint`、`parameterDefs`、`sourceByteLength`、`sha256`）；
+  - 绝对阻断并物理排除：大模型 API Key 与端点配置、Windows DPAPI 凭据密文、聊天会话历史、运行历史与耗时记录（`runHistory`）、流水线与批处理记录、目标工作簿物理路径、业务表格数据、快照标识与备份文件、系统及机器环境信息；
+  - 明确“零凭据泄露”限定为产品凭据与禁止数据不被主动打包，用户源码仍可能包含业务敏感内容，扫描未检出不等于绝对安全。
+- **疑似敏感内容静态检出与用户确认拦截机制**：
+  - 扫描范围：在导出与预览两个关键卡点，针对宏源码正文、宏描述、参数默认值及参数描述进行静态正则扫描（覆盖 API Key、GitHub Token、硬编码密码、私钥 Marker、带凭据 URL 等）；
+  - 检出行为：发现疑似敏感内容时，立即暂停导出/导入流程，向前端返回结构化警告清单（包含字段、类型、脱敏代码片段），强制提示用户显式审核并确认；
+  - 源码正文 100% 保真原则：若用户核对后确认继续导出/导入，系统**绝对不对宏源码进行任何自动打码、正则替换、星号遮蔽或静默删改**，必须保证用户原始代码 100% 逐字节真实；
+  - 免责与局限性声明：静态正则扫描仅作为辅助提醒工具，未检出疑似凭据绝对不代表宏中 100% 无敏感数据或密钥。
+- **隔离临时解包目录与深度容量防御**：
+  - 解包必须在隔离的临时目录（`%LOCALAPPDATA%\LeeExcel\Temp\_pkg_temp_<guid>\`）中进行，规范命名为“隔离临时解包目录”，严禁误称为“解密目录”；
+  - 路径安全性深度防御：严格校验 ZIP 条目路径规范化后的物理 Canonical Path，严密阻断 `..` 相对路径穿越、绝对路径、Windows 盘符（如 `C:\`）、UNC 路径（如 `\\server\share`）以及非 `.bas`/非 `manifest.json` 的意外文件（如 `.exe`、`.bat`、`.dll`）；
+  - 压缩炸弹与容量保护：预检包内条目总数（≤ 50 个）、单文件解压后大小（≤ 5MB，manifest.json ≤ 1MB）、解压后总容量（≤ 20MB）、压缩比阈值（≤ 20:1），超限直接阻断；
+  - 加密包阻断：检测到带密码保护的加密 ZIP 时透明阻断，要求使用标准非加密包。
+- **同名宏并存保护与本地稳定 ID 重建**：
+  - 导入同名宏时，绝不覆盖已有存量宏及其历史记录；自动避让重命名为 `${displayName} (导入)`（重复递增为 `(导入 2)` 等）；
+  - 为导入的宏重新分配全新的本地稳定 GUID，避免与包源机或本地既有 ID 碰撞；
+  - 严格通过 R2c `VbaSignatureParser.CompareWithMetadata` 核验参数元数据与源码 Sub/Function 签名一致性，数量或名称冲突时安全阻断。
+- **失败清理与补偿保护、零宏执行承诺**：
+  - 导入过程发生任何 IO 错误、格式校验失败或用户取消时，自动清理隔离临时目录及已写入的局部新文件，存量宏库 100% 保持零改动与一致性（不承诺进程崩溃或断电下的完整数据库事务原子性）；
+  - 导入完成后仅输出结构化摘要卡片，**绝对不调用 VBA 运行引擎执行宏、绝对不自动将导入宏添加至流水线、批量任务队列或功能区常用宏收藏菜单**。
+
+---
+
+## 14. TASK-R6c-01 无损安装升级与脱敏诊断导出关键工程发现与架构防线 (2026-10-03 核验定稿)
+- **路线图与最小切片边界严格锁定**：
+  - 严格遵循 `docs/product-roadmap.md` §3 及 §4.9 规范；
+  - 依托现有 `scripts/core/install_addin.ps1` 增强安装升级能力，不另建庞大外部安装体系；
+  - 纯离线纯本地架构：诊断包纯本地生成，零云端依赖、零外部网络上传、零自动执行、零安装包内置脚本外挂。
+- **三态彻底物理分离与用户资产零触碰原则**：
+  - **应用文件层**：`bin/` 或独立自定义安装目录（如 `C:\Program Files\ExcelMindAI\`），包含 `LeeExcel.dll`、`LeeExcel64.xll`、`dist/` 前端构建产物；
+  - **加载项注册层**：`HKCU:\Software\Microsoft\Office\$ver\Excel\Options` 下的 `OPENx` 键值注册自启动；
+  - **用户数据层**：`%APPDATA%\ExcelMindAI\`，独立承载 `Scripts/`（宏库源码与元数据）、`Workflows/`（流水线定义）、`Runs/`（批处理与运行历史）、`Backups/`（整本物理快照）、DPAPI 加密凭据；
+  - **保护铁律**：安装、重新安装与版本升级仅操作应用文件与加载项自启动项，**100% 绝不覆盖、重置、清理或删除用户数据目录中的既有文件**；旧数据保持原样。
+- **暂存预检、备份补偿与非原子性客观声明**：
+  - 来源包在暂存区严格预检，缺失核心二进制（`LeeExcel.dll`, `LeeExcel.xll`, `LeeExcel64.xll`, `LeeExcel.dna`, `LeeExcel64.dna`）立即阻断终止；
+  - 升级前对旧版既有应用文件建立带时间戳的临时备份目录；
+  - 复制或注册过程中发生异常时，自动触发回退补偿逻辑，将备份文件恢复至目标目录；
+  - 严格如实报告已完成与未完成步骤，明确告知恢复状态，**不将补偿操作伪称为进程崩溃或断电下仍具备完整事务原子性的数据库级升级**。
+- **进程与占用安全防线（严禁强杀进程）**：
+  - 预检目标目录二进制文件的写锁定状态（`[System.IO.File]::Open` 排他检测）；
+  - 检测到文件被占用（Excel 正在运行或已加载插件）时，脚本安全退出（退出码 2），并明确提示用户“请先保存工作簿并关闭 Excel 进程后再运行安装/升级”；
+  - **严禁使用 `taskkill` 强杀 Excel 进程，绝不静默覆盖被锁定文件，绝不修改 Excel 宏信任或系统级安全设置**。
+- **脱敏诊断导出严格白名单与 8 类排除分类**：
+  - 新增 `preview_diagnostics` 与 `export_diagnostics`，仅白名单收集最小诊断范围：
+    1. `diagnostics_summary.json`：操作系统版本与架构、CLR 版本、Excel 宿主版本、WebView2 运行时版本、任务窗格状态、最近失败阶段、脱敏后活动工作簿名（如 `workbook_***.xlsx`）；
+    2. `diagnostics.log`：最近过滤脱敏日志（严格限制最近 200 行）；
+    3. `manifest.json`：诊断包版本元数据清单与白名单声明；
+  - **默认排除全部 8 类敏感分类**：
+    1. `CredentialsAndApiKeys`：大模型 API Key、DPAPI 凭据、私钥；
+    2. `HttpAuthorizationAndTokens`：HTTP 请求头、Bearer Token、Cookie；
+    3. `ChatHistoryAndPrompts`：会话聊天记录、Prompt 提示词正文；
+    4. `MacroSourceCode`：宏库源码 `.bas` 正文及内部代码；
+    5. `MacroParametersAndPayloads`：宏运行实际参数值、流水线数据载荷；
+    6. `WorkbookAndCellData`：工作簿内容、单元格数据、选区样本；
+    7. `SnapshotBackups`：历史快照备份；
+    8. `ExternalDataResponses`：外部接口原始响应体、CSV/JSON 业务数据。
+- **两道脱敏与高危敏感剔除防线**：
+  - **第一道正则脱敏**：
+    - 用户路径：`C:\Users\<REDACTED_USER>\...`；
+    - 大模型 API Key：`sk-***`；
+    - Bearer Token：`Bearer ***`；
+    - URL 查询参数：`?token=***`、`&key=***` 等；
+    - 工作簿业务名：`workbook_***.xlsx`；
+  - **第二道敏感信息扫描拦截**：
+    - 针对无法可靠脱敏的高危凭据行（如 `-----BEGIN RSA PRIVATE KEY-----`、`password := "..."` 等），直接整行剔除，替换为 `[REDACTED_SENSITIVE_LINE: 包含潜在高危凭据已自动剔除]`，并在清单中客观记录 `omittedSensitiveLinesCount`；
+  - 声明：白名单优先，脱敏正则为第二道检查；无法可靠处理的文本直接排除，不为凑诊断完整性放宽规则。
+- **安全交付与清理防线**：
+  - 前端设置面板提供“脱敏诊断与导出”独立 Tab，展示包含分类、排除分类及最近脱敏日志预览；
+  - 用户点击导出时通过 Windows STA 系统文件保存对话框选择保存位置；
+  - 诊断包纯本地生成，不联网，不自动上传，不执行其中内容；
+  - 用户取消零生成最终包；导出失败或异常时立即清理隔离临时目录，绝不污染或残留垃圾文件。
+
+---
+
+## 15. 产品化发布候选工程与可靠性关键发现 (2026-10-03 v1.2.0-rc1)
+
+- **Windows PowerShell 5.1 编码陷阱与 UTF-8 BOM 规范**：
+  - Windows 10/11 自带的 Windows PowerShell 5.1 在简体中文系统下默认使用 GBK (代码页 936) 解析 `.ps1` 脚本；
+  - 无 BOM 的 UTF-8 文件若包含中文字符串或中文注释，PowerShell 5.1 解析可能发生截断或语法解析错位；
+  - 解决方案：所有分发的 `.ps1` 核心自动化脚本（如 `install_addin.ps1`, `package_release.ps1`, `run_r6c_targeted_verification.ps1`）均统一写入 UTF-8 BOM 头（`0xEF, 0xBB, 0xBF`），确保在任何版本的 PowerShell 5.1 和 PowerShell 7+ 下解析 100% 准确一致。
+- **PowerShell 非终止错误 (Non-Terminating Errors) 与 try/catch 机制**：
+  - 在 PowerShell 中，标准 cmdlet（如 `New-Item`, `Copy-Item`, `Set-ItemProperty`）产生的错误默认属于非终止错误；
+  - 若外层脚本的 `$ErrorActionPreference` 为 `Continue`，即使将其包裹在 `try { ... } catch { ... }` 中，非终止错误也不会触发 `catch` 块；
+  - 解决方案：在进入文件复制与注册表注入的关键操作步骤前，必须显式设置 `$ErrorActionPreference = "Stop"`（并在正常结束或 catch 中恢复），确保任何文件写失败或注册表注入异常都能立即跳转至 `catch` 块执行失败补偿回滚，退出码严格保证为 3。
+- **升级失败双阶段三重回滚补偿机制**：
+  - 升级包含“文件复制”和“注册表更新”两个先后阶段。临时备份目录 `$upgradeBackupDir`（`_backup_<timestamp>`）必须贯穿这两个阶段；
+  - 若文件复制阶段失败：立即将已部分覆盖的目标文件回退还原为旧版，删除临时备份，退出码 3；
+  - 若文件复制成功但注册表阶段失败：同样立即利用临时备份将目标文件回退还原为旧版，删除临时备份，退出码 3；
+  - 唯有两阶段全部成功后，才在正常退出前彻底清理临时备份，并保证用户数据目录（`%APPDATA%\ExcelMindAI\`）在此过程中 100% 恒定未受触碰。
+- **诊断设置页深层内容物理核验与界面文字区分**：
+  - 界面测试容易停留在“按钮显示导出成功”、“提示文本正确”等浅层 UI；
+  - 必须通过物理解压导出的实际 `.zip` 包，逐字节核验包内 `diagnostics_summary.json`、`diagnostics.log`、`manifest.json`：
+    1. 验证白名单字段完整（OS, CLR, Excel, WebView2）；
+    2. 验证高危凭据（API Key, Bearer, 真实用户名, 真实工作簿名）已全部脱敏或整行剔除；
+    3. 验证 manifest 中严格声明了 8 类排除项（Credentials, HttpTokens, ChatHistory, MacroSource, Parameters, CellData, Snapshots, ExternalResponses）；
+    4. 验证用户取消导出时返回明确的“已取消”错误码，且本地零文件写入、零临时目录残留。
+- **发布候选包与纯净分发规范**：
+  - 坚决杜绝打包任何开发测试脚本、源码、临时日志、调试转储、工作簿数据与用户个人配置；
+  - 自动生成 `checksums_sha256.txt` 校验清单，明确标明“未签名发布候选构建 (Unsigned Release Candidate)”；
+  - 配套生成 `INSTALL.md`、`USER_GUIDE.md`、`RELEASE_NOTES.md`、`LICENSE.md`，提供清晰的 SmartScreen 运行指引与 Excel 宏信任中心设置指南。
+
+---
+
+## 16. 发行 ZIP 独立隔离解压冒烟验证与事实边界发现 (2026-10-03 定向纠偏)
+
+- **直接验证发行 ZIP 而非开发目录**：
+  - 将最终 ZIP（`ExcelMindAI-v1.2.0-rc1.zip`，SHA-256: `ef08fdb127a082a4902e98fd6b86c2b837707b3da3e925144a7faebcc49852e2`）解压至全新的隔离目录 `.artifacts/tests/smoke_isolated_20261003_123829/extracted_pkg/`；
+  - 启动独立测试 Excel 实例时，直接引用解压包内的 `LeeExcel64.xll`，所有调用链路严格封闭在解压目录内，零引用仓库 `bin/`、`src/` 或开发服务器。
+- **条目真实统计与区别分类（杜绝手工凑数）**：
+  - 严格通过 ZIP 词法条目自动统计：总条目 28 项；
+  - 区别分类：2 个目录项（`runtimes/win-x64/`, `runtimes/win-x86/`），1 个校验清单文件（`checksums_sha256.txt`），25 项载荷文件；
+  - 25 项载荷文件与 `checksums_sha256.txt` 中的 SHA-256 校验码 100% 逐一吻合。
+- **便携启动入口自包含性与路径解析**：
+  - `core/launch_portable.ps1` 与 `免安装启动.bat` 依靠 `$releaseDir = Split-Path -Parent $PSScriptRoot` 动态定位解压包根目录；
+  - 经静态与动态核对，脚本内无任何 `..\\bin`、`..\\src` 等外部仓库硬编码，确保绿色便携解压即用，并保护 `%APPDATA%\ExcelMindAI\` 既有用户数据。
+- **临时加载路径与系统安全防线（零侵入）**：
+  - 采用当前测试 Excel 的临时命令行参数加载方式（`EXCEL.EXE "<extracted>\LeeExcel64.xll" "<isolated_wb>"`）；
+  - 绝不修改正式 Office 自启动注册（`HKCU:\Software\Microsoft\Office`）、安装位置或宏信任中心设置；
+  - 测试进程独占 PID 运行，退出时仅针对测试实例执行 `Close(false)` 与 `Quit()`，绝不影响系统已有的用户 Excel 进程。
+- **真实设置页交互与诊断全流程验证**：
+  - 设置页支持大模型 API 配置与脱敏诊断两大模块；
+  - 真实全流程验证：
+    1. 预览（`preview_diagnostics`）：展示 OS/Excel/WebView2/工作簿脱敏名/最近阶段及 8 类排除分类；
+    2. 取消（`export_diagnostics` 带取消标记）：安全拦截，本地 0 字节写入、0 文件生成；
+    3. 导出（`export_diagnostics`）：生成合法 Clean Zip，包含 3 项核心白名单文件，敏感凭据与单元格数据 100% 排除。
+- **隔离工作簿无害宏执行与 COM 真实读回**：
+  - 在隔离工作簿注入并执行固定无害宏（`IsolatedSmokeMacro`），通过 COM 深入网格读取 `A1 == "RELEASE_SMOKE_VERIFIED"`、`B1 == 20261003`，验证执行引擎与读回契约真实有效。
+- **既有证据复用边界与架构客观声明**：
+  - 旧桌面验收报告（`.artifacts/tests/desktop_acceptance_20261003_083458/`）对应构建版本为 R0～R6b 代码基线（Commit `8c57cef`）。本轮改动仅为设置页脱敏诊断真机交互流程、文档表述纠偏及校验清单条目真实统计，核心业务未改，因此既有证据复用理由充分，非“同一构建版本”；
+  - 32 位文件已打包（`LeeExcel.xll`、`LeeExcel.dna`、`runtimes/win-x86/`），但由于测试机为 64 位 Office 16.0，实际运行未验证；
+  - “阻断问题 0 项”严格限定为当前已执行的 6 项解压冒烟检查未发现阻断。
 
