@@ -4,8 +4,8 @@
 > **当前状态入口**：参见 [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md)  
 > **基准发布版本**：v1.3.0-rc1 (Git Commit: `b4402a9ead90d8e74c451ccb6683a22e20da3ae4`)  
 > **当前任务**：发布后资产核对、项目文档与测试资产整理  
-> **当前状态**：**整理进行中 (docs/chore 阶段)**  
-> **当前停点**：完成资产核对、文档职责梳理、历史归档与测试资产手册更新后停止，交付简短结果，等待用户下一步指令。  
+> **当前状态**：**已全部完成并就绪 (Completed & Ready to Push)**  
+> **当前停点**：工作流加固、Release 元数据更正、官方包解压冒烟与文档收尾均已完成。  
 > **下一步计划**：无未授权代码开发任务；R7 为远期评估项，当前不启动。  
 > **授权边界**：不新增功能、不重新设计 UI、不修改已发布 tag、不覆盖 Release 资产、不重新发布已有版本、不启动真实 API。
 
@@ -15,12 +15,15 @@
 
 | 任务编号 | 任务内容 | 状态 | 验证与产出物 | 停点判定与授权边界 |
 | :--- | :--- | :--- | :--- | :--- |
-| `TASK-CHORE-01` | **已发布真实基线核对**<br>只读核查 GitHub 远端 main、tag、Release 状态及 Pre-release 标记 | `done` | `docs/CURRENT_STATE.md`<br>确认 tag 指向 `b4402a9`，Release 存在但未标 prerelease 事实记录 | 只读核对，不修改 tag/Release |
-| `TASK-CHORE-02` | **GitHub 资产与冒烟证据核对**<br>下载官方 Release ZIP，对比本地构建包，逐字节比对解压载荷哈希 | `done` | 两份包文件清单完全一致；确认换行符与编译器元数据差异，冒烟证据有效复用 | 不覆盖已发布资产 |
-| `TASK-CHORE-03` | **项目文档职责梳理与入口建立**<br>新增 `docs/CURRENT_STATE.md`，更新 `README.md`、`docs/product-roadmap.md` 等 | `in_progress` | `docs/CURRENT_STATE.md`<br>`README.md`<br>`INSTALL.md`<br>`USER_GUIDE.md`<br>`RELEASE_NOTES.md` | 沿用现有体系，不建第二套路线图 |
-| `TASK-CHORE-04` | **历史旧文档归档与纠偏**<br>建立保留/更新/归档/清理清单，归档旧规范至 `docs/history/` 并标明免责声明 | `in_progress` | `docs/history/plans/`<br>`docs/history/specs/`<br>`findings.md` | 标注历史状态，不掩盖真实历史 |
-| `TASK-CHORE-05` | **测试资产手册与隔离规范更新**<br>梳理测试命令、范围、环境要求、产物位置与安全隔离红线 | `in_progress` | `tests/README.md`<br>`AGENTS.md` | 测试默认隔离，严禁污染正式数据 |
-| `TASK-CHORE-06` | **轻量验证与安全提交**<br>检查链接、运行离线门禁、规避 CI 意外触发发布，提交推送 docs/chore | `pending` | `test_suite_unit.cjs` (PASS)<br>`test_regex_counter_example.cjs` (PASS)<br>独立提交记录 | 提交使用 [skip ci]，不触发自动发布 |
+| `TASK-CHORE-01` | **已发布真实基线核对**<br>只读核查 GitHub 远端 main、tag、Release 状态及 Pre-release 标记 | `done` | `docs/CURRENT_STATE.md`<br>确认 tag 指向 `b4402a9`，记录初始状态 | 只读核对，不移动 tag |
+| `TASK-CHORE-02` | **GitHub 资产与冒烟证据核对**<br>下载官方 Release ZIP，对比本地构建包，逐字节比对解压载荷哈希 | `done` | 两份包文件清单完全一致；确认换行符与编译器元数据差异 | 不覆盖已发布资产 |
+| `TASK-CHORE-03` | **项目文档职责梳理与入口建立**<br>新增 `docs/CURRENT_STATE.md`，更新 `README.md`、`docs/product-roadmap.md` 等 | `done` | `docs/CURRENT_STATE.md`<br>`README.md`<br>`INSTALL.md`<br>`USER_GUIDE.md`<br>`RELEASE_NOTES.md` | 沿用现有体系，不建第二套路线图 |
+| `TASK-CHORE-04` | **历史旧文档归档与纠偏**<br>建立保留/更新/归档/清理清单，归档旧规范至 `docs/history/` 并标明免责声明 | `done` | `docs/history/plans/`<br>`docs/history/specs/`<br>`findings.md` | 标注历史状态，不掩盖真实历史 |
+| `TASK-CHORE-05` | **测试资产手册与隔离规范更新**<br>梳理测试命令、范围、环境要求、产物位置与安全隔离红线 | `done` | `tests/README.md`<br>`AGENTS.md` | 测试默认隔离，严禁污染正式数据 |
+| `TASK-CI-01` | **发布工作流加固**<br>消除 main push fallback v1.2.0，修复 prerelease 判定，增加已有 Release 覆盖保护 | `done` | `.github/workflows/release.yml`<br>离线 9 项分支/PR 场景测试 100% PASS | 独立提交 `4eee7b3` |
+| `TASK-REL-01` | **纠正现有 Release 元数据**<br>PATCH API 更新 Release `405746132`，prerelease 设为 true，补充限制说明 | `done` | GitHub API 响应验证 `prerelease: true`<br>不删除 Release、不移动 tag、不覆盖 ZIP | 零工作流副作用 |
+| `TASK-SMOKE-01` | **GitHub 官方下载包最小冒烟**<br>针对 `445ef...` 真实包运行清单校验、64 位 Excel 独立挂载、Ribbon 截图与无害宏读回 | `done` | `.artifacts/tests/smoke_github_release_20261007_214500/`<br>6/6 PASS，实例安全退出 | 真实下载包真机存证 |
+| `TASK-CHORE-06` | **按影响范围测试策略与安全提交**<br>更新 CURRENT_STATE，文档提交附带 [skip ci]，推送 main | `done` | 准备就绪，工作流具备多道防误发布保护 | 遵循既定规则推送 |
 
 ---
 

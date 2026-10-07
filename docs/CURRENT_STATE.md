@@ -14,7 +14,7 @@
 | **当前发布版本** | `v1.3.0-rc1` (Pre-release Candidate 1) | 真实发布版本 |
 | **构建发布提交** | `b4402a9ead90d8e74c451ccb6683a22e20da3ae4` | `git rev-parse HEAD` / `origin/main` 确认<br>*(注：历史报告曾因笔误将全量哈希末尾误记为 `...0518be4b9`，已核实修正为真实提交 `b4402a9ead90d8e74c451ccb6683a22e20da3ae4`)* |
 | **Git Tag** | `v1.3.0-rc1` | Annotated Tag（Tag 对象 `22dec826dc0b46f931cc1efac6bec805e78f3f06`），其解引用 Commit 准确指向发布提交 `b4402a9` |
-| **GitHub Release** | 存在发布条目 `ExcelMind AI v1.3.0-rc1` | **实际核实**：GitHub API 显示其 `prerelease` 属性为 `false`。<br>**根因分析**：`.github/workflows/release.yml` 在 tag 触发时脚本写死 `$isPre = $false`，导致发布到 GitHub 时未勾选 Pre-release 标记。本轮遵循“不删除、不覆盖、不重新发布”铁律，如实记录此事实，后续由 CI 脚本优化解决。 |
+| **GitHub Release** | 存在发布条目 `ExcelMind AI v1.3.0-rc1` (ID: `405746132`) | **实际核实与状态纠偏**：此前由工作流写死导致的 `prerelease=false` 状态已通过 GitHub REST API 成功更正，现状态明确为 **`prerelease: true`**（Pre-release Candidate 1），`make_latest` 为 `false`；Release 说明中已如实标注官方权威校验和与已知限制。遵循铁律：不移动 tag、不删除 Release、不覆盖既有资产。 |
 | **用户下载校验权威基准 (Release ZIP)** | **SHA-256**:<br>`445ef8b481491bc99b31dcd286b1ac109ae6b519fafc51fc456aaa22687ff25e` | **实际核实**：直接从 GitHub Release 官方页面下载物理包 `ExcelMindAI-v1.3.0-rc1.zip` 计算得出，与 GitHub 资产 Digest 100% 一致。此哈希为**用户下载校验的唯一权威对象**。 |
 | **本地构建记录资产 (Local Build ZIP)** | **SHA-256**:<br>`f544108d73ad8cfc60723b49b2306a225a93db82e89419065fe11991bce83515` | **物理位置**：`.artifacts/release/ExcelMindAI-v1.3.0-rc1.zip`<br>本地由提交 `b4402a9` 打包流水线生成，作为另一份构建记录留存，不能与 GitHub 下载文件并列写为同一个哈希。 |
 
@@ -23,16 +23,21 @@
 1. **文件清单完全一致**：解压比对表明，两份 ZIP 内均包含完全一致的 26 个文件。
 2. **二进制依赖完全一致**：包内 6 个核心依赖 DLL（`ExcelDna.Integration.dll`、`LeeExcel.xll`、`LeeExcel64.xll`、`Microsoft.Web.WebView2.Core.dll`、`Microsoft.Web.WebView2.WinForms.dll`、`WebView2Loader.dll`）SHA-256 100% 比对一致。
 3. **文本文件差异根因**：所有脚本与 Markdown（`.bat`、`.dna`、`README.md`、前端 `dist/index.html`、`dist/assets/*.js`、`dist/assets/*.css`）在去除换行符差异（GitHub CI 为 CRLF，本地为 LF）后，**正文内容 100% 完全相同**。
-4. **`LeeExcel.dll` 差异根因**：两份 DLL 文件大小均为 590,336 字节。二进制逐字节对比显示，仅 44 字节存在差异（0.0075%），具体为 PE 头部编译时间戳（`TimeDateStamp`）与 .NET 4.0 编译器为程序集自动生成的随机模块版本标识（MVID GUID）。所有 IL 中间语言、类、方法及内嵌资源完全相同。
-5. **冒烟证据复用**：六项独立解压隔离冒烟测试（报告位于 `.artifacts/tests/smoke_isolated_20261007_203405/`，涵盖解压完整性、依赖反射、前端资源、无工作簿核心服务、真实 Excel 挂载加载、品牌功能区与无害宏读回）此前是在本地构建包上执行并 100% PASS。因两份包运行载荷完全等价，冒烟证据有效性已得到确立。
+4. **`LeeExcel.dll` 差异根因**：两份 DLL 文件大小均为 590,336 字节。二进制逐字节对比显示，仅 44 字节存在差异（0.0075%），具体为 PE 头部编译时间戳（`TimeDateStamp`）与 .NET 4.0 编译器为程序集自动生成的随机模块版本标识（MVID GUID）。
+5. **两份包均已拥有独立真机冒烟验证证据（杜绝仅凭静态推断）**：
+   - **本地构建包 (`f5441...`)**：在独立隔离目录运行 6 项解压冒烟全部通过（存证报告：`.artifacts/tests/smoke_isolated_20261007_203405/smoke_report.md`）；
+   - **GitHub 官方下载包 (`445ef...`)**：在独立隔离目录运行 6 项解压冒烟全部通过（存证报告：`.artifacts/tests/smoke_github_release_20261007_214500/smoke_report.md`，测试 Excel PID=8672，包内 26 项清单核验 100% 通过，WebView2 任务窗格及 Ribbon 截图存证已固化，脱敏诊断导出全流程通过，固定无害宏读回 `A1 == 'RELEASE_SMOKE_VERIFIED'`、`B1 == '20261003'`，测试进程安全释放）；
+   - 本地包与 CI 包不是逐字节相同，文档分别记录构建与实际运行证据，不称为逐字节一致；两者均已在真实 64 位 Excel 宿主上获得直接端到端运行验证证据。
 
 ---
 
 ## 二、 当前 main 与发布提交的关系
 
-- **发布基线提交**：`b4402a9ead90d8e74c451ccb6683a22e20da3ae4`（包含功能收敛与 `RELEASE_NOTES.md`）。
-- **当前 main 分支**：在发布提交后，通过本轮整理独立追加 docs/chore 整理提交。
-- **发布与整理关系铁律**：已发布的 `v1.3.0-rc1` 发行包由发布提交 `b4402a9` 构建；后续 main 上的文档与资产整理提交**不属于该包的构建源码**，绝不宣称旧发行包由最新整理后的 main 构建。
+- **发布基线提交**：`b4402a9ead90d8e74c451ccb6683a22e20da3ae4`（包含功能收敛与 `RELEASE_NOTES.md`，构建产物即为 `v1.3.0-rc1`）。
+- **文档整理与测试资产手册提交**：`eac0f0b`（`docs(chore): reorganize project documentation, test inventory and release verification [skip ci]`，包含全仓文档梳理、历史归档与测试索引）。
+- **CI 发布工作流加固提交**：`4eee7b3`（`ci: harden release workflow publication guards and prerelease detection`，彻底修复 main push fallback v1.2.0、修复 prerelease 检测并增加防止覆盖已有 Release 的前置防护）。
+- **收尾文档提交**：更新当前状态与公开包冒烟证据记录。
+- **发布与整理关系铁律**：已发布的 `v1.3.0-rc1` 发行包由发布提交 `b4402a9` 构建；后续 main 上的文档与 CI 工作流加固提交**不属于该包的构建源码**，绝不宣称旧发行包由最新整理后的 main 构建。
 
 ---
 
@@ -85,17 +90,27 @@ ExcelMind-AI/
 - **路径**：[docs/product-roadmap.md](file:///c:/Users/35651/Desktop/Google/lee-excle/docs/product-roadmap.md)
 - **范围**：R0～R6 均已完成并在 `v1.3.0-rc1` 交付；R7（DuckDB/Python）处于远期评估状态，非当前必做项。不另建第二套路线图。
 
-### 2. 有效测试命令与门禁
-1. **核心离线门禁 (CI 与日常提交必须 100% PASS，无需 Excel 进程)**：
-   ```bash
-   node test_suite_unit.cjs
-   node test_regex_counter_example.cjs
-   ```
-2. **独立解压隔离冒烟验证 (需真实 Excel 宿主，环境完全隔离)**：
-   ```powershell
-   pwsh -File tests/diagnostics/run_isolated_release_smoke.ps1 -ZipPath ".artifacts/release/ExcelMindAI-v1.3.0-rc1.zip"
-   ```
-3. **真实桌面端自动化验收套件 (针对 R1~R6 的 STA 完整验收)**：
+### 2. 有效测试命令与按影响范围测试策略
+
+依据 AGENTS.md 规范，日常开发与提交严格执行**按影响范围测试策略**，绝不因仅修改 MD 文档强制执行整套测试门禁：
+
+1. **文档与辅助说明变更 (docs-only / chore)**：
+   - 仅执行文档链接与静态审查；
+   - **严禁强制重新构建应用或启动全套 Excel 桌面验收**；
+   - 推送到 main 时提交信息包含 `[skip ci]`。
+2. **核心代码与特定模块变更**：
+   - 执行离线核心门禁（无需 Excel 进程，耗时 < 1 秒）：
+     ```bash
+     node test_suite_unit.cjs
+     node test_regex_counter_example.cjs
+     ```
+   - 运行与修改模块直接相关的定向测试。
+3. **涉及发行包与打包流程变更**：
+   - 执行独立解压隔离冒烟验证（需真实 Excel 宿主，环境完全隔离）：
+     ```powershell
+     pwsh -File tests/diagnostics/run_isolated_release_smoke.ps1 -ZipPath ".artifacts/tmp/ci_download_verify/ExcelMindAI-v1.3.0-rc1_from_github.zip"
+     ```
+4. **全套桌面端自动化验收套件 (STA 完整验收，仅在重大版本发版前明确授权运行)**：
    - 源码：`tests/tools/DesktopAcceptanceRunner.cs`
    - 手册：参见 [tests/README.md](file:///c:/Users/35651/Desktop/Google/lee-excle/tests/README.md)。
 
@@ -126,10 +141,16 @@ ExcelMind-AI/
 
 ---
 
-## 七、 下一步与待授权事项
+## 七、 下一步与待清理项事实
 
-1. **当前开发状态**：当前开发周期已收敛，无新增功能开发，不启动 R7。
-2. **待授权事项**：
+1. **当前开发状态**：当前开发周期已彻底收敛，无新增功能开发，不启动 R7。
+2. **CI 与发布加固现状**：
+   - `.github/workflows/release.yml` 已完成加固，main/PR 普通推送仅触发 CI 构建检查，不发布 Release；
+   - 彻底删除 `v1.2.0` fallback 逻辑；发布仅接受语义化 tag 或显式指定版本的手动触发；
+   - 包含 `-rc` / `-beta` 后缀自动识别并标记 Pre-release；
+   - 增加 Release 覆盖检测阻断防线；离线 9 项分支/PR 场景测试全部通过。
+3. **174 个草稿及其他候选文件处置**：
+   - 本轮严格遵照指示保持原样，不批准物理删除，也不继续扩大逐个审计；日常生成物清理按规约由 `scripts/clean_artifacts.ps1` 在授权下受控执行。
+4. **后续待授权事项**：
    - 32 位 Office 真实环境适配与兼容性验证（需在具备 32 位 Office 的测试机上授权执行）；
-   - 真实商业大模型 API 线上调用审计（需用户明确授权预算与测试 Key 后方可执行）；
-   - 后续 GitHub Actions 工作流优化（调整 `release.yml` 的触发分支与 Pre-release 自动识别逻辑）。
+   - 真实商业大模型 API 线上调用审计（需用户明确授权预算与测试 Key 后方可执行）。

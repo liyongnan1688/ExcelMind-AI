@@ -8,6 +8,27 @@
 
 ## 近期有效进度
 
+### Session: 2026-10-07 (工作流加固、Release 状态纠偏与公开下载包真机冒烟收尾)
+- [x] **发布工作流加固 (`.github/workflows/release.yml`)**
+  - 普通 main push 或 PR 仅触发 CI 构建检查（`v="ci-build"`），杜绝 fallback 到 `v1.2.0`。
+  - 发布作业仅对标准语义化 tag (`v*`) 或手动指定 target_version 开启 (`should_publish=true`)。
+  - 自动识别 `-rc`、`-alpha`、`-beta` 等预发布后缀，正确置位 `is_prerelease=true`。
+  - 增加 Release 覆盖预检防护，若远端已存在同名 Release 则直接报错阻断。
+  - 离线 9 项分支/PR 场景测试 100% 通过；提交至 `4eee7b3`。
+- [x] **GitHub Release 元数据纠偏**
+  - 确认工作流中无监听 release 事件的副作用后，通过 GitHub REST API 成功更新 Release `405746132`。
+  - `prerelease` 从 `false` 修正为 `true`（Pre-release Candidate 1），`make_latest` 设为 `false`。
+  - 更新发布说明明确官方权威哈希 `445ef...` 及已知限制。不移动 tag、不删除 Release、不覆盖资产。
+- [x] **GitHub 官方下载包最小解压真机冒烟**
+  - 使用下载的官方 Release ZIP (`445ef...`) 运行独立解压冒烟 (`tests/diagnostics/run_isolated_release_smoke.ps1`)。
+  - 存证目录：`.artifacts/tests/smoke_github_release_20261007_214500/smoke_report.md`。
+  - 6 项测试 100% PASS（包内 26 项清单校验、便携入口解析、64 位 Excel 独立挂载 LeeExcel64.xll PID=8672、WebView2 与功能区截图存证、脱敏诊断导出全流程、固定无害宏读回 `A1=='RELEASE_SMOKE_VERIFIED'`）。
+  - 测试 Excel 实例安全退出并释放 COM。
+- [x] **文档收尾与测试策略锁定**
+  - 更新 [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md) 记录完整提交 SHA、独立双包真机证据与 Pre-release 真实状态。
+  - 锁定“按影响范围测试策略”，docs/chore 提交严禁强制重跑 210 项历史单测。
+  - 174 个草稿及其他候选文件保持原样，不作扩大审计或删除。
+
 ### Session: 2026-10-07 (v1.3.0-rc1 发布后资产核对与文档测试资产整理)
 - [x] **发布基线核对**
   - 核查远端仓库 `liyongnan1688/ExcelMind-AI`，发布提交为 `b4402a9ead90d8e74c451ccb6683a22e20da3ae4`。
