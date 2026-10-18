@@ -11,12 +11,10 @@
 | 属性 | 状态 / 事实 | 核对来源与说明 |
 | :--- | :--- | :--- |
 | **所属仓库** | `liyongnan1688/ExcelMind-AI` | GitHub 远端权威仓库 |
-| **当前发布版本** | `v1.3.0-rc1` (Pre-release Candidate 1) | 真实发布版本 |
-| **构建发布提交** | `b4402a9ead90d8e74c451ccb6683a22e20da3ae4` | `git rev-parse HEAD` / `origin/main` 确认<br>*(注：历史报告曾因笔误将全量哈希末尾误记为 `...0518be4b9`，已核实修正为真实提交 `b4402a9ead90d8e74c451ccb6683a22e20da3ae4`)* |
-| **Git Tag** | `v1.3.0-rc1` | Annotated Tag（Tag 对象 `22dec826dc0b46f931cc1efac6bec805e78f3f06`），其解引用 Commit 准确指向发布提交 `b4402a9` |
-| **GitHub Release** | 存在发布条目 `ExcelMind AI v1.3.0-rc1` (ID: `405746132`) | **实际核实与状态纠偏**：此前由工作流写死导致的 `prerelease=false` 状态已通过 GitHub REST API 成功更正，现状态明确为 **`prerelease: true`**（Pre-release Candidate 1），`make_latest` 为 `false`；Release 说明中已如实标注官方权威校验和与已知限制。遵循铁律：不移动 tag、不删除 Release、不覆盖既有资产。 |
-| **用户下载校验权威基准 (Release ZIP)** | **SHA-256**:<br>`445ef8b481491bc99b31dcd286b1ac109ae6b519fafc51fc456aaa22687ff25e` | **实际核实**：直接从 GitHub Release 官方页面下载物理包 `ExcelMindAI-v1.3.0-rc1.zip` 计算得出，与 GitHub 资产 Digest 100% 一致。此哈希为**用户下载校验的唯一权威对象**。 |
-| **本地构建记录资产 (Local Build ZIP)** | **SHA-256**:<br>`f544108d73ad8cfc60723b49b2306a225a93db82e89419065fe11991bce83515` | **物理位置**：`.artifacts/release/ExcelMindAI-v1.3.0-rc1.zip`<br>本地由提交 `b4402a9` 打包流水线生成，作为另一份构建记录留存，不能与 GitHub 下载文件并列写为同一个哈希。 |
+| **当前发布版本** | `v1.3.0` (Official Production Release) | 正式稳定发行版本 |
+| **前序候选版本** | `v1.3.0-rc1` (Pre-release Candidate 1) | 历史候选发布（Tag `v1.3.0-rc1`，Commit `b4402a9`） |
+| **Git Tag** | `v1.3.0` | 正式发行 Tag |
+| **本地构建资产 (Local Release ZIP)** | **SHA-256**:<br>`cef7ed1bbb427c6fb1c2774ca5fe06bed878e85a89c1734d5b6e3274dbbc5da9` | **物理位置**：`release/ExcelMindAI-v1.3.0.zip`<br>由本地全自动流水线编译打包生成（1.55 MB） |
 
 ### 两个 ZIP 文件差异与冒烟证据结论
 
