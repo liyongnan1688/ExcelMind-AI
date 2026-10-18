@@ -133,7 +133,7 @@
       const res = await bridge.analyzeDedup({
         targetWorkbookName: workbook?.name || '',
         targetWorkbookFullName: workbook?.fullName || '',
-        sheetName: workbook?.activeSheet || '',
+        sheetName: workbook?.activeSheetName || workbook?.activeSheet || '',
         rangeAddress: rangeAddress.trim(),
         hasHeader: hasHeader,
         keyColumnIndices: selectedColIndices,
@@ -172,7 +172,7 @@
       const res = await bridge.applyDedup({
         targetWorkbookName: workbook?.name || '',
         targetWorkbookFullName: workbook?.fullName || '',
-        sheetName: analysisResult.targetSheetName || workbook?.activeSheet || '',
+        sheetName: analysisResult.targetSheetName || workbook?.activeSheetName || workbook?.activeSheet || '',
         rangeAddress: analysisResult.rangeAddress || rangeAddress.trim(),
         hasHeader: hasHeader,
         keyColumnIndices: selectedColIndices,
@@ -537,7 +537,7 @@
     isScanningManagedCharts = true;
     chartError = '';
     try {
-      const targetSheet = chartTargetSheet || chartSourceSheet || workbook?.activeSheet || 'Sheet1';
+      const targetSheet = chartTargetSheet || chartSourceSheet || workbook?.activeSheetName || workbook?.activeSheet || 'Sheet1';
       chartManagedList = await bridge.listManagedCharts({
         targetWorkbookName: workbook?.name || '',
         targetWorkbookFullName: workbook?.fullName || '',
@@ -592,7 +592,7 @@
       const p: QuickChartParams = {
         targetWorkbookName: workbook?.name || '',
         targetWorkbookFullName: workbook?.fullName || '',
-        sourceSheet: chartSourceSheet || (workbook?.activeSheet || 'Sheet1'),
+        sourceSheet: chartSourceSheet || (workbook?.activeSheetName || workbook?.activeSheet || 'Sheet1'),
         sourceRange: chartSourceRange.trim(),
         hasHeaders: chartHasHeaders,
         dataStartRow: chartHasHeaders ? 2 : 1,
@@ -972,7 +972,7 @@
           <div class="bg-gray-50/80 rounded-lg p-4 border border-gray-200/80 space-y-3">
             <div class="flex items-center justify-between text-xs text-gray-600">
               <span class="font-medium">目标工作簿: <strong class="text-gray-900">{workbook?.name || '当前工作簿'}</strong></span>
-              <span>工作表: <strong class="text-gray-900">{workbook?.activeSheet || '当前表'}</strong></span>
+              <span>工作表: <strong class="text-gray-900">{workbook?.activeSheetName || workbook?.activeSheet || '当前表'}</strong></span>
             </div>
 
             <div class="space-y-1.5">
@@ -1169,7 +1169,7 @@
               </div>
 
               <div class="space-y-1">
-                <label class="text-[11px] text-gray-500">目标工作簿与工作表</label>
+                <div class="text-[11px] text-gray-500">目标工作簿与工作表</div>
                 <div class="grid grid-cols-2 gap-1.5">
                   <input
                     type="text"
@@ -1187,7 +1187,7 @@
               </div>
 
               <div class="space-y-1">
-                <label class="text-[11px] text-gray-500">数据区域 (例如 A1:E100)</label>
+                <div class="text-[11px] text-gray-500">数据区域 (例如 A1:E100)</div>
                 <input
                   type="text"
                   bind:value={leftRange}
@@ -1223,7 +1223,7 @@
               </div>
 
               <div class="space-y-1">
-                <label class="text-[11px] text-gray-500">目标工作簿与工作表</label>
+                <div class="text-[11px] text-gray-500">目标工作簿与工作表</div>
                 <div class="grid grid-cols-2 gap-1.5">
                   <input
                     type="text"
@@ -1241,7 +1241,7 @@
               </div>
 
               <div class="space-y-1">
-                <label class="text-[11px] text-gray-500">数据区域 (例如 A1:E100)</label>
+                <div class="text-[11px] text-gray-500">数据区域 (例如 A1:E100)</div>
                 <input
                   type="text"
                   bind:value={rightRange}
@@ -1554,9 +1554,9 @@
                     {/if}
                   </div>
 
-                  <div class="grid grid-cols-3 gap-2">
+                  <div class="responsive-grid-3">
                     <div>
-                      <label class="text-[10px] text-gray-500 block mb-0.5">工作表名 (留空默认首张)</label>
+                      <div class="text-[10px] text-gray-500 mb-0.5">工作表名 (留空默认首张)</div>
                       <input
                         type="text"
                         bind:value={src.sheetName}
@@ -1565,7 +1565,7 @@
                       />
                     </div>
                     <div>
-                      <label class="text-[10px] text-gray-500 block mb-0.5">区域地址 (留空自动获取已用区域)</label>
+                      <div class="text-[10px] text-gray-500 mb-0.5">区域地址 (留空自动获取已用区域)</div>
                       <input
                         type="text"
                         bind:value={src.rangeAddress}
@@ -1574,7 +1574,7 @@
                       />
                     </div>
                     <div>
-                      <label class="text-[10px] text-gray-500 block mb-0.5">表头行号 (1-based)</label>
+                      <div class="text-[10px] text-gray-500 mb-0.5">表头行号 (1-based)</div>
                       <input
                         type="number"
                         min="1"
@@ -1590,9 +1590,9 @@
             <!-- 全局输出与规则选项 -->
             <div class="pt-2 border-t border-gray-200/80 space-y-2">
               <div>
-                <label class="text-[11px] font-semibold text-gray-700 block mb-1">
+                <div class="text-[11px] font-semibold text-gray-700 mb-1">
                   目标输出工作簿全路径 (必须为新文件，不覆盖源文件与既有文件)
-                </label>
+                </div>
                 <input
                   type="text"
                   bind:value={consolidationOutputPath}
@@ -1796,7 +1796,7 @@
           <div class="bg-gray-50/90 rounded-lg p-4 border border-gray-200 space-y-3.5">
             <div class="flex items-center justify-between text-xs text-gray-600 pb-2 border-b border-gray-200">
               <span class="font-medium">目标工作簿: <strong class="text-gray-900">{workbook?.name || '当前工作簿'}</strong></span>
-              <span>数据源工作表: <strong class="text-gray-900">{chartSourceSheet || workbook?.activeSheet || 'Sheet1'}</strong></span>
+              <span>数据源工作表: <strong class="text-gray-900">{chartSourceSheet || workbook?.activeSheetName || workbook?.activeSheet || 'Sheet1'}</strong></span>
             </div>
 
             <!-- 数据源区域 -->
@@ -1868,7 +1868,7 @@
             <!-- 图表类型与标题 -->
             <div class="grid grid-cols-2 gap-3 pt-1">
               <div class="space-y-1.5">
-                <label class="text-xs font-semibold text-gray-700">图表类型</label>
+                <div class="text-xs font-semibold text-gray-700">图表类型</div>
                 <div class="grid grid-cols-3 gap-1.5">
                   <button
                     type="button"
@@ -1929,7 +1929,7 @@
             <!-- 放置位置与执行模式 -->
             <div class="grid grid-cols-2 gap-3 pt-1 border-t border-gray-200/80">
               <div class="space-y-1">
-                <label for="chart-target-cell" class="text-xs font-semibold text-gray-700">放置工作表与起始单元格</label>
+                <div class="text-xs font-semibold text-gray-700">放置工作表与起始单元格</div>
                 <div class="grid grid-cols-2 gap-1.5">
                   <input
                     type="text"
@@ -1948,7 +1948,7 @@
               </div>
 
               <div class="space-y-1">
-                <label class="text-xs font-semibold text-gray-700">防旧结果叠加行为模式</label>
+                <div class="text-xs font-semibold text-gray-700">防旧结果叠加行为模式</div>
                 <div class="flex items-center gap-3 pt-1 text-xs">
                   <label class="flex items-center gap-1 cursor-pointer">
                     <input
@@ -2610,9 +2610,9 @@
 
       <div class="text-xs space-y-2 bg-gray-50 p-3.5 rounded-lg border border-gray-200">
         <div><strong>输出文件路径：</strong><span class="font-mono text-indigo-700 break-all">{consolidationOutputPath}</span></div>
-        <div><strong>来源文件数量：</strong>共 {consolidationAnalysis.sourceProfiles.length} 个独立来源</div>
-        <div><strong>汇总行数计算：</strong>纳入数据 {consolidationAnalysis.totalIncludedDataRows} 行 + 表头 1 行 = <strong>共 {consolidationAnalysis.finalOutputRows} 行</strong> (排除纯空行 {consolidationAnalysis.totalExcludedRows} 行)</div>
-        <div><strong>输出列数清单：</strong>共 {consolidationAnalysis.orderedTargetColumns.length} 列 [{consolidationAnalysis.orderedTargetColumns.slice(0, 5).join(', ')}{consolidationAnalysis.orderedTargetColumns.length > 5 ? '...' : ''}]</div>
+        <div><strong>来源文件数量：</strong>共 {(consolidationAnalysis.sources || []).length} 个独立来源</div>
+        <div><strong>汇总行数计算：</strong>纳入数据 {consolidationAnalysis.totalIncludedDataRows} 行 + 表头 1 行 = <strong>共 {consolidationAnalysis.expectedFinalOutputRows} 行</strong> (排除纯空行 {consolidationAnalysis.totalExcludedBlankRows} 行)</div>
+        <div><strong>输出列数清单：</strong>共 {(consolidationAnalysis.alignedColumns || []).length} 列 [{(consolidationAnalysis.alignedColumns || []).slice(0, 5).join(', ')}{(consolidationAnalysis.alignedColumns || []).length > 5 ? '...' : ''}]</div>
         
         <div class="pt-1 text-[11px] text-emerald-700 space-y-1 bg-emerald-50/60 p-2.5 rounded border border-emerald-200">
           <div class="font-semibold">数据保真与安全承诺：</div>

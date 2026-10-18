@@ -2,7 +2,7 @@
 # 职责：编译前端与后端、组织双架构依赖、生成安装卸载套件、打包为独立 ZIP
 
 param(
-    [string]$Version = "v1.2.0-rc1"
+    [string]$Version = "v1.3.0-rc1"
 )
 
 $ErrorActionPreference = "Stop"
@@ -143,6 +143,10 @@ Copy-Item -LiteralPath (Join-Path $projectRoot "scripts\core\uninstall_addin.ps1
 Copy-Item -LiteralPath (Join-Path $projectRoot "scripts\core\launch_portable.ps1") -Destination (Join-Path $coreTarget "launch_portable.ps1") -Force
 
 # 文档与许可说明
+$guideTxt = Join-Path $projectRoot "安装与使用说明(必读).txt"
+if (Test-Path $guideTxt) {
+    Copy-Item -LiteralPath $guideTxt -Destination (Join-Path $packRoot "安装与使用说明(必读).txt") -Force
+}
 Copy-Item -LiteralPath (Join-Path $projectRoot "INSTALL.md") -Destination (Join-Path $packRoot "INSTALL.md") -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "docs\USER_GUIDE.md") -Destination (Join-Path $packRoot "USER_GUIDE.md") -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "RELEASE_NOTES.md") -Destination (Join-Path $packRoot "RELEASE_NOTES.md") -Force
@@ -197,11 +201,26 @@ $zipItem = Get-Item $zipPath
 $zipSizeMB = [math]::Round($zipItem.Length / 1MB, 2)
 $zipHash = (Get-FileHash -Path $zipPath -Algorithm SHA256).Hash.ToLower()
 
+# 10. 同步到项目根目录下直观可见的 release/ 目录 (避免 .artifacts 点目录被系统隐藏)
+$visibleReleaseDir = Join-Path $projectRoot "release"
+if (!(Test-Path $visibleReleaseDir)) {
+    New-Item -ItemType Directory -Path $visibleReleaseDir -Force | Out-Null
+}
+$visibleZipPath = Join-Path $visibleReleaseDir $zipName
+Copy-Item -Path $zipPath -Destination $visibleZipPath -Force
+$visibleTargetDir = Join-Path $visibleReleaseDir "ExcelMindAI-$Version"
+if (Test-Path $visibleTargetDir) {
+    Remove-Item -Path $visibleTargetDir -Recurse -Force
+}
+Copy-Item -Path $rcTargetDir -Destination $visibleTargetDir -Recurse -Force
+
 Write-Host "`n[6/6] 发布候选包组装成功！" -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Green
-Write-Host "发布候选目录: $rcTargetDir" -ForegroundColor Cyan
-Write-Host "发布归档路径: $zipPath" -ForegroundColor Cyan
-Write-Host "归档大小    : $zipSizeMB MB" -ForegroundColor Cyan
-Write-Host "归档 SHA-256: $zipHash" -ForegroundColor Cyan
-Write-Host "构建声明    : 未签名发布候选构建 (Unsigned Release Candidate)" -ForegroundColor Yellow
+Write-Host "根目录可见发布包: $visibleZipPath" -ForegroundColor Magenta
+Write-Host "根目录可见文件夹: $visibleTargetDir" -ForegroundColor Magenta
+Write-Host "内部归档路径:     $zipPath" -ForegroundColor Cyan
+Write-Host "归档大小:         $zipSizeMB MB" -ForegroundColor Cyan
+Write-Host "归档 SHA-256:     $zipHash" -ForegroundColor Cyan
+Write-Host "构建声明:         未签名发布候选构建 (Unsigned Release Candidate)" -ForegroundColor Yellow
 Write-Host "==========================================================" -ForegroundColor Green
+

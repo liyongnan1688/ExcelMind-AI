@@ -50,9 +50,9 @@ export function getCurrentDateTimeInfo(): string {
 /**
  * 构建纯自然语言对话通道系统提示词
  */
-export function buildChatSystemPrompt(): string {
+export function buildChatSystemPrompt(addition?: string): string {
   const timeInfo = getCurrentDateTimeInfo();
-  return `你是一名精通 Microsoft Excel 和 VBA 的专业顾问。
+  let base = `你是一名精通 Microsoft Excel 和 VBA 的专业顾问。
 当前用户设备的本地系统真实时间: 【${timeInfo}】。
 当前处于【问答咨询与解释通道】。请用专业、亲切、通俗易懂的中文直接解答用户的问题、解释代码含义或进行日常交流。
 若用户咨询当前日期、今天几号、明天星期几、节假日或与时间相关的推算，请严格基于上述系统真实时间准确回答。
@@ -60,6 +60,11 @@ export function buildChatSystemPrompt(): string {
 1. 本通道为问答与咨询通道，不会自动在 Excel 中执行宏代码。若用户要求编写、展示或提供 VBA 代码供参考，可以用 Markdown 代码块（如 \`\`\`vba）清晰展示，无需引导执行。
 2. 若用户询问代码含义，请用文字清晰分步剖析。
 3. 若用户需要直接在当前工作簿中自动化修改或生成数据，请提示用户直接下达操作指令（例如“直接在表格中操作”、“帮我拆分D列”等），系统会自动切换至自动化执行通道直接在工作表中完成操作。`;
+
+  if (addition && addition.trim()) {
+    base += `\n\n【用户自定义附加指令】：\n${addition.trim()}`;
+  }
+  return base;
 }
 
 /**
@@ -141,10 +146,11 @@ export function buildAutomationSystemPrompt(
   targetWorkbookName: string,
   sheets: string[],
   activeSheet: string = '',
-  usedRange: string = ''
+  usedRange: string = '',
+  addition?: string
 ): string {
   const timeInfo = getCurrentDateTimeInfo();
-  return `你是一名精通 Microsoft Windows 桌面 Excel 和 VBA 自动化的专业 AI 助手。
+  let base = `你是一名精通 Microsoft Windows 桌面 Excel 和 VBA 自动化的专业 AI 助手。
 当前用户设备的本地系统真实时间: 【${timeInfo}】。
 当前任务目标工作簿: "${targetWorkbookName || '当前活动工作簿'}"。
 目标工作簿包含的工作表: [${sheets.join(', ')}]。
@@ -166,6 +172,11 @@ export function buildAutomationSystemPrompt(
 
 【模型能力限制（宿主环境安全约束）】：
 1. 严禁调用 MsgBox、InputBox 等会导致自动化流程挂起的阻塞式交互对话框（说明：由于插件执行内核处于后台自动化链路，此类弹窗会阻塞 Excel UI 线程并导致自动化执行永久挂死，属于宿主执行器施加的能力限制，并非中性协议或模型自然选择）。`;
+
+  if (addition && addition.trim()) {
+    base += `\n\n【用户自定义附加指令】：\n${addition.trim()}`;
+  }
+  return base;
 }
 
 /**
@@ -507,6 +518,7 @@ export interface ApiAuditInfo {
 export interface LlmStreamResponse {
   fullText: string;
   finishReason?: string;
+  reasoningText?: string;
   audit: ApiAuditInfo;
 }
 
@@ -627,8 +639,8 @@ export async function callLlmStream(
   // 根据通道选择对应的系统提示词
   const systemPrompt =
     intent === 'CHAT'
-      ? buildChatSystemPrompt()
-      : buildAutomationSystemPrompt(targetWorkbookName, sheets, activeSheet, usedRange);
+      ? buildChatSystemPrompt(config.systemPromptAddition)
+      : buildAutomationSystemPrompt(targetWorkbookName, sheets, activeSheet, usedRange, config.systemPromptAddition);
 
   // 历史上下文策略：保留最近 6 条消息（注：仅在标准一问一答时近似对应 3 轮，实际按消息条数精确截断）
   const MAX_HISTORY_MESSAGES = 6;
@@ -807,6 +819,7 @@ export async function callLlmStream(
   const reader = response.body.getReader();
   const decoder = new TextDecoder('utf-8');
   let fullText = '';
+  let reasoningText = '';
   let finishReason: string | undefined = undefined;
   let buffer = '';
 
@@ -830,8 +843,21 @@ export async function callLlmStream(
           try {
             const data = JSON.parse(jsonStr);
             const delta = data.choices?.[0]?.delta?.content || '';
+            const reasoningDelta =
+              data.choices?.[0]?.delta?.reasoning_content ||
+              data.choices?.[0]?.delta?.thinking ||
+              '';
             const fr = data.choices?.[0]?.finish_reason;
             if (fr) finishReason = fr;
+
+            if (reasoningDelta) {
+              reasoningText += reasoningDelta;
+              // 当正文尚未输出时，向 UI 反馈思考进度，防止用户产生超时与卡死疑虑
+              if (!fullText) {
+                onChunk(`> 🧠 思考规划中（${reasoningText.length} 字符）...\n\n`);
+              }
+            }
+
             if (delta) {
               fullText += delta;
               onChunk(fullText);
@@ -848,8 +874,18 @@ export async function callLlmStream(
         try {
           const data = JSON.parse(lastLine.slice(6));
           const delta = data.choices?.[0]?.delta?.content || '';
+          const reasoningDelta =
+            data.choices?.[0]?.delta?.reasoning_content ||
+            data.choices?.[0]?.delta?.thinking ||
+            '';
           const fr = data.choices?.[0]?.finish_reason;
           if (fr) finishReason = fr;
+          if (reasoningDelta) {
+            reasoningText += reasoningDelta;
+            if (!fullText) {
+              onChunk(`> 🧠 思考规划中（${reasoningText.length} 字符）...\n\n`);
+            }
+          }
           if (delta) {
             fullText += delta;
             onChunk(fullText);
@@ -866,5 +902,5 @@ export async function callLlmStream(
     if (chunkTimer) clearTimeout(chunkTimer);
   }
 
-  return { fullText, finishReason, audit: apiAudit };
+  return { fullText, finishReason, reasoningText, audit: apiAudit };
 }

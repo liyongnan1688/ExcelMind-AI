@@ -85,10 +85,13 @@ namespace LeeExcel
             try
             {
                 if (excelApp == null) return IntPtr.Zero;
-                int mainHwndInt = 0;
-                try { mainHwndInt = (int)excelApp.Hwnd; } catch { }
-                if (mainHwndInt == 0) return IntPtr.Zero;
-                IntPtr xlMain = new IntPtr(mainHwndInt);
+                IntPtr xlMain = IntPtr.Zero;
+                try
+                {
+                    xlMain = new IntPtr(Convert.ToInt64(excelApp.Hwnd));
+                }
+                catch { }
+                if (xlMain == IntPtr.Zero) return IntPtr.Zero;
 
                 // 1. 标准 MDI 结构遍历：XLMAIN -> XLDESK -> EXCEL< -> EXCEL7
                 IntPtr xlDesk = FindWindowEx(xlMain, IntPtr.Zero, "XLDESK", null);

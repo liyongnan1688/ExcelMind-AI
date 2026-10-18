@@ -1,7 +1,7 @@
 # ExcelMind AI 当前系统状态与基线入口 (CURRENT_STATE.md)
 
 > **文档定位**：后续开发者与 AI 识别项目真实状态的唯一当前入口  
-> **更新时间**：2026-10-07  
+> **更新时间**：2026-10-18  
 > **维护原则**：事实驱动、基线清晰、边界分明；旧报告只证明当时测试，不作为当前假设。
 
 ---
@@ -43,10 +43,13 @@
 
 ## 三、 未提交或未合并修改 (工作区事实)
 
-本轮工作区对以下非源码文件保持跟踪或记录：
-1. `bin/LeeExcel.dll`：本地运行打包脚本重编译产生的 PE 时间戳与 MVID 变动，源码逻辑无变动。
-2. `bin/dist/*`：本地前端构建生成物检出时的换行符差异，前端源码无变动。
-3. `tests/diagnostics/run_isolated_release_smoke.ps1`：增加了 `-ZipPath` 参数化路径支持，并将默认目标包更新为 `v1.3.0-rc1`。
+本轮工作区完成以下缺陷排查与闭环修复，并通过全量离线门禁（210/210 PASS）：
+1. **启动器编码与路径修复**：`scripts/core/launch_portable.ps1` 补充 UTF-8 BOM 修复 PowerShell 5.1 解析异常，并补齐源码仓库环境自动回溯 `bin/` 路径。
+2. **前端运行时异常修复**：`web/src/App.svelte` 补齐 `targetWbName` 解构与默认值，彻底修复执行完成时报 `ReferenceError: targetWbName is not defined`。
+3. **数据工具箱字段契约对齐**：`web/src/components/DataToolModal.svelte` 修复多文件汇总确认弹窗字段名不匹配（`sources`、`expectedFinalOutputRows`、`totalExcludedBlankRows`、`alignedColumns`）及工作表名称优先读取。
+4. **桥接层别名兼容**：`web/src/services/bridge.ts` 补齐 `activeSheet` 别名映射与 `VbaParamSignature` 类型导出。
+5. **项目手册与指引补全**：`安装与使用说明(必读).txt` 与 `docs/USER_GUIDE.md` 补充物理快照前置安全门禁及 `Ctrl + S` 解锁说明。
+6. **运行时与静态资源更新**：重新编译生成最新 `bin/dist/` 与 `bin/LeeExcel.dll`。
 
 *注：遵守 AGENTS.md 规范，不盲目执行 `git reset` 或 `git clean` 丢弃工作区文件。*
 

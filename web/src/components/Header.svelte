@@ -348,7 +348,7 @@
     color: var(--excel-green);
   }
 
-  .menu-icon {
+  :global(.menu-icon) {
     color: var(--office-muted);
     flex-shrink: 0;
   }

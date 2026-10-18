@@ -5,6 +5,7 @@
   import type { MacroReferenceData } from '../services/conversationManager';
 
   export let disabled = false;
+  export let workbook: any = null;
   export let referencedMacro: MacroReferenceData | null = null;
   export let onSend: (
     text: string,
@@ -12,6 +13,8 @@
     selectionSnapshot?: SelectionSnapshot,
     macroReference?: MacroReferenceData
   ) => void;
+
+  $: isUnsavedWorkbook = Boolean(workbook && (!workbook.isSaved || !workbook.fullName || !workbook.fullName.includes('\\')));
 
   let inputText = '';
   let currentMode: 'AUTOMATION' | 'CHAT' = 'AUTOMATION';
@@ -246,6 +249,16 @@
       <span>{isLoadingSelection ? '读取中...' : (selectionContext ? '替换为当前选区' : '附加当前选区')}</span>
     </button>
   </div>
+
+  <!-- 未存盘工作簿前置预警条 -->
+  {#if isUnsavedWorkbook}
+    <div class="unsaved-warning-bar" title="当前活动工作簿尚未保存到磁盘">
+      <div class="unsaved-msg-wrapper">
+        <span class="unsaved-dot">💾</span>
+        <span class="unsaved-text">工作簿【{workbook?.name || '未保存'}】未存盘，建议自动化操作前先按 Ctrl+S 存盘。</span>
+      </div>
+    </div>
+  {/if}
 
   <!-- 选区读取错误提示条 -->
   {#if selectionError}
@@ -557,6 +570,38 @@
   @keyframes rotate {
     from { transform: rotate(0deg); }
     to { transform: rotate(360deg); }
+  }
+
+  /* 未存盘预警条 */
+  .unsaved-warning-bar {
+    background: #fff8f0;
+    border: 1px solid #fed9cc;
+    color: #a14c00;
+    padding: 3px 8px;
+    border-radius: var(--office-radius-sm);
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .unsaved-msg-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    overflow: hidden;
+  }
+
+  .unsaved-dot {
+    font-size: 11px;
+    flex-shrink: 0;
+  }
+
+  .unsaved-text {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.3;
   }
 
   /* 选区错误提示条 */

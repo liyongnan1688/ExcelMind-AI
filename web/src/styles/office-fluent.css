@@ -583,5 +583,54 @@ button {
 .text-amber-600 { color: var(--office-amber); }
 .text-amber-700 { color: #a14c00; }
 .text-amber-800 { color: #873e00; }
+.text-blue-600 { color: #2563eb; }
+.text-purple-600 { color: #9333ea; }
+.text-indigo-600 { color: #4f46e5; }
+.text-indigo-700 { color: #4338ca; }
+
+/* 细微字号与字重支持 */
+.text-\[10px\] { font-size: 10px; line-height: 1.25; }
+.text-\[11px\] { font-size: 11px; line-height: 1.35; }
+.font-normal { font-weight: 400; }
+
+/* 尺寸与排版 */
+.w-full { width: 100%; }
+.h-full { height: 100%; }
+.block { display: block; }
+.inline-block { display: inline-block; }
+.text-center { text-align: center; }
+.cursor-pointer { cursor: pointer; }
+.overflow-hidden { overflow: hidden; }
+.overflow-y-auto { overflow-y: auto; }
+.max-h-36 { max-height: 9rem; }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 间距工具类补齐 */
+.px-1\.5 { padding-left: 6px; padding-right: 6px; }
+.px-2 { padding-left: 8px; padding-right: 8px; }
+.px-3 { padding-left: 12px; padding-right: 12px; }
+.py-0\.5 { padding-top: 2px; padding-bottom: 2px; }
+.py-1\.5 { padding-top: 6px; padding-bottom: 6px; }
+.pt-1 { padding-top: 4px; }
+.mt-0\.5 { margin-top: 2px; }
+.mb-0\.5 { margin-bottom: 2px; }
+.mb-1 { margin-bottom: 4px; }
+
+/* 边框与透明背景补充 */
+.border-gray-300 { border-color: #d1d5db; }
+.border-indigo-100 { border-color: #e0e7ff; }
+.border-gray-200\/60 { border-color: rgba(229, 231, 235, 0.6); }
+.border-gray-200\/80 { border-color: rgba(229, 231, 235, 0.8); }
+.bg-white\/80 { background-color: rgba(255, 255, 255, 0.8); }
+.bg-white\/90 { background-color: rgba(255, 255, 255, 0.9); }
+.bg-amber-50\/80 { background-color: rgba(254, 243, 199, 0.8); }
+
+/* 响应式自适应网格（窄窗格自动折行，宽窗格三列并排） */
+.responsive-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+  gap: 8px;
+}
+
 
 

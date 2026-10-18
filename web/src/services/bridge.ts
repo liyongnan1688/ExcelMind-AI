@@ -73,6 +73,7 @@ export interface WorkbookInfo {
   fullName: string;
   isSaved: boolean;
   activeSheetName?: string;
+  activeSheet?: string;
   usedRangeAddress?: string;
   sheets: string[];
   snapshots: SnapshotItem[];
@@ -90,6 +91,8 @@ export interface ScriptParameterDef {
   isSupported?: boolean;
   unsupportedReason?: string;
 }
+
+export type VbaParamSignature = ScriptParameterDef;
 
 export interface VbaEntryPointInfo {
   name: string;

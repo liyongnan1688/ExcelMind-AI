@@ -466,19 +466,6 @@ End Sub`;
     border-radius: 2px;
   }
 
-  .icon-inline {
-    flex-shrink: 0;
-    margin-top: 2px;
-  }
-
-  .text-amber {
-    color: var(--office-amber);
-  }
-
-  .text-green {
-    color: var(--excel-green);
-  }
-
   /* 源码折叠区 */
   .code-section {
     border: 1px solid var(--office-border-subtle);

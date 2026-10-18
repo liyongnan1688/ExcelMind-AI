@@ -558,19 +558,27 @@ namespace LeeExcel
             }
 
             bool createdOwnExcel = false;
-            dynamic runningApp = app;
-            if (runningApp == null)
+            dynamic runningApp = null;
+            // 优先启动独立专属的无头 Excel 后台实例，彻底隔离前台用户正在交互编辑的工作簿，防止 RPC_E_CALL_REJECTED
+            try
             {
-                try
+                Type excelType = Type.GetTypeFromProgID("Excel.Application");
+                if (excelType != null)
                 {
-                    Type excelType = Type.GetTypeFromProgID("Excel.Application");
                     runningApp = Activator.CreateInstance(excelType);
                     runningApp.Visible = false;
                     runningApp.DisplayAlerts = false;
                     runningApp.AskToUpdateLinks = false;
                     createdOwnExcel = true;
                 }
-                catch { }
+            }
+            catch { }
+
+            // 保底回退：若独立进程创建失败，才回退至传入的前台宿主 app
+            if (runningApp == null)
+            {
+                runningApp = app;
+                createdOwnExcel = false;
             }
 
             var summary = new BatchJobSummary

@@ -218,6 +218,9 @@
   async function refreshWorkbookInfo() {
     const res = await bridge.send<WorkbookInfo>('get_workbook_info');
     if (res.ok && res.data) {
+      if (res.data.activeSheetName && !res.data.activeSheet) {
+        res.data.activeSheet = res.data.activeSheetName;
+      }
       workbook = res.data;
     }
   }
@@ -245,6 +248,16 @@
       const attachedWbName = (selectionSnapshot.context.workbookName || '').trim();
       if (currentWbName && attachedWbName && currentWbName.toLowerCase() !== attachedWbName.toLowerCase()) {
         alert(`⚠️ 附加选区来自工作簿【${attachedWbName}】，但当前活动工作簿为【${currentWbName}】。\n\n为避免跨工作簿误操作，请重新附加当前工作簿选区或移除附件后再发送。`);
+        return false;
+      }
+    }
+
+    // 未存盘工作簿前置拦截：操作模式下写入未存盘文件无法安全通过重开回退，提示用户确认
+    if (requestMode === 'AUTOMATION' && workbook && (!workbook.isSaved || !workbook.fullName || !workbook.fullName.includes('\\'))) {
+      const confirmed = window.confirm(
+        `⚠️ 提示：当前工作簿【${workbook.name || '未保存工作簿'}】尚未保存到本地磁盘。\n\n自动化脚本执行后将直接修改当前表格数据。若未保存，出错时可能无法通过重新打开文件撤销。\n\n建议先按 Ctrl+S 存盘。是否仍要继续？`
+      );
+      if (!confirmed) {
         return false;
       }
     }
@@ -312,6 +325,7 @@
 
   async function runSendWorkflow(currentRequest: any, assistantMsg: ChatMessage) {
     const text = currentRequest.text || assistantMsg.prompt || '';
+    const targetWbName = currentRequest.targetWbName || '当前工作簿';
     try {
       // 提取多轮历史上下文：优先取各轮助手消息的 rawContent（大模型真实原始回复），执行摘要不污染历史
       const chatHistory = buildChatHistory(messages, {
@@ -669,7 +683,7 @@
     onRefresh={refreshWorkbookInfo}
   />
 
-  {#if activeWorkspace === 'assistant'}
+  {#if activeWorkspace === 'assistant' || activeWorkspace === 'scripts'}
     <div class="workspace-view assistant-view">
       <!-- 消息流区域 -->
       <main class="chat-area {isScrollBottom ? 'scroll-to-bottom' : ''}" bind:this={messagesContainer}>
@@ -751,7 +765,7 @@
           <div class="prototype-card-wrapper">
             <MacroConfirmCard
               targetWorkbook={workbook?.name || 'Sales_2026.xlsx'}
-              activeSheetName={workbook?.activeSheet || 'Sheet1'}
+              activeSheetName={workbook?.activeSheetName || workbook?.activeSheet || 'Sheet1'}
               onConfirmExecute={() => refreshWorkbookInfo()}
               onSwitchToChat={(draft) => {
                 activeWorkspace = 'assistant';
@@ -765,7 +779,7 @@
       </main>
 
       <!-- 底部紧凑输入栏 -->
-      <ChatInput bind:this={chatInputRef} disabled={isProcessing} bind:referencedMacro={activeMacroReference} onSend={handleSend} />
+      <ChatInput bind:this={chatInputRef} {workbook} disabled={isProcessing} bind:referencedMacro={activeMacroReference} onSend={handleSend} />
     </div>
 
   <!-- 工作区 2: 数据工具工作区 (代表性原型 2，独立视图，彻底解决弹窗遮罩与裸按钮) -->
@@ -889,45 +903,6 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
-  }
-
-  .prototype-banner {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    background: #eef5f0;
-    border: 1px solid var(--excel-light-border);
-    padding: 4px 8px;
-    border-radius: var(--office-radius-sm);
-    font-size: var(--font-size-xs);
-  }
-
-  .proto-tag {
-    font-weight: 700;
-    color: var(--excel-green);
-    margin-right: 6px;
-  }
-
-  .proto-title {
-    color: var(--office-text-secondary);
-    font-size: 11px;
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .proto-dismiss-btn {
-    border: none;
-    background: transparent;
-    color: var(--office-muted);
-    cursor: pointer;
-    font-size: 11px;
-    padding: 0 4px;
-  }
-
-  .proto-dismiss-btn:hover {
-    color: var(--office-text);
   }
 
   .chat-area {

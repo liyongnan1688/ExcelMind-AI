@@ -11,10 +11,19 @@ Write-Host "==========================================================" -Foregro
 Write-Host "           ExcelMind AI 原生插件 - 便携启动向导           " -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 
-# 1. 定位插件发布目录 (即 core/ 的父目录)
-$releaseDir = Split-Path -Parent $PSScriptRoot
-if (!(Test-Path (Join-Path $releaseDir "LeeExcel64.xll"))) {
+# 1. 定位插件发布目录 (发行包为 core/ 的父目录；源码仓库为项目根目录/bin)
+$parentDir = Split-Path -Parent $PSScriptRoot
+if (Test-Path (Join-Path $parentDir "LeeExcel64.xll")) {
+    $releaseDir = $parentDir
+} elseif (Test-Path (Join-Path $PSScriptRoot "LeeExcel64.xll")) {
     $releaseDir = $PSScriptRoot
+} else {
+    $projectRoot = Split-Path -Parent $parentDir
+    if (Test-Path (Join-Path $projectRoot "bin\LeeExcel64.xll")) {
+        $releaseDir = Join-Path $projectRoot "bin"
+    } else {
+        $releaseDir = $parentDir
+    }
 }
 
 # 解除安全锁定

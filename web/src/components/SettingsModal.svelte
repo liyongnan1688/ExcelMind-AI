@@ -180,6 +180,18 @@
             <span class="hint">留空时不发送 budget_tokens；用户填写时才发送具体预算数值</span>
           </div>
         {/if}
+
+        <div class="form-group">
+          <label for="cfg-system-prompt-addition">自定义系统附加提示词 (可选)</label>
+          <textarea
+            id="cfg-system-prompt-addition"
+            rows="2"
+            bind:value={config.systemPromptAddition}
+            placeholder="例如：生成的 VBA 宏请优先使用中文注释，保留原有字体样式..."
+            style="width: 100%; font-family: inherit; font-size: 12px; padding: 6px 8px; border: 1px solid var(--office-border); border-radius: var(--office-radius-sm); resize: vertical; box-sizing: border-box;"
+          ></textarea>
+          <span class="hint">该内容将自动追加到系统提示词尾部，可用于设定个人业务专属偏好</span>
+        </div>
       </div>
 
       <div class="modal-footer">
