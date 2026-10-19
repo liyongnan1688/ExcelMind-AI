@@ -5,12 +5,12 @@
 
 ---
 
-## 📌 当前发布基线 (v1.3.2)
+## 📌 当前发布基线 (v1.3.3)
 
-- **当前发布版本**：[v1.3.2](https://github.com/liyongnan1688/ExcelMind-AI/releases/tag/v1.3.2)
-- **官方发行包**：`ExcelMindAI-v1.3.2.zip`
+- **当前发布版本**：[v1.3.3](https://github.com/liyongnan1688/ExcelMind-AI/releases/tag/v1.3.3)
+- **官方发行包**：`ExcelMindAI-v1.3.3.zip`
 - **本地构建 SHA-256 校验值**：  
-  `f18ba50292a75cbdd69be7e53e15191b0d165a4f751663fd038a2767b5c85330`
+  `cb88bff1a351fd06e72dd3145405a94d3f50d66925f27509330cfeae0854c9fb`
 
 ---
 
@@ -53,7 +53,7 @@
 
 ## 🚀 快速开始
 
-从 [Releases](https://github.com/liyongnan1688/ExcelMind-AI/releases/tag/v1.3.2) 页面下载 `ExcelMindAI-v1.3.2.zip` 并校验 SHA-256 哈希：
+从 [Releases](https://github.com/liyongnan1688/ExcelMind-AI/releases/tag/v1.3.3) 页面下载 `ExcelMindAI-v1.3.3.zip` 并校验 SHA-256 哈希：
 
 > ⚠️ **未签名运行说明**：本候选包尚未导入商业 CA 证书。运行前请核对哈希值并遵守所在组织 IT 安全政策，由用户自主决定运行，本向导不默认引导用户绕过系统安全防护。
 
@@ -89,7 +89,7 @@
 cd web && pnpm install && pnpm run build && cd ..
 
 # 2. 自动化打包跨机器发布包
-pwsh -File scripts/package_release.ps1 -Version "v1.3.2"
+pwsh -File scripts/package_release.ps1 -Version "v1.3.3"
 ```
 
 离线自动化质量门禁检验：
