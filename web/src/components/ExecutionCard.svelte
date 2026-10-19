@@ -22,6 +22,7 @@
   } from 'lucide-svelte';
   import { bridge, type SnapshotItem, type VbaExecutionData } from '../services/bridge';
   import { getPromptConstraintsCatalog } from '../services/llm';
+  import { checkMacroSaveEligibility } from '../services/macroSaveEligibility';
   import { createEventDispatcher, tick } from 'svelte';
 
   const dispatch = createEventDispatcher();
@@ -53,35 +54,14 @@
       ? wrapperCode
       : executedCode;
 
-  // 常用宏保存资格校验门禁：
-  // 1. 代码非空且已执行完毕
-  // 2. 无运行期异常 (execution.error 为空)
-  // 3. 预检未失败 (precheckStatus !== 'failed')
-  // 4. 未发生非目标工作簿越权修改 (!otherWorkbooksAffected)
-  // 5. 目标身份核验未失败 (verificationStatus !== 'failed')
-  $: isSaveEligible = Boolean(
-    (executedCode || displayCode) &&
-    !isExecuting &&
-    execution &&
-    !execution.error &&
-    execution.precheckStatus !== 'failed' &&
-    !execution.readback?.otherWorkbooksAffected &&
-    execution.verificationStatus !== 'failed'
+  // 常用宏保存资格校验门禁 (调用生产纯函数服务 macroSaveEligibility.ts)
+  $: eligibility = checkMacroSaveEligibility(
+    execution,
+    isExecuting,
+    executedCode || displayCode
   );
-
-  $: saveDisabledReason = isExecuting
-    ? '宏正在执行中，请等待完成'
-    : !execution
-    ? '代码尚未执行，暂不可存为常用宏'
-    : execution.error
-    ? `代码执行遇到异常 (${execution.error})，不可存为常用宏`
-    : execution.precheckStatus === 'failed'
-    ? '代码编译预检失败，不可存为常用宏'
-    : execution.readback?.otherWorkbooksAffected
-    ? '检测到修改了非目标工作簿，存在越权风险，不可存为常用宏'
-    : execution.verificationStatus === 'failed'
-    ? '目标工作簿身份核验失败，不可存为常用宏'
-    : '';
+  $: isSaveEligible = eligibility.isSaveEligible;
+  $: saveDisabledReason = eligibility.reason;
 
   let showSaveDialog = false;
   let scriptName = '';
@@ -928,7 +908,7 @@
                   scriptDesc = prompt || '';
                 }
               }}
-              title={isSaveEligible ? "将本次执行验证通过的代码一键沉淀为本地宏库 (.bas)，随时可在 Ribbon 常用菜单中复用" : saveDisabledReason}
+              title={isSaveEligible ? "将本次执行成功的代码一键沉淀为本地宏库 (.bas)，随时可在 Ribbon 常用菜单中复用" : saveDisabledReason}
             >
               <Save size={13} color={isSaveEligible ? "#0078d4" : "#999999"} />
               <span>{showSaveDialog ? '收起' : '存为常用宏'}</span>

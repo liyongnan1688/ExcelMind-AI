@@ -46,11 +46,18 @@ export function buildChatHistory(
       }
       let evidence: { snapshotId?: string; failedIncident?: string; verifiedChange?: string } | undefined = undefined;
       if (m.execution) {
+        // 关键门禁（响应第三轮审查 P1-新）：仅当抽样核验一致且无运行异常时，才写入确定性的变更证据！
+        // 待人工核验 (unconfirmed) 或执行报错 (failed) 时，严禁虚构“验证通过”！
+        const isMatchedOrVerified =
+          (m.execution.verificationStatus === 'matched' || m.execution.verificationStatus === 'verified') &&
+          !m.execution.error &&
+          m.execution.precheckStatus !== 'failed';
+
         evidence = {
           snapshotId: m.execution.snapshot?.id,
           failedIncident: m.execution.error ? `${m.execution.summary || '执行报错'}: ${m.execution.error}` : undefined,
-          verifiedChange: m.execution.readback?.usedRangeAddress
-            ? `区域 ${m.execution.readback.usedRangeAddress} 验证通过`
+          verifiedChange: isMatchedOrVerified && m.execution.readback?.usedRangeAddress
+            ? `区域 ${m.execution.readback.usedRangeAddress} 抽样核验一致`
             : undefined,
         };
       }

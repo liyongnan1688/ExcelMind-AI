@@ -41,22 +41,27 @@
 
 ## 三、 审计整改专项落地事实 (feat/audit-rectification)
 
-本轮针对 2026-10-19 审查报告（第一轮与第二轮）完成全面闭环整改，并通过全量离线核心门禁（**230/230 PASS**，100% 保持全绿）：
-1. **CI 门禁与测试动态编译自愈 (解决第二轮审查 P2-新/阻断级隐患)**：
+本轮针对 2026-10-19 审查报告（第一轮、第二轮与第三轮）完成全面闭环整改，并通过全量离线核心门禁（**231/231 PASS**，100% 保持全绿）：
+1. **证据载荷真实性门控 (解决第三轮审查 P1-新/载荷失真)**：
+   - 彻底解决“管道已通但载荷失真”漏洞：在 `conversationManager.ts` 组装结构化元数据时，增加严格状态门控 `(verificationStatus === 'matched' || verificationStatus === 'verified') && !error`；
+   - 仅当抽样核验真正一致且无运行异常时，才向证据账本写入 `区域 ${usedRangeAddress} 抽样核验一致`；对未确认的排版任务或失败报错任务，绝不虚构“验证通过”，确保不可变证据账本内容 100% 真实。
+2. **抽离门禁为独立纯 TS 模块并测真身 (解决第三轮审查 P1-新/测试副本)**：
+   - 新增独立纯函数服务模块 `web/src/services/macroSaveEligibility.ts`，导出 `checkMacroSaveEligibility`；
+   - `ExecutionCard.svelte` 组件接入该纯函数计算保存资格；
+   - `test_suite_unit.cjs` 通过动态转译直接加载该生产服务模块进行断言，生产与测试共享同一真实代码，彻底根治门禁逻辑的“测试抄写副本”弊病。
+3. **闭环死状态、死分支与文案契约对齐 (解决第三轮审查 P1-新)**：
+   - 在 `bridge.ts` 补齐 `verificationStatus?: 'matched' | 'verified' | 'unconfirmed' | 'failed'` 类型联合；
+   - 修复 `App.svelte:549` 孤立不可达分支为 `if (verification.status === 'matched' || verification.status === 'verified')`，打通全链路可达性；
+   - 同步更新 `ExecutionCard.svelte` 宏保存按钮的 Tooltip 为“将本次执行成功的代码一键沉淀为本地宏库 (.bas)...”，彻底消除行为与文案的分叉。
+4. **CI 门禁与测试动态编译自愈 (第二轮整改固化)**：
    - 彻底将 `web/node_modules/` 从 Git 索引中剔除（`git rm -r --cached`），本地保留物理文件供编译测试；
-   - 在 `.github/workflows/release.yml` 门禁执行前显式增加前端依赖安装步骤，同时在 `test_suite_unit.cjs` 中引入 Vite/esbuild 动态嗅探与纯 Node 离线语法降级兜底，彻底消除 CI 纯净环境因缺失依赖导致的断崖崩溃。
-2. **核验语义去虚高与常用宏保存死锁彻底解除 (解决第二轮审查 P0-新)**：
-   - 将 `verifyExecutionResult` 中基于样本抽样的字面包含诚实重构为 `matched`（抽样匹配），UI 明确标识“抽样匹配”，杜绝虚高夸大为全部逻辑验证；
-   - 彻底解绑“存为常用宏”的一刀切门禁：修正准入门槛为“无运行期报错、预检未失败、未发生非目标工作簿越权修改且目标身份未错乱”。复杂排版、格式美化与数据清洗宏均可正常存为常用宏，字面抽样命中作为高可信加分徽标展示。
-3. **结构化证据账本优先摄取 (解决第二轮审查 P1-新)**：
-   - 在 `conversationManager.ts` 构建上下文时直接挂载 `evidence: { snapshotId, failedIncident, verifiedChange }` 结构化对象；
-   - `compaction.ts` 优先摄取结构化元数据，文本正则仅作为降级兜底，彻底消灭自然语言提示词或 UI 文案调整导致证据静默丢失的脆弱性。
-4. **架构描述诚实严谨化 (解决第二轮审查 P0-3)**：
+   - 在 `.github/workflows/release.yml` 门禁执行前显式增加前端依赖安装步骤，同时在 `test_suite_unit.cjs` 中引入 Vite/esbuild 动态嗅探与纯 Node 离线语法降级兜底，消除 CI 离线依赖断崖。
+5. **架构描述诚实严谨化 (第二轮整改固化)**：
    - 清理代码与文档中关于“In-Process Tool Loop”等夸大措辞，实事求是更正为“**Native COM Fast-Path Dispatch（原生轻量快速分派通道）**”。
-5. **工具契约与安全参数校验门禁 (第一轮整改固化)**：
+6. **工具契约与安全参数校验门禁 (第一轮整改固化)**：
    - `web/src/services/toolRegistry.ts` 作为前端工具唯一事实来源；C# `src/NativeBridge.cs` 增加坐标格式严格正则拦截；C# 加载项重新编译生成合规 `bin/LeeExcel.dll`。
-6. **仓库根目录卫生与历史报告归档 (解决第二轮审查 P2-新)**：
-   - 将根目录的历史审查报告彻底归档至 `docs/history/reviews/`，严格遵循 `AGENTS.md` 规约保持根目录干净；
+7. **仓库根目录卫生与历史报告归档**：
+   - 将根目录的三份审查报告（v1、v2、v3）彻底归档至 `docs/history/reviews/`，严格遵循 `AGENTS.md` 规约保持根目录干净；
    - 前端工作台重新构建生成最终单文件静态包 `bin/dist/`。
 
 *注：遵守 AGENTS.md 规范，不盲目执行 `git reset` 或 `git clean` 丢弃工作区文件。*

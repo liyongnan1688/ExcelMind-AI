@@ -546,10 +546,10 @@
         const repairBadge = wasRepaired ? '（初次代码存在预编译瑕疵，已自动完成自我修复并成功执行）' : '';
 
         // 对话气泡最终回复保持简短（1句话），不污染聊天界面
-        if (verification.status === 'verified') {
+        if (verification.status === 'matched' || verification.status === 'verified') {
           assistantMsg.content = parsed.explanation
-            ? `${parsed.explanation}（区域 ${execRes.data.readback?.usedRangeAddress || ''} 验证通过）${repairBadge}`
-            : `已在【${targetWbName}】执行完成，区域 ${execRes.data.readback?.usedRangeAddress || ''} 验证通过。${repairBadge}`;
+            ? `${parsed.explanation}（区域 ${execRes.data.readback?.usedRangeAddress || ''} 抽样核验一致）${repairBadge}`
+            : `已在【${targetWbName}】执行完成，区域 ${execRes.data.readback?.usedRangeAddress || ''} 抽样核验一致。${repairBadge}`;
         } else {
           assistantMsg.content = parsed.explanation
             ? `${parsed.explanation}（${verification.note}）${repairBadge}`

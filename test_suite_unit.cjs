@@ -6305,6 +6305,7 @@ async function loadRealTsService(relPath) {
     if (reqPath === './compaction') return tsModuleCache[path.resolve(__dirname, './web/src/services/compaction.ts')];
     if (reqPath === './toolRegistry') return tsModuleCache[path.resolve(__dirname, './web/src/services/toolRegistry.ts')];
     if (reqPath === './conventions') return tsModuleCache[path.resolve(__dirname, './web/src/services/conventions.ts')];
+    if (reqPath === './macroSaveEligibility') return tsModuleCache[path.resolve(__dirname, './web/src/services/macroSaveEligibility.ts')];
     if (reqPath === './mcpClient') return { mcpGateway: {} };
     return require(reqPath);
   };
@@ -6320,6 +6321,7 @@ const realCompaction = await loadRealTsService('./web/src/services/compaction.ts
 const realToolRegistry = await loadRealTsService('./web/src/services/toolRegistry.ts');
 const realDecisionEngine = await loadRealTsService('./web/src/services/decisionEngine.ts');
 const realLlm = await loadRealTsService('./web/src/services/llm.ts');
+const realMacroSaveEligibility = await loadRealTsService('./web/src/services/macroSaveEligibility.ts');
 
 // Test 20.1: 静态 System Prompt 100% 字节恒定与前缀缓存安全断言 (直接测试真实 llm.ts)
 {
@@ -6450,6 +6452,46 @@ const realLlm = await loadRealTsService('./web/src/services/llm.ts');
     structSummary.includes('snap_struct_9999') &&
       structSummary.includes('预检拦截: 包含非法系统API') &&
       structSummary.includes('区域 C1:C50 验证通过')
+  );
+
+  // Test 20.6: 证据载荷真实性门控断言 (响应审查报告第三轮 P1-新，杜绝失败/待确认虚构“验证通过”)
+  const mockPayloadMessages = [
+    {
+      id: 'm1',
+      role: 'assistant',
+      content: '排版完成',
+      execution: {
+        verificationStatus: 'unconfirmed',
+        readback: { usedRangeAddress: 'A1:H10' },
+      },
+    },
+    {
+      id: 'm2',
+      role: 'assistant',
+      content: '执行报错',
+      execution: {
+        error: 'Err 13',
+        verificationStatus: 'failed',
+        readback: { usedRangeAddress: 'B1:B10' },
+      },
+    },
+    {
+      id: 'm3',
+      role: 'assistant',
+      content: '抽样匹配',
+      execution: {
+        verificationStatus: 'matched',
+        readback: { usedRangeAddress: 'C1:C10' },
+      },
+    },
+  ];
+  const payloadHistoryOutput = buildChatHistory(mockPayloadMessages);
+  assert(
+    '[Phase 1 证据载荷真实性门控] buildChatHistory 仅在 matched 状态生成 verifiedChange，unconfirmed 与 failed 绝不虚构验证通过',
+    payloadHistoryOutput[0].evidence.verifiedChange === undefined &&
+      payloadHistoryOutput[1].evidence.verifiedChange === undefined &&
+      payloadHistoryOutput[1].evidence.failedIncident.includes('Err 13') &&
+      payloadHistoryOutput[2].evidence.verifiedChange === '区域 C1:C10 抽样核验一致'
   );
 }
 
@@ -6641,28 +6683,7 @@ const realLlm = await loadRealTsService('./web/src/services/llm.ts');
       dWithMacro.track === 'TRACK_B_HEAVY_VBA'
   );
 
-  // Test 22.2: 常用宏保存资格与状态门禁断言 (响应审查报告第二轮 P0-新，解除待确认死锁)
-  function testSaveEligibility(execution, isExecuting) {
-    const executedCode = execution?.executedVbaCode || execution?.vbaCode || '';
-    const isSaveEligible = Boolean(
-      executedCode &&
-      !isExecuting &&
-      execution &&
-      !execution.error &&
-      execution.precheckStatus !== 'failed' &&
-      !execution.readback?.otherWorkbooksAffected &&
-      execution.verificationStatus !== 'failed'
-    );
-    let reason = '';
-    if (isExecuting) reason = '宏正在执行中，请等待完成';
-    else if (!execution) reason = '代码尚未执行，暂不可存为常用宏';
-    else if (execution.error) reason = `代码执行遇到异常 (${execution.error})，不可存为常用宏`;
-    else if (execution.precheckStatus === 'failed') reason = '代码编译预检失败，不可存为常用宏';
-    else if (execution.readback?.otherWorkbooksAffected) reason = '检测到修改了非目标工作簿，存在越权风险，不可存为常用宏';
-    else if (execution.verificationStatus === 'failed') reason = '目标工作簿身份核验失败，不可存为常用宏';
-    return { isSaveEligible, reason };
-  }
-
+  // Test 22.2: 常用宏保存资格与状态门禁断言 (直接测试生产纯函数模块 macroSaveEligibility.ts，彻底杜绝测试副本)
   const validMatchedExec = { executedVbaCode: 'Sub Test()\nEnd Sub', verificationStatus: 'matched', precheckStatus: 'passed' };
   const validUnconfirmedExec = { executedVbaCode: 'Sub Test()\nEnd Sub', verificationStatus: 'unconfirmed', precheckStatus: 'passed' };
   const failedExec = { executedVbaCode: 'Sub Test()\nEnd Sub', error: 'Type mismatch (13)', verificationStatus: 'failed' };
@@ -6670,18 +6691,25 @@ const realLlm = await loadRealTsService('./web/src/services/llm.ts');
   const precheckFailExec = { executedVbaCode: 'Sub Test()\nEnd Sub', precheckStatus: 'failed' };
   const otherWbAffectedExec = { executedVbaCode: 'Sub Test()\nEnd Sub', readback: { otherWorkbooksAffected: true } };
 
+  const resMatched = realMacroSaveEligibility.checkMacroSaveEligibility(validMatchedExec, false, 'Sub Test()\nEnd Sub');
+  const resUnconfirmed = realMacroSaveEligibility.checkMacroSaveEligibility(validUnconfirmedExec, false, 'Sub Test()\nEnd Sub');
+  const resFailed = realMacroSaveEligibility.checkMacroSaveEligibility(failedExec, false, 'Sub Test()\nEnd Sub');
+  const resTargetMismatch = realMacroSaveEligibility.checkMacroSaveEligibility(targetMismatchExec, false, 'Sub Test()\nEnd Sub');
+  const resOtherWb = realMacroSaveEligibility.checkMacroSaveEligibility(otherWbAffectedExec, false, 'Sub Test()\nEnd Sub');
+  const resPrecheckFail = realMacroSaveEligibility.checkMacroSaveEligibility(precheckFailExec, false, 'Sub Test()\nEnd Sub');
+
   assert(
-    '[Phase 3 常用宏保存门禁与死锁解除] ExecutionCard 存为常用宏门禁：抽样匹配与待确认均放行，报错/预检失败/目标错乱/越权修改严密拦截',
-    testSaveEligibility(validMatchedExec, false).isSaveEligible === true &&
-      testSaveEligibility(validUnconfirmedExec, false).isSaveEligible === true &&
-      testSaveEligibility(failedExec, false).isSaveEligible === false &&
-      testSaveEligibility(failedExec, false).reason.includes('代码执行遇到异常') &&
-      testSaveEligibility(targetMismatchExec, false).isSaveEligible === false &&
-      testSaveEligibility(targetMismatchExec, false).reason.includes('身份核验失败') &&
-      testSaveEligibility(otherWbAffectedExec, false).isSaveEligible === false &&
-      testSaveEligibility(otherWbAffectedExec, false).reason.includes('修改了非目标工作簿') &&
-      testSaveEligibility(precheckFailExec, false).isSaveEligible === false &&
-      testSaveEligibility(precheckFailExec, false).reason.includes('编译预检失败')
+    '[Phase 3 常用宏保存门禁真身测试] 真实 macroSaveEligibility.ts 生产纯函数：抽样匹配与待确认均放行，报错/预检失败/目标错乱/越权修改严密拦截',
+    resMatched.isSaveEligible === true &&
+      resUnconfirmed.isSaveEligible === true &&
+      resFailed.isSaveEligible === false &&
+      resFailed.reason.includes('代码执行遇到异常') &&
+      resTargetMismatch.isSaveEligible === false &&
+      resTargetMismatch.reason.includes('身份核验失败') &&
+      resOtherWb.isSaveEligible === false &&
+      resOtherWb.reason.includes('修改了非目标工作簿') &&
+      resPrecheckFail.isSaveEligible === false &&
+      resPrecheckFail.reason.includes('编译预检失败')
   );
 
   // Test 22.3: 对话即宏过程名智能提取与保真断言
