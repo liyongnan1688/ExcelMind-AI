@@ -206,11 +206,6 @@ namespace LeeExcelTests
 
         public static int Main(string[] args)
         {
-            Console.OutputEncoding = Encoding.UTF8;
-            Log("================================================================================");
-            Log("    ExcelMind AI: v1.2.0-rc1 发行包独立隔离解压冒烟验证 (Isolated Smoke Test)    ");
-            Log("================================================================================");
-
             if (args.Length < 2)
             {
                 Console.WriteLine("用法: VerifyIsolatedReleaseSmoke.exe <ArtifactsDir> <ZipFilePath>");
@@ -220,6 +215,15 @@ namespace LeeExcelTests
             _artifactsDir = Path.GetFullPath(args[0]);
             string zipPath = Path.GetFullPath(args[1]);
             _extractedPkgDir = Path.Combine(_artifactsDir, "extracted_pkg");
+
+            string fileName = Path.GetFileNameWithoutExtension(zipPath);
+            string versionTag = "发行包";
+            var vm = Regex.Match(fileName, @"(v\d+\.\d+\.\d+(?:-[a-zA-Z0-9.]+)?)$");
+            if (vm.Success) versionTag = vm.Groups[1].Value;
+
+            Log("================================================================================");
+            Log(string.Format("    ExcelMind AI: {0} 独立隔离解压冒烟验证 (Isolated Smoke Test)    ", versionTag));
+            Log("================================================================================");
 
             Log("工作目录 (Artifacts): " + _artifactsDir);
             Log("发布包路径 (ZIP)    : " + zipPath);
@@ -826,8 +830,13 @@ namespace LeeExcelTests
 
         private static void GenerateReport(string reportPath, string zipPath)
         {
+            string fileName = Path.GetFileNameWithoutExtension(zipPath);
+            string versionTag = "发行包";
+            var vm = Regex.Match(fileName, @"(v\d+\.\d+\.\d+(?:-[a-zA-Z0-9.]+)?)$");
+            if (vm.Success) versionTag = vm.Groups[1].Value;
+
             var sb = new StringBuilder();
-            sb.AppendLine("# ExcelMind AI v1.2.0-rc1 发行包独立隔离解压冒烟验证报告");
+            sb.AppendLine(string.Format("# ExcelMind AI {0} 发行包独立隔离解压冒烟验证报告", versionTag));
             sb.AppendLine();
             sb.AppendLine(string.Format("> **报告时间**：{0}  ", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")));
             sb.AppendLine(string.Format("> **发行 ZIP 路径**：`{0}`  ", zipPath));
