@@ -417,12 +417,12 @@ export function checkVbaScopeRisk(code: string): ScopeRiskResult {
 
 /**
  * 执行后状态核验：将写后读回 (Readback) 与用户实际诉求比较
- * 严格区分“宏已运行”与“任务完成”，主观美观标为“效果待确认”
+ * 严格区分“宏已运行”、“抽样字面匹配”与“视觉效果待人工确认”
  */
 export function verifyExecutionResult(
   prompt: string,
   readback: WorkbookReadback | undefined
-): { status: 'verified' | 'unconfirmed' | 'failed'; note: string } {
+): { status: 'matched' | 'verified' | 'unconfirmed' | 'failed'; note: string } {
   if (!readback) {
     return {
       status: 'unconfirmed',
@@ -470,8 +470,8 @@ export function verifyExecutionResult(
       const found = readback.sampleValues.some((v) => v.includes(expectedVal));
       if (found) {
         return {
-          status: 'verified',
-          note: `已成功在目标区域 (${readback.usedRangeAddress || targetCell}) 写入【${expectedVal}】，数据核验一致。`,
+          status: 'matched',
+          note: `已成功在目标区域 (${readback.usedRangeAddress || targetCell}) 检测到【${expectedVal}】（抽样字面核验一致）。`,
         };
       }
     }
@@ -506,6 +506,11 @@ export function verifyExecutionResult(
 export interface ChatHistoryItem {
   role: 'user' | 'assistant';
   content: string;
+  evidence?: {
+    snapshotId?: string;
+    failedIncident?: string;
+    verifiedChange?: string;
+  };
 }
 
 export interface ApiAuditInfo {

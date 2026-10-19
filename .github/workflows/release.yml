@@ -44,6 +44,13 @@ jobs:
           version: 9
           run_install: false
 
+      - name: Install Frontend Dependencies
+        shell: pwsh
+        run: |
+          cd web
+          pnpm install --frozen-lockfile
+          cd ..
+
       - name: Run Offline Quality Gates
         shell: pwsh
         run: |

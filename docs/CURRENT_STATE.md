@@ -41,23 +41,22 @@
 
 ## 三、 审计整改专项落地事实 (feat/audit-rectification)
 
-本轮针对 2026-10-19 审查报告完成全面闭环整改，并通过全量离线核心门禁（**229/229 PASS**，100% 保持全绿）：
-1. **版本库索引与工程干净度治理 (Phase 0)**：
-   - 彻底将 `web/node_modules/` 从 Git 索引中剔除（`git rm -r --cached`），同时在 `.gitignore` 中固化忽略，本地保留物理文件供编译测试，杜绝巨型依赖误入仓库；
-   - 严格遵守 `AGENTS.md`，不污染 `bin/` 与根目录，无任何无授权进程操作。
-2. **工具契约与安全参数校验门禁 (Phase 1)**：
-   - 新增 `web/src/services/toolRegistry.ts` 作为前端本地与外部工具唯一事实来源（Single Source of Truth），统一声明 Schema、只读标记与参数验证逻辑；
-   - `web/src/services/mcpClient.ts` 重构为基于 `toolRegistry` 的轻量进程内通用网关；
-   - 在 C# `src/NativeBridge.cs` 中增加坐标格式严格正则拦截（`^(\$)?[A-Za-z]{1,3}(\$)?[0-9]{1,7}$`），非法输入直接拒绝穿透底层 COM；
-   - C# 加载项重新编译生成合规 `bin/LeeExcel.dll`。
-3. **不可变事实与证据账本机制 (Phase 2)**：
-   - `web/src/services/compaction.ts` 实现 `extractExecutionEvidence` 机制，在会话压缩时将物理快照 ID（`snap_...`）、预检/执行报错记录与核验通过区域固化为 `【关键执行事实与证据锚点】`，禁止跨压缩周期遗忘或篡改。
-4. **意图自主决策加固、公约解耦与常用宏门禁 (Phase 3)**：
-   - 提取 `web/src/services/conventions.ts` 集中管理商务排版与企业主题公约，`web/src/services/llm.ts` 解耦引用，确保静态 Prompt 100% 字节恒定；
-   - `web/src/services/decisionEngine.ts` 接入 `toolRegistry`，增加疑问修饰词（怎么/如何/why/how等）短路降级规则与中英文精准双语分流；在 `web/src/App.svelte` 实施有效请求模式降级（CHAT 模式绝不自动触发物理快照与 VBA 执行）；
-   - `web/src/components/ExecutionCard.svelte` 增加 `isSaveEligible` 与原因提示，物理禁用未通过核验、执行报错或预检失败时的“存为常用宏”操作。
-5. **动态测试架构彻底升级**：
-   - `test_suite_unit.cjs` 淘汰重复手写的 mock 副本，改用 Vite 的 `transformWithEsbuild` 在内存中实时转译加载 TS 源码模块进行断言，门禁通过数升至 **229/229 PASS**；
+本轮针对 2026-10-19 审查报告（第一轮与第二轮）完成全面闭环整改，并通过全量离线核心门禁（**230/230 PASS**，100% 保持全绿）：
+1. **CI 门禁与测试动态编译自愈 (解决第二轮审查 P2-新/阻断级隐患)**：
+   - 彻底将 `web/node_modules/` 从 Git 索引中剔除（`git rm -r --cached`），本地保留物理文件供编译测试；
+   - 在 `.github/workflows/release.yml` 门禁执行前显式增加前端依赖安装步骤，同时在 `test_suite_unit.cjs` 中引入 Vite/esbuild 动态嗅探与纯 Node 离线语法降级兜底，彻底消除 CI 纯净环境因缺失依赖导致的断崖崩溃。
+2. **核验语义去虚高与常用宏保存死锁彻底解除 (解决第二轮审查 P0-新)**：
+   - 将 `verifyExecutionResult` 中基于样本抽样的字面包含诚实重构为 `matched`（抽样匹配），UI 明确标识“抽样匹配”，杜绝虚高夸大为全部逻辑验证；
+   - 彻底解绑“存为常用宏”的一刀切门禁：修正准入门槛为“无运行期报错、预检未失败、未发生非目标工作簿越权修改且目标身份未错乱”。复杂排版、格式美化与数据清洗宏均可正常存为常用宏，字面抽样命中作为高可信加分徽标展示。
+3. **结构化证据账本优先摄取 (解决第二轮审查 P1-新)**：
+   - 在 `conversationManager.ts` 构建上下文时直接挂载 `evidence: { snapshotId, failedIncident, verifiedChange }` 结构化对象；
+   - `compaction.ts` 优先摄取结构化元数据，文本正则仅作为降级兜底，彻底消灭自然语言提示词或 UI 文案调整导致证据静默丢失的脆弱性。
+4. **架构描述诚实严谨化 (解决第二轮审查 P0-3)**：
+   - 清理代码与文档中关于“In-Process Tool Loop”等夸大措辞，实事求是更正为“**Native COM Fast-Path Dispatch（原生轻量快速分派通道）**”。
+5. **工具契约与安全参数校验门禁 (第一轮整改固化)**：
+   - `web/src/services/toolRegistry.ts` 作为前端工具唯一事实来源；C# `src/NativeBridge.cs` 增加坐标格式严格正则拦截；C# 加载项重新编译生成合规 `bin/LeeExcel.dll`。
+6. **仓库根目录卫生与历史报告归档 (解决第二轮审查 P2-新)**：
+   - 将根目录的历史审查报告彻底归档至 `docs/history/reviews/`，严格遵循 `AGENTS.md` 规约保持根目录干净；
    - 前端工作台重新构建生成最终单文件静态包 `bin/dist/`。
 
 *注：遵守 AGENTS.md 规范，不盲目执行 `git reset` 或 `git clean` 丢弃工作区文件。*

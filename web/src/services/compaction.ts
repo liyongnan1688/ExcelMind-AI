@@ -205,7 +205,20 @@ export function buildStructuredSummary(
     insights.sheetNames.forEach((s) => !allSheets.includes(s) && allSheets.push(s));
     insights.rules.forEach((r) => !allRules.includes(r) && allRules.push(r));
 
-    // 提取关键证据事实
+    // 提取关键证据事实：优先读取结构化元数据（Structured Evidence），杜绝文案改动导致证据漏检
+    if (msg.evidence) {
+      if (msg.evidence.snapshotId && !allSnapshotIds.includes(msg.evidence.snapshotId)) {
+        allSnapshotIds.push(msg.evidence.snapshotId);
+      }
+      if (msg.evidence.failedIncident && !allFailedIncidents.includes(msg.evidence.failedIncident)) {
+        allFailedIncidents.push(msg.evidence.failedIncident);
+      }
+      if (msg.evidence.verifiedChange && !allVerifiedChanges.includes(msg.evidence.verifiedChange)) {
+        allVerifiedChanges.push(msg.evidence.verifiedChange);
+      }
+    }
+
+    // 降级兜底：从自然语言文本中正则提取
     const evidence = extractExecutionEvidence(msg.content);
     evidence.snapshotIds.forEach((id) => !allSnapshotIds.includes(id) && allSnapshotIds.push(id));
     evidence.failedIncidents.forEach((f) => !allFailedIncidents.includes(f) && allFailedIncidents.push(f));

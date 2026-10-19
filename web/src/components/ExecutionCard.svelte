@@ -53,13 +53,20 @@
       ? wrapperCode
       : executedCode;
 
-  // 常用宏保存资格强校验门禁：代码必须执行完成、无错误、且通过写后验证 (verified)
+  // 常用宏保存资格校验门禁：
+  // 1. 代码非空且已执行完毕
+  // 2. 无运行期异常 (execution.error 为空)
+  // 3. 预检未失败 (precheckStatus !== 'failed')
+  // 4. 未发生非目标工作簿越权修改 (!otherWorkbooksAffected)
+  // 5. 目标身份核验未失败 (verificationStatus !== 'failed')
   $: isSaveEligible = Boolean(
     (executedCode || displayCode) &&
     !isExecuting &&
-    !execution?.error &&
-    execution?.verificationStatus === 'verified' &&
-    execution?.precheckStatus !== 'failed'
+    execution &&
+    !execution.error &&
+    execution.precheckStatus !== 'failed' &&
+    !execution.readback?.otherWorkbooksAffected &&
+    execution.verificationStatus !== 'failed'
   );
 
   $: saveDisabledReason = isExecuting
@@ -70,8 +77,10 @@
     ? `代码执行遇到异常 (${execution.error})，不可存为常用宏`
     : execution.precheckStatus === 'failed'
     ? '代码编译预检失败，不可存为常用宏'
-    : execution.verificationStatus !== 'verified'
-    ? '执行效果尚未完全核验通过 (待确认)，暂不可存为常用宏'
+    : execution.readback?.otherWorkbooksAffected
+    ? '检测到修改了非目标工作簿，存在越权风险，不可存为常用宏'
+    : execution.verificationStatus === 'failed'
+    ? '目标工作簿身份核验失败，不可存为常用宏'
     : '';
 
   let showSaveDialog = false;
@@ -260,7 +269,7 @@
     ? 'card-running'
     : execution?.error
     ? 'card-error'
-    : execution?.verificationStatus === 'verified'
+    : (execution?.verificationStatus === 'matched' || execution?.verificationStatus === 'verified')
     ? 'card-success'
     : 'card-unconfirmed'}"
 >
@@ -289,11 +298,12 @@
         {#if execution.elapsedMs}
           <span class="badge badge-gray">{(execution.elapsedMs / 1000).toFixed(2)}s</span>
         {/if}
-      {:else if execution?.verificationStatus === 'verified'}
+      {:else if execution?.verificationStatus === 'matched' || execution?.verificationStatus === 'verified'}
         <CheckCircle2 size={16} color="#107C41" />
         <span class="summary-text font-success" title={execution.summary}>
-          {execution.summary || '宏已运行，区域验证通过'}
+          {execution.summary || '宏已运行，抽样字面核验一致'}
         </span>
+        <span class="badge badge-green">抽样匹配</span>
         {#if execution?.elapsedMs}
           <span class="badge badge-green">{(execution.elapsedMs / 1000).toFixed(2)}s</span>
         {/if}
@@ -992,8 +1002,8 @@
       <div class="fs-header">
         <div class="fs-title-area">
           <span class="fs-title">执行详情与源码放大查看</span>
-          <span class="badge {execution?.verificationStatus === 'verified' ? 'badge-green' : (execution?.error ? 'badge-red' : 'badge-amber')}">
-            {execution?.verificationStatus === 'verified' ? '核验通过' : (execution?.error ? '执行异常' : '待确认')}
+          <span class="badge {(execution?.verificationStatus === 'matched' || execution?.verificationStatus === 'verified') ? 'badge-green' : (execution?.error || execution?.verificationStatus === 'failed' ? 'badge-red' : 'badge-amber')}">
+            {(execution?.verificationStatus === 'matched' || execution?.verificationStatus === 'verified') ? '抽样匹配' : (execution?.error || execution?.verificationStatus === 'failed' ? '执行异常' : '待确认')}
           </span>
           <span class="fs-subtitle">{execution?.targetWorkbookName || '当前工作簿'}</span>
         </div>

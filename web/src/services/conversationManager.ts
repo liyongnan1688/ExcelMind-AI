@@ -44,9 +44,20 @@ export function buildChatHistory(
           contentToSend = m.rawContent;
         }
       }
+      let evidence: { snapshotId?: string; failedIncident?: string; verifiedChange?: string } | undefined = undefined;
+      if (m.execution) {
+        evidence = {
+          snapshotId: m.execution.snapshot?.id,
+          failedIncident: m.execution.error ? `${m.execution.summary || '执行报错'}: ${m.execution.error}` : undefined,
+          verifiedChange: m.execution.readback?.usedRangeAddress
+            ? `区域 ${m.execution.readback.usedRangeAddress} 验证通过`
+            : undefined,
+        };
+      }
       return {
         role: m.role,
         content: contentToSend,
+        evidence,
       };
     });
 }

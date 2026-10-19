@@ -2,8 +2,8 @@
  * 双轨自主调度决策器 (Dual-Track Decision Engine)
  * 
  * 核心设计：
- * - 轨道一 (Track A: Native COM / In-Process Tool Loop)：
- *   轻量感知、只读探测、全簿透视、公式血缘审计与外部数据接入。毫秒级即时响应，零宏注入、零弹窗。
+ * - 轨道一 (Track A: Native COM Fast-Path Dispatch / 原生轻量快速分派通道)：
+ *   轻量感知、只读探测、全簿透视、公式血缘审计与外部数据接入。毫秒级即时响应，零宏注入、零快照、零弹窗。
  * - 轨道二 (Track B: Heavy VBA & Physical Snapshot)：
  *   重度计算、复杂批量清洗、图表渲染与跨表形变。先做物理全量快照，再进行 100% 源码保真编译注入与写后读回。
  * - 纯咨询通道 (CHAT)：

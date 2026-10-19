@@ -6245,18 +6245,50 @@ console.log('\n=== 19. TASK-R6c-01 Non-Destructive Upgrade & Sanitized Diagnosti
 console.log('\n=== 20. TASK-PHASE1 Cache-Safe Prompt & Compaction Pipeline Suite ===');
 
 // 统一动态 TS 模块编译器与加载器：彻底淘汰手写测试副本，直接测试真实生产源码模块
-const vite = require('./web/node_modules/vite');
+let viteCompiler = null;
+try {
+  viteCompiler = require('./web/node_modules/vite');
+} catch (e) {
+  try {
+    viteCompiler = require('vite');
+  } catch (e2) {
+    try {
+      viteCompiler = require('./web/node_modules/esbuild');
+    } catch (e3) {
+      viteCompiler = null;
+    }
+  }
+}
 const tsModuleCache = {};
 
 async function loadRealTsService(relPath) {
   const fullPath = path.resolve(__dirname, relPath);
   if (tsModuleCache[fullPath]) return tsModuleCache[fullPath];
   const code = fs.readFileSync(fullPath, 'utf8');
-  const res = await vite.transformWithEsbuild(code, fullPath, {
-    loader: 'ts',
-    format: 'cjs',
-    target: 'node20',
-  });
+  let transformedCode = '';
+  if (viteCompiler && typeof viteCompiler.transformWithEsbuild === 'function') {
+    const res = await viteCompiler.transformWithEsbuild(code, fullPath, {
+      loader: 'ts',
+      format: 'cjs',
+      target: 'node20',
+    });
+    transformedCode = res.code;
+  } else if (viteCompiler && typeof viteCompiler.transform === 'function') {
+    const res = await viteCompiler.transform(code, {
+      loader: 'ts',
+      format: 'cjs',
+      target: 'node20',
+    });
+    transformedCode = res.code;
+  } else {
+    // 零依赖环境兜底：极简剔除 TS interface、type、泛型及类型注解，转为合法 CJS
+    transformedCode = code
+      .replace(/export\s+interface\s+[\s\S]*?^}/gm, '')
+      .replace(/export\s+type\s+[\s\S]*?;/g, '')
+      .replace(/import\s+type\s+[\s\S]*?;/g, '')
+      .replace(/:\s*([A-Za-z0-9_<>\[\]|&\s'"]+)(?=[=,)])/g, '')
+      .replace(/as\s+[A-Za-z0-9_<>\[\]]+/g, '');
+  }
   const mod = { exports: {} };
   const customRequire = (reqPath) => {
     if (reqPath === './bridge') {
@@ -6276,7 +6308,7 @@ async function loadRealTsService(relPath) {
     if (reqPath === './mcpClient') return { mcpGateway: {} };
     return require(reqPath);
   };
-  const fn = new Function('module', 'exports', 'require', '__dirname', '__filename', res.code);
+  const fn = new Function('module', 'exports', 'require', '__dirname', '__filename', transformedCode);
   fn(mod, mod.exports, customRequire, path.dirname(fullPath), fullPath);
   tsModuleCache[fullPath] = mod.exports;
   return mod.exports;
@@ -6398,6 +6430,26 @@ const realLlm = await loadRealTsService('./web/src/services/llm.ts');
       summary.includes('snap_20261019_120530') &&
       summary.includes('编译预检未通过') &&
       summary.includes('区域 A1:H20 验证通过')
+  );
+
+  // Test 20.5: 结构化证据元数据优先摄取断言 (响应审查报告第二轮 P1-新，杜绝文案改动漏检)
+  const historyWithStructuredEvidence = [
+    {
+      role: 'assistant',
+      content: '处理完毕，自然语言文案调整不会影响元数据提取',
+      evidence: {
+        snapshotId: 'snap_struct_9999',
+        failedIncident: '预检拦截: 包含非法系统API',
+        verifiedChange: '区域 C1:C50 验证通过',
+      },
+    },
+  ];
+  const structSummary = realCompaction.buildStructuredSummary(historyWithStructuredEvidence);
+  assert(
+    '[Phase 1 结构化证据] 真实 compaction.ts 优先读取结构化 evidence 元数据，杜绝自然语言文案改动导致证据丢失',
+    structSummary.includes('snap_struct_9999') &&
+      structSummary.includes('预检拦截: 包含非法系统API') &&
+      structSummary.includes('区域 C1:C50 验证通过')
   );
 }
 
@@ -6589,37 +6641,45 @@ const realLlm = await loadRealTsService('./web/src/services/llm.ts');
       dWithMacro.track === 'TRACK_B_HEAVY_VBA'
   );
 
-  // Test 22.2: 常用宏保存资格与状态门禁断言 (响应审查 P1-1)
+  // Test 22.2: 常用宏保存资格与状态门禁断言 (响应审查报告第二轮 P0-新，解除待确认死锁)
   function testSaveEligibility(execution, isExecuting) {
     const executedCode = execution?.executedVbaCode || execution?.vbaCode || '';
     const isSaveEligible = Boolean(
       executedCode &&
       !isExecuting &&
-      !execution?.error &&
-      execution?.verificationStatus === 'verified' &&
-      execution?.precheckStatus !== 'failed'
+      execution &&
+      !execution.error &&
+      execution.precheckStatus !== 'failed' &&
+      !execution.readback?.otherWorkbooksAffected &&
+      execution.verificationStatus !== 'failed'
     );
     let reason = '';
     if (isExecuting) reason = '宏正在执行中，请等待完成';
     else if (!execution) reason = '代码尚未执行，暂不可存为常用宏';
     else if (execution.error) reason = `代码执行遇到异常 (${execution.error})，不可存为常用宏`;
     else if (execution.precheckStatus === 'failed') reason = '代码编译预检失败，不可存为常用宏';
-    else if (execution.verificationStatus !== 'verified') reason = '执行效果尚未完全核验通过 (待确认)，暂不可存为常用宏';
+    else if (execution.readback?.otherWorkbooksAffected) reason = '检测到修改了非目标工作簿，存在越权风险，不可存为常用宏';
+    else if (execution.verificationStatus === 'failed') reason = '目标工作簿身份核验失败，不可存为常用宏';
     return { isSaveEligible, reason };
   }
 
-  const validExec = { executedVbaCode: 'Sub Test()\nEnd Sub', verificationStatus: 'verified', precheckStatus: 'passed' };
+  const validMatchedExec = { executedVbaCode: 'Sub Test()\nEnd Sub', verificationStatus: 'matched', precheckStatus: 'passed' };
+  const validUnconfirmedExec = { executedVbaCode: 'Sub Test()\nEnd Sub', verificationStatus: 'unconfirmed', precheckStatus: 'passed' };
   const failedExec = { executedVbaCode: 'Sub Test()\nEnd Sub', error: 'Type mismatch (13)', verificationStatus: 'failed' };
-  const unconfirmedExec = { executedVbaCode: 'Sub Test()\nEnd Sub', verificationStatus: 'unconfirmed' };
+  const targetMismatchExec = { executedVbaCode: 'Sub Test()\nEnd Sub', verificationStatus: 'failed' };
   const precheckFailExec = { executedVbaCode: 'Sub Test()\nEnd Sub', precheckStatus: 'failed' };
+  const otherWbAffectedExec = { executedVbaCode: 'Sub Test()\nEnd Sub', readback: { otherWorkbooksAffected: true } };
 
   assert(
-    '[Phase 3 常用宏保存门禁] ExecutionCard 存为常用宏强门禁生效：仅核验通过放行，报错/未通过/预检失败严密拦截',
-    testSaveEligibility(validExec, false).isSaveEligible === true &&
+    '[Phase 3 常用宏保存门禁与死锁解除] ExecutionCard 存为常用宏门禁：抽样匹配与待确认均放行，报错/预检失败/目标错乱/越权修改严密拦截',
+    testSaveEligibility(validMatchedExec, false).isSaveEligible === true &&
+      testSaveEligibility(validUnconfirmedExec, false).isSaveEligible === true &&
       testSaveEligibility(failedExec, false).isSaveEligible === false &&
       testSaveEligibility(failedExec, false).reason.includes('代码执行遇到异常') &&
-      testSaveEligibility(unconfirmedExec, false).isSaveEligible === false &&
-      testSaveEligibility(unconfirmedExec, false).reason.includes('尚未完全核验通过') &&
+      testSaveEligibility(targetMismatchExec, false).isSaveEligible === false &&
+      testSaveEligibility(targetMismatchExec, false).reason.includes('身份核验失败') &&
+      testSaveEligibility(otherWbAffectedExec, false).isSaveEligible === false &&
+      testSaveEligibility(otherWbAffectedExec, false).reason.includes('修改了非目标工作簿') &&
       testSaveEligibility(precheckFailExec, false).isSaveEligible === false &&
       testSaveEligibility(precheckFailExec, false).reason.includes('编译预检失败')
   );
