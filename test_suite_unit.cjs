@@ -6261,6 +6261,24 @@ try {
 }
 const tsModuleCache = {};
 
+// 零依赖环境兜底转译器：健壮剥离 TS interface、type、泛型及类型注解，转为合法 CJS (响应审查第四轮 P2)
+function stripTsTypesForCjs(code) {
+  return code
+    .replace(/(?:export\s+)?interface\s+[A-Za-z0-9_]+(?:<[^>]+>)?\s*(?:extends\s+[^{]+)?\{[\s\S]*?\n\}/gm, '')
+    .replace(/(?:export\s+)?type\s+[A-Za-z0-9_]+(?:<[^>]+>)?\s*=[\s\S]*?;/g, '')
+    .replace(/import\s+type\s+[\s\S]*?;/g, '')
+    .replace(/import\s*\{([^}]+)\}\s*from\s*['"]([^'"]+)['"];?/g, (m, specifiers, modPath) => {
+      const valid = specifiers.split(',').map((s) => s.trim()).filter((s) => s && !s.startsWith('type '));
+      return valid.length > 0 ? `const { ${valid.join(', ')} } = require('${modPath}');` : '';
+    })
+    .replace(/\)\s*:\s*[A-Za-z0-9_<>\[\]|&\s'"{}:]+\s*(?=\{)/g, ') ')
+    .replace(/([a-zA-Z0-9_]+)\?\s*:/g, '$1:')
+    .replace(/:\s*([A-Za-z0-9_<>\[\]|&\s'"]+)(?=[=,)])/g, '')
+    .replace(/as\s+[A-Za-z0-9_<>\[\]|&]+/g, '')
+    .replace(/export\s+function\s+([A-Za-z0-9_]+)/g, 'exports.$1 = function $1')
+    .replace(/export\s+const\s+([A-Za-z0-9_]+)\s*=/g, 'const $1 = exports.$1 =');
+}
+
 async function loadRealTsService(relPath) {
   const fullPath = path.resolve(__dirname, relPath);
   if (tsModuleCache[fullPath]) return tsModuleCache[fullPath];
@@ -6281,13 +6299,8 @@ async function loadRealTsService(relPath) {
     });
     transformedCode = res.code;
   } else {
-    // 零依赖环境兜底：极简剔除 TS interface、type、泛型及类型注解，转为合法 CJS
-    transformedCode = code
-      .replace(/export\s+interface\s+[\s\S]*?^}/gm, '')
-      .replace(/export\s+type\s+[\s\S]*?;/g, '')
-      .replace(/import\s+type\s+[\s\S]*?;/g, '')
-      .replace(/:\s*([A-Za-z0-9_<>\[\]|&\s'"]+)(?=[=,)])/g, '')
-      .replace(/as\s+[A-Za-z0-9_<>\[\]]+/g, '');
+    // 零依赖环境兜底：健壮剥离 TS interface、type、泛型及类型注解，转为合法 CJS
+    transformedCode = stripTsTypesForCjs(code);
   }
   const mod = { exports: {} };
   const customRequire = (reqPath) => {
@@ -6322,6 +6335,24 @@ const realToolRegistry = await loadRealTsService('./web/src/services/toolRegistr
 const realDecisionEngine = await loadRealTsService('./web/src/services/decisionEngine.ts');
 const realLlm = await loadRealTsService('./web/src/services/llm.ts');
 const realMacroSaveEligibility = await loadRealTsService('./web/src/services/macroSaveEligibility.ts');
+
+// Test 20.0: 零依赖 TS 转译器 stripTsTypesForCjs 自测 (响应审查第四轮 P2，消除未验证死代码)
+{
+  const rawEligibilityCode = fs.readFileSync(path.resolve(__dirname, './web/src/services/macroSaveEligibility.ts'), 'utf8');
+  const strippedCjsCode = stripTsTypesForCjs(rawEligibilityCode);
+  const testMod = { exports: {} };
+  const testFn = new Function('module', 'exports', 'require', '__dirname', '__filename', strippedCjsCode);
+  testFn(testMod, testMod.exports, () => ({}), __dirname, 'test.js');
+  const zeroDepRes = testMod.exports.checkMacroSaveEligibility(
+    { executedVbaCode: 'Sub Test()\nEnd Sub', verificationStatus: 'matched' },
+    false,
+    'Sub Test()\nEnd Sub'
+  );
+  assert(
+    '[Phase 1 CI 依赖断崖防御] 零依赖 TS 转译器 stripTsTypesForCjs 自测：强行绕过 Vite/esbuild 成功转译真实生产服务并执行',
+    typeof testMod.exports.checkMacroSaveEligibility === 'function' && zeroDepRes.isSaveEligible === true
+  );
+}
 
 // Test 20.1: 静态 System Prompt 100% 字节恒定与前缀缓存安全断言 (直接测试真实 llm.ts)
 {
@@ -6414,7 +6445,7 @@ const realMacroSaveEligibility = await loadRealTsService('./web/src/services/mac
     { role: 'user', content: '清空第二列' },
     { role: 'assistant', content: '代码未执行：编译预检未通过，缺少配对的 End If。' },
     { role: 'user', content: '补充 End If 并重试' },
-    { role: 'assistant', content: '已修复并执行。快照 snap_20261019_120530 生成。区域 B1:B20 验证通过。' },
+    { role: 'assistant', content: '已修复并执行。快照 snap_20261019_120530 生成。区域 B1:B20 抽样核验一致。' },
     { role: 'user', content: '查询工作表' },
     { role: 'assistant', content: '完成' },
     { role: 'user', content: '继续处理' },
@@ -6425,13 +6456,14 @@ const realMacroSaveEligibility = await loadRealTsService('./web/src/services/mac
   const summary = compacted.summaryText || '';
 
   assert(
-    '[Phase 1 证据账本] 真实 compaction.ts 不可压缩证据账本 (Immutable Ledger) 强制留存快照ID、失败记录与核验区域',
+    '[Phase 1 证据账本] 真实 compaction.ts 纯文本兜底双向兼容存量“验证通过”与新文案“抽样核验一致”，强制留存快照ID、失败记录与核验区域',
     compacted.isCompacted &&
       summary.includes('【关键执行事实与证据锚点 (Immutable Execution Ledger)】') &&
       summary.includes('snap_20261019_120400') &&
       summary.includes('snap_20261019_120530') &&
       summary.includes('编译预检未通过') &&
-      summary.includes('区域 A1:H20 验证通过')
+      summary.includes('区域 A1:H20 验证通过') &&
+      summary.includes('区域 B1:B20 抽样核验一致')
   );
 
   // Test 20.5: 结构化证据元数据优先摄取断言 (响应审查报告第二轮 P1-新，杜绝文案改动漏检)

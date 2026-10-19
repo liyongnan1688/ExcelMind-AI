@@ -106,8 +106,8 @@ export function extractExecutionEvidence(content: string): ExecutionEvidence {
     }
   }
 
-  // 3. 提取已核验通过的变更区域与已运行宏
-  const verifiedRegex = /(?:区域\s*([a-zA-Z]{1,3}[0-9]{1,7}:[a-zA-Z]{1,3}[0-9]{1,7})\s*验证通过|宏【([^】]+)】已运行完成)/gi;
+  // 3. 提取已核验通过的变更区域与已运行宏 (兼容新文案“抽样核验一致”与历史存量“验证通过”)
+  const verifiedRegex = /(?:区域\s*([a-zA-Z]{1,3}[0-9]{1,7}:[a-zA-Z]{1,3}[0-9]{1,7})\s*(?:抽样核验一致|验证通过)|宏【([^】]+)】已运行完成)/gi;
   let verMatch;
   while ((verMatch = verifiedRegex.exec(content)) !== null) {
     const change = verMatch[0];

@@ -380,7 +380,7 @@ export interface VbaExecutionData {
   readback?: WorkbookReadback;
   targetWorkbookName?: string;
   targetWorkbookFullName?: string;
-  verificationStatus?: 'matched' | 'verified' | 'unconfirmed' | 'failed';
+  verificationStatus?: 'matched' | 'unconfirmed' | 'failed';
   verificationNote?: string;
   precheckStatus?: 'passed' | 'warning' | 'failed' | 'unavailable' | 'scope_risk_intercepted' | 'workbook_locked' | 'skipped';
   executionPhase?:

@@ -249,7 +249,7 @@
     ? 'card-running'
     : execution?.error
     ? 'card-error'
-    : (execution?.verificationStatus === 'matched' || execution?.verificationStatus === 'verified')
+    : execution?.verificationStatus === 'matched'
     ? 'card-success'
     : 'card-unconfirmed'}"
 >
@@ -278,7 +278,7 @@
         {#if execution.elapsedMs}
           <span class="badge badge-gray">{(execution.elapsedMs / 1000).toFixed(2)}s</span>
         {/if}
-      {:else if execution?.verificationStatus === 'matched' || execution?.verificationStatus === 'verified'}
+      {:else if execution?.verificationStatus === 'matched'}
         <CheckCircle2 size={16} color="#107C41" />
         <span class="summary-text font-success" title={execution.summary}>
           {execution.summary || '宏已运行，抽样字面核验一致'}
@@ -982,8 +982,8 @@
       <div class="fs-header">
         <div class="fs-title-area">
           <span class="fs-title">执行详情与源码放大查看</span>
-          <span class="badge {(execution?.verificationStatus === 'matched' || execution?.verificationStatus === 'verified') ? 'badge-green' : (execution?.error || execution?.verificationStatus === 'failed' ? 'badge-red' : 'badge-amber')}">
-            {(execution?.verificationStatus === 'matched' || execution?.verificationStatus === 'verified') ? '抽样匹配' : (execution?.error || execution?.verificationStatus === 'failed' ? '执行异常' : '待确认')}
+          <span class="badge {execution?.verificationStatus === 'matched' ? 'badge-green' : (execution?.error || execution?.verificationStatus === 'failed' ? 'badge-red' : 'badge-amber')}">
+            {execution?.verificationStatus === 'matched' ? '抽样匹配' : (execution?.error || execution?.verificationStatus === 'failed' ? '执行异常' : '待确认')}
           </span>
           <span class="fs-subtitle">{execution?.targetWorkbookName || '当前工作簿'}</span>
         </div>

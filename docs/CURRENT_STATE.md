@@ -41,27 +41,28 @@
 
 ## 三、 审计整改专项落地事实 (feat/audit-rectification)
 
-本轮针对 2026-10-19 审查报告（第一轮、第二轮与第三轮）完成全面闭环整改，并通过全量离线核心门禁（**231/231 PASS**，100% 保持全绿）：
-1. **证据载荷真实性门控 (解决第三轮审查 P1-新/载荷失真)**：
-   - 彻底解决“管道已通但载荷失真”漏洞：在 `conversationManager.ts` 组装结构化元数据时，增加严格状态门控 `(verificationStatus === 'matched' || verificationStatus === 'verified') && !error`；
+本轮针对 2026-10-19 审查报告（第一至第四轮）完成全面闭环整改，并通过全量离线核心门禁（**232/232 PASS**，100% 保持全绿）：
+1. **纯文本兜底双向兼容与证据防漏 (解决第四轮审查 P1-新)**：
+   - 修复 `compaction.ts` 纯文本兜底提取正则，升级为同时兼容新文案“抽样核验一致”与历史存量“验证通过”；
+   - 解决纯文本会话折叠时因文案调整导致的证据静默丢失问题，且在门禁 `Test 20.4` 中完成双向提取断言。
+2. **彻底清除 `verified` 死状态（解决第四轮审查 P2/类型诚实性）**：
+   - 真实底层 `verifyExecutionResult` 仅产出 `matched`、`unconfirmed`、`failed` 三态；
+   - 彻底将 `bridge.ts`、`llm.ts`、`conversationManager.ts`、`App.svelte` 与 `ExecutionCard.svelte` 中的联合类型及判断收敛，移除虚假的 `verified` 成员，使类型契约 100% 反映生产真实。
+3. **零依赖转译器加固与自测覆盖（解决第四轮审查 P2/消除未验证死代码）**：
+   - 提取独立的 `stripTsTypesForCjs` 语法剥离器，加固对 TS 可选参数（`param?: Type`）及复杂类型的剥离能力；
+   - 在 `test_suite_unit.cjs` 中增设自测断言（`Test 20.0`），强行绕过 Vite 与 esbuild 执行生产服务编译运行，确保在无任何外部编译器依赖的极端环境下测试门禁依然稳健。
+4. **证据载荷真实性门控 (解决第三轮审查 P1-新/载荷失真)**：
+   - 彻底解决“管道已通但载荷失真”漏洞：在 `conversationManager.ts` 组装结构化元数据时，增加严格状态门控 `verificationStatus === 'matched' && !error`；
    - 仅当抽样核验真正一致且无运行异常时，才向证据账本写入 `区域 ${usedRangeAddress} 抽样核验一致`；对未确认的排版任务或失败报错任务，绝不虚构“验证通过”，确保不可变证据账本内容 100% 真实。
-2. **抽离门禁为独立纯 TS 模块并测真身 (解决第三轮审查 P1-新/测试副本)**：
+5. **抽离门禁为独立纯 TS 模块并测真身 (解决第三轮审查 P1-新/测试副本)**：
    - 新增独立纯函数服务模块 `web/src/services/macroSaveEligibility.ts`，导出 `checkMacroSaveEligibility`；
    - `ExecutionCard.svelte` 组件接入该纯函数计算保存资格；
    - `test_suite_unit.cjs` 通过动态转译直接加载该生产服务模块进行断言，生产与测试共享同一真实代码，彻底根治门禁逻辑的“测试抄写副本”弊病。
-3. **闭环死状态、死分支与文案契约对齐 (解决第三轮审查 P1-新)**：
-   - 在 `bridge.ts` 补齐 `verificationStatus?: 'matched' | 'verified' | 'unconfirmed' | 'failed'` 类型联合；
-   - 修复 `App.svelte:549` 孤立不可达分支为 `if (verification.status === 'matched' || verification.status === 'verified')`，打通全链路可达性；
-   - 同步更新 `ExecutionCard.svelte` 宏保存按钮的 Tooltip 为“将本次执行成功的代码一键沉淀为本地宏库 (.bas)...”，彻底消除行为与文案的分叉。
-4. **CI 门禁与测试动态编译自愈 (第二轮整改固化)**：
-   - 彻底将 `web/node_modules/` 从 Git 索引中剔除（`git rm -r --cached`），本地保留物理文件供编译测试；
-   - 在 `.github/workflows/release.yml` 门禁执行前显式增加前端依赖安装步骤，同时在 `test_suite_unit.cjs` 中引入 Vite/esbuild 动态嗅探与纯 Node 离线语法降级兜底，消除 CI 离线依赖断崖。
-5. **架构描述诚实严谨化 (第二轮整改固化)**：
-   - 清理代码与文档中关于“In-Process Tool Loop”等夸大措辞，实事求是更正为“**Native COM Fast-Path Dispatch（原生轻量快速分派通道）**”。
-6. **工具契约与安全参数校验门禁 (第一轮整改固化)**：
+6. **架构描述诚实严谨化与工具校验门禁**：
+   - 清理代码与文档中关于“In-Process Tool Loop”等夸大措辞，实事求是更正为“**Native COM Fast-Path Dispatch（原生轻量快速分派通道）**”；
    - `web/src/services/toolRegistry.ts` 作为前端工具唯一事实来源；C# `src/NativeBridge.cs` 增加坐标格式严格正则拦截；C# 加载项重新编译生成合规 `bin/LeeExcel.dll`。
 7. **仓库根目录卫生与历史报告归档**：
-   - 将根目录的三份审查报告（v1、v2、v3）彻底归档至 `docs/history/reviews/`，严格遵循 `AGENTS.md` 规约保持根目录干净；
+   - 将根目录的四份审查报告（v1、v2、v3、v4）全部归档至 `docs/history/reviews/`，严格遵循 `AGENTS.md` 规约保持根目录干净；
    - 前端工作台重新构建生成最终单文件静态包 `bin/dist/`。
 
 *注：遵守 AGENTS.md 规范，不盲目执行 `git reset` 或 `git clean` 丢弃工作区文件。*

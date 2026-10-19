@@ -422,7 +422,7 @@ export function checkVbaScopeRisk(code: string): ScopeRiskResult {
 export function verifyExecutionResult(
   prompt: string,
   readback: WorkbookReadback | undefined
-): { status: 'matched' | 'verified' | 'unconfirmed' | 'failed'; note: string } {
+): { status: 'matched' | 'unconfirmed' | 'failed'; note: string } {
   if (!readback) {
     return {
       status: 'unconfirmed',
