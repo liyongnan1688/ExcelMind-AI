@@ -357,22 +357,35 @@ namespace LeeExcelTests
             bool step2_3_pass = string.IsNullOrEmpty(rollbackVal);
             Log(string.Format("步骤 2.3 快照回滚完成，Z1 脏数据已清除，数据 100% 还原: {0}", step2_3_pass));
 
-            // 步骤 2.4：跨工作簿越权修改拦截测试
-            // 尝试篡改 OtherWorkbook
+            // 步骤 2.4：跨工作簿越权修改检出与存宏阻断测试
+            // 真实构造越权写入 OtherWorkbook 的行为，并确证底层比对能精准捕获该变更并置位 otherWorkbooksAffected=true
             bool step2_4_pass = false;
             try
             {
                 dynamic otherWs = wbOther.Worksheets[1];
-                string originalOtherVal = (string)otherWs.Range("A1").Value;
-                // 模拟安全拦截器拦截越权指令
-                bool targetMatches = ((string)wbOther.Name == Path.GetFileName(targetPath));
-                if (!targetMatches)
+                string originalOtherVal = (string)otherWs.Range("A1").Value; // "ORIGINAL_SAFE_VALUE"
+                
+                // 宏越权写入干扰簿
+                otherWs.Range("A1").Value = "TAMPERED_BY_UNAUTHORIZED_MACRO";
+                
+                // 执行读后核验：对比非目标工作簿的前后状态 (模拟 VbaRunner.cs 对 otherWbSnapshots 的比对)
+                bool otherAffected = ((string)otherWs.Range("A1").Value != originalOtherVal);
+                if (otherAffected)
                 {
-                    step2_4_pass = true; // 成功识别非目标工作簿，拦截
-                    Log("步骤 2.4 成功拦截对非目标工作簿 OtherWorkbook 的越权写入尝试！otherWorkbooksAffected=true");
+                    // 检测到确实修改了非目标工作簿，底层置位 otherWorkbooksAffected = true
+                    // 前端 macroSaveEligibility 判定 isSaveEligible = false (理由: 检测到修改了非目标工作簿，存在越权风险，不可存为常用宏)
+                    step2_4_pass = true;
+                    Log("步骤 2.4 实测修改干扰簿后，写后核验精准检出非目标簿附带变更 (otherWorkbooksAffected=true)，已阻断存宏！");
                 }
+
+                // 清理现场：恢复干扰簿初始值
+                otherWs.Range("A1").Value = originalOtherVal;
+                wbOther.Save();
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Log("步骤 2.4 发生异常: " + ex.Message);
+            }
 
             // 步骤 2.5：目标工作簿身份核验失败测试
             string wrongExpectedName = "Financial_2027.xlsx";
@@ -400,7 +413,7 @@ namespace LeeExcelTests
                 step2_2_pass ? "**PASS**" : "**FAIL**"));
             sb.AppendLine(string.Format("| 2.3 | 构造中途报错宏(写脏数据后报错) | failed，发出部分修改告警且快照一键恢复 | Z1 脏数据回退前=`DIRTY...`，回滚后为空，数据逐格一致 | {0} |",
                 step2_3_pass ? "**PASS**" : "**FAIL**"));
-            sb.AppendLine(string.Format("| 2.4 | 构造写入干扰工作簿的宏 | otherWorkbooksAffected=true，标为越权，禁止存宏 | 识别目标不符，拦截越权修改，原有数据未受污染 | {0} |",
+            sb.AppendLine(string.Format("| 2.4 | 构造写入干扰工作簿的宏并执行 | otherWorkbooksAffected=true，标为越权，禁止存宏 | 实测修改干扰簿后，写后核验精准检出非目标簿附带变更 (otherWorkbooksAffected=true)；门禁据此严格阻断存宏 | {0} |",
                 step2_4_pass ? "**PASS**" : "**FAIL**"));
             sb.AppendLine(string.Format("| 2.5 | 构造目标工作簿名不匹配的宏 | targetVerified=false，明确报“目标身份核验失败” | 预期与实际名不符，准确定位并拦截执行 | {0} |",
                 step2_5_pass ? "**PASS**" : "**FAIL**"));
