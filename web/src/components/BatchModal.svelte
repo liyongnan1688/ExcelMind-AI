@@ -115,12 +115,12 @@
 
   async function loadSavedScripts() {
     try {
-      const res = await bridge.getScripts();
+      const res = await bridge.send<ScriptItem[]>('list_scripts');
       if (res.ok && res.data) {
         availableScripts = res.data;
       }
-    } catch {
-      // 忽略无法获取脚本库的错误
+    } catch (e) {
+      console.warn('加载已保存宏失败', e);
     }
   }
 

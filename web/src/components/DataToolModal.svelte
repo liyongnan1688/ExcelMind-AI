@@ -77,8 +77,8 @@
   let pendingMode: 'highlight' | 'export_unique' = 'highlight';
 
   $: if (isOpen && workbook) {
-    if (workbook.activeCell && !rangeAddress) {
-      rangeAddress = workbook.activeCell;
+    if (workbook.usedRangeAddress && !rangeAddress) {
+      rangeAddress = workbook.usedRangeAddress;
     }
   }
 
@@ -90,8 +90,8 @@
         if (res.data.address) {
           rangeAddress = res.data.address;
         }
-        if (res.data.columnsCount && res.data.columnsCount > 0) {
-          availableColsCount = Math.min(res.data.columnsCount, 50);
+        if (res.data.totalColumns && res.data.totalColumns > 0) {
+          availableColsCount = Math.min(res.data.totalColumns, 50);
           if (!selectedColIndices.includes(1)) {
             selectedColIndices = [1];
           }
@@ -704,9 +704,9 @@
       };
 
       const res = await bridge.previewExternalData(p);
-      if (res.ok && res.data) {
-        extPreviewResult = res.data;
-        extSelectedColumns = [...res.data.columns];
+      if (res.ok) {
+        extPreviewResult = res;
+        extSelectedColumns = [...res.columns];
       } else {
         externalDataError = res.error || '获取外部数据预览失败。';
       }
@@ -812,9 +812,9 @@
       };
 
       const res = await bridge.importExternalData(p);
-      if (res.ok && res.data) {
-        extImportResult = res.data;
-        externalDataSuccess = `成功导入数据至新建工作表 [${res.data.sheetName}]！共写入 ${res.data.importedRowCount} 行、${res.data.importedColCount} 列（快照: ${res.data.snapshotId || '已创建'}）。`;
+      if (res.ok) {
+        extImportResult = res;
+        externalDataSuccess = `成功导入数据至新建工作表 [${res.sheetName}]！共写入 ${res.importedRowCount} 行、${res.importedColCount} 列（快照: ${res.snapshotId || '已创建'}）。`;
         if (onExecuted) onExecuted();
       } else {
         externalDataError = res.error || '执行外部数据导入失败。';
@@ -1638,7 +1638,7 @@
                   <span>列名对齐只读分析完成 (耗时: {consolidationAnalysis.analysisElapsedMs} ms)</span>
                 </span>
                 <span class="text-[11px] text-indigo-700 font-mono">
-                  来源文件: {consolidationAnalysis.sourceProfiles.length} 个 | 输出列数: {consolidationAnalysis.orderedTargetColumns.length} 列
+                  来源文件: {consolidationAnalysis.sources.length} 个 | 输出列数: {consolidationAnalysis.alignedColumns.length} 列
                 </span>
               </div>
 
@@ -1646,7 +1646,7 @@
               <div class="grid grid-cols-4 gap-2 text-center">
                 <div class="bg-white p-2.5 rounded border border-gray-100 shadow-2xs">
                   <div class="text-[11px] text-gray-500">来源工作簿</div>
-                  <div class="text-base font-bold text-gray-800">{consolidationAnalysis.sourceProfiles.length}</div>
+                  <div class="text-base font-bold text-gray-800">{consolidationAnalysis.sources.length}</div>
                 </div>
                 <div class="bg-white p-2.5 rounded border border-indigo-100 shadow-2xs">
                   <div class="text-[11px] text-indigo-600 font-medium">规划汇总行数</div>
@@ -1654,11 +1654,11 @@
                 </div>
                 <div class="bg-white p-2.5 rounded border border-gray-100 shadow-2xs">
                   <div class="text-[11px] text-gray-500">排除纯空行</div>
-                  <div class="text-base font-bold text-gray-600">{consolidationAnalysis.totalExcludedRows}</div>
+                  <div class="text-base font-bold text-gray-600">{consolidationAnalysis.totalExcludedBlankRows}</div>
                 </div>
                 <div class="bg-white p-2.5 rounded border border-emerald-100 shadow-2xs">
                   <div class="text-[11px] text-emerald-600 font-medium">最终输出总行数 (含表头)</div>
-                  <div class="text-base font-bold text-emerald-700">{consolidationAnalysis.finalOutputRows}</div>
+                  <div class="text-base font-bold text-emerald-700">{consolidationAnalysis.expectedFinalOutputRows}</div>
                 </div>
               </div>
 
@@ -1669,15 +1669,15 @@
                   <span class="text-emerald-600 font-mono">恒等式核对: 最终数据行 = 各来源纳入行之和</span>
                 </div>
                 <div class="max-h-32 overflow-y-auto divide-y divide-gray-100">
-                  {#each consolidationAnalysis.sourceProfiles as prof}
+                  {#each consolidationAnalysis.sources as prof}
                     <div class="px-3 py-1.5 flex items-center justify-between text-[11px]">
                       <div class="truncate max-w-xs font-mono" title={prof.filePath}>
                         <span class="font-bold text-gray-800">{prof.displayIdentifier}</span>
                         <span class="text-gray-400">({prof.sheetName}!{prof.rangeAddress})</span>
                       </div>
                       <div class="flex items-center gap-3 text-gray-600 font-mono">
-                        <span>选区总行: {prof.totalRowsInRange}</span>
-                        <span class="text-indigo-600 font-semibold">纳入: {prof.dataRowCount}</span>
+                        <span>选区总行: {prof.totalRows}</span>
+                        <span class="text-indigo-600 font-semibold">纳入: {prof.includedDataRows}</span>
                         {#if prof.excludedBlankRows > 0}
                           <span class="text-gray-400">排除: {prof.excludedBlankRows}</span>
                         {/if}
@@ -1691,16 +1691,16 @@
               <div class="bg-white rounded border border-gray-200 overflow-hidden text-xs">
                 <div class="px-3 py-1.5 bg-gray-50 border-b border-gray-200 font-semibold text-gray-700 flex items-center justify-between text-[11px]">
                   <span>稳定输出列对齐清单 (确定性精确匹配 · 缺失列默认留空)</span>
-                  <span class="text-gray-500">共 {consolidationAnalysis.orderedTargetColumns.length} 列</span>
+                  <span class="text-gray-500">共 {consolidationAnalysis.alignedColumns.length} 列</span>
                 </div>
                 <div class="max-h-36 overflow-y-auto p-2 grid grid-cols-2 gap-1.5">
-                  {#each consolidationAnalysis.orderedTargetColumns as colName, colIdx}
+                  {#each consolidationAnalysis.alignedColumns as colName, colIdx}
                     <div class="flex items-center justify-between px-2 py-1 bg-gray-50 rounded border border-gray-200/60 text-[11px]">
                       <div class="flex items-center gap-1.5 truncate">
                         <span class="text-[10px] font-mono text-gray-400">#{colIdx + 1}</span>
                         <span class="font-bold text-gray-800 truncate" title={colName}>{colName}</span>
                       </div>
-                      {#if colName === consolidationAnalysis.metadataFileColName || colName === consolidationAnalysis.metadataSheetColName}
+                      {#if colName === consolidationAnalysis.metadataSourceFileCol || colName === consolidationAnalysis.metadataSourceSheetCol}
                         <span class="text-[10px] bg-indigo-50 text-indigo-700 px-1 rounded font-medium">元数据列</span>
                       {:else}
                         <span class="text-[10px] bg-emerald-50 text-emerald-700 px-1 rounded font-medium">业务数据列</span>
@@ -1754,8 +1754,8 @@
                 {consolidationExecution.outputFilePath}
               </p>
               <div class="pt-1 flex items-center justify-between text-[11px] text-emerald-700/80 font-mono">
-                <span>汇总行数: {consolidationExecution.totalRowsWritten} 行 (含表头) | 列数: {consolidationExecution.totalColsWritten} 列</span>
-                <span>真机读回核验: {consolidationExecution.reverifiedRowCount} 行 | 耗时: {consolidationExecution.totalElapsedMs} ms</span>
+                <span>汇总行数: {consolidationExecution.finalDataRows} 行 (含表头) | 列数: {consolidationExecution.finalDataCols} 列</span>
+                <span>读回核验: {consolidationExecution.verifiedReadback ? '已通过' : '未通过'} ({consolidationExecution.finalDataRows} 行) | 耗时: {consolidationExecution.elapsedMs} ms</span>
               </div>
             </div>
           {/if}

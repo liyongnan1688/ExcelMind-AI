@@ -171,6 +171,23 @@ namespace LeeExcel
 
                 if (Directory.Exists(distFolder) && File.Exists(Path.Combine(distFolder, "index.html")))
                 {
+                    string indexPath = Path.Combine(distFolder, "index.html");
+                    string buildFingerprint = "v1.0.0";
+                    try
+                    {
+                        string htmlContent = File.ReadAllText(indexPath);
+                        var match = System.Text.RegularExpressions.Regex.Match(htmlContent, @"index-([a-zA-Z0-9_-]+)\.js");
+                        if (match.Success)
+                        {
+                            buildFingerprint = match.Groups[1].Value;
+                        }
+                        else
+                        {
+                            buildFingerprint = File.GetLastWriteTimeUtc(indexPath).Ticks.ToString("x");
+                        }
+                    }
+                    catch { }
+
                     try
                     {
                         _webView.CoreWebView2.SetVirtualHostNameToFolderMapping(
@@ -178,7 +195,7 @@ namespace LeeExcel
                             distFolder,
                             CoreWebView2HostResourceAccessKind.Allow
                         );
-                        _webView.CoreWebView2.Navigate("https://app.lee-excel/index.html");
+                        _webView.CoreWebView2.Navigate(string.Format("https://app.lee-excel/index.html?v={0}", buildFingerprint));
                         return;
                     }
                     catch (Exception mapEx)
@@ -188,7 +205,7 @@ namespace LeeExcel
 
                     // 备用 file 协议导航
                     string fileUri = new Uri(Path.Combine(distFolder, "index.html")).AbsoluteUri;
-                    _webView.CoreWebView2.Navigate(fileUri);
+                    _webView.CoreWebView2.Navigate(string.Format("{0}?v={1}", fileUri, buildFingerprint));
                 }
                 else
                 {

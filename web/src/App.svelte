@@ -241,7 +241,7 @@
     selectionSnapshot?: SelectionSnapshot,
     macroReference?: MacroReferenceData
   ) {
-    if (!text.trim() || isProcessing) return;
+    if (!text.trim() || isProcessing) return false;
 
     // 工作簿一致性核验：若附加了选区，且为操作模式，核对目标工作簿
     const requestMode: 'AUTOMATION' | 'CHAT' = userSelectedMode || 'AUTOMATION';
@@ -360,7 +360,9 @@
       } else if (decision.track === 'CHAT') {
         // 疑问修饰词/技术咨询智能降级：用户虽处在 AUTOMATION 模式，但提问明显属于疑问答疑（如“怎么计算”、“为什么报错”）
         // 自动降级为 CHAT 模式回答，杜绝误触发整本快照与 VBA 写入
-        effectiveRequestMode = 'CHAT';
+        if (decision.reason.includes('疑问') || decision.reason.includes('咨询词')) {
+          effectiveRequestMode = 'CHAT';
+        }
       }
     }
 
@@ -781,6 +783,7 @@
           <!-- 全自动执行结果卡片 (仅在确有 VBA 自动化指令时展示，纯自然语言对话时不显示) -->
           {#if (msg.isExecuting && msg.streamVbaCode) || msg.execution}
             <ExecutionCard
+              messageId={msg.id}
               prompt={msg.prompt || ''}
               execution={msg.execution}
               streamCode={msg.streamVbaCode || ''}

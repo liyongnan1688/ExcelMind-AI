@@ -1,5 +1,97 @@
 // test_suite_unit.cjs - Unit test runner for explicit dual-entry routing, code extraction, and verification
 
+const fs = require('fs');
+const path = require('path');
+
+// 统一动态 TS 模块编译器与加载器：彻底淘汰手写测试副本，直接测试真实生产源码模块
+let viteCompiler = null;
+try {
+  viteCompiler = require('./web/node_modules/vite');
+} catch (e) {
+  try {
+    viteCompiler = require('vite');
+  } catch (e2) {
+    try {
+      viteCompiler = require('./web/node_modules/esbuild');
+    } catch (e3) {
+      viteCompiler = null;
+    }
+  }
+}
+const tsModuleCache = {};
+
+// 零依赖环境兜底转译器：健壮剥离 TS interface、type、泛型及类型注解，转为合法 CJS (响应审查第四轮 P2)
+function stripTsTypesForCjs(code) {
+  return code
+    .replace(/(?:export\s+)?interface\s+[A-Za-z0-9_]+(?:<[^>]+>)?\s*(?:extends\s+[^{]+)?\{[\s\S]*?\n\}/gm, '')
+    .replace(/(?:export\s+)?type\s+[A-Za-z0-9_]+(?:<[^>]+>)?\s*=[\s\S]*?;/g, '')
+    .replace(/import\s+type\s+[\s\S]*?;/g, '')
+    .replace(/import\s*\{([^}]+)\}\s*from\s*['"]([^'"]+)['"];?/g, (m, specifiers, modPath) => {
+      const valid = specifiers.split(',').map((s) => s.trim()).filter((s) => s && !s.startsWith('type '));
+      return valid.length > 0 ? `const { ${valid.join(', ')} } = require('${modPath}');` : '';
+    })
+    .replace(/\)\s*:\s*[A-Za-z0-9_<>\[\]|&\s'"{}:]+\s*(?=\{)/g, ') ')
+    .replace(/([a-zA-Z0-9_]+)\?\s*:/g, '$1:')
+    .replace(/:\s*([A-Za-z0-9_<>\[\]|&\s'"]+)(?=[=,)])/g, '')
+    .replace(/as\s+[A-Za-z0-9_<>\[\]|&]+/g, '')
+    .replace(/export\s+function\s+([A-Za-z0-9_]+)/g, 'exports.$1 = function $1')
+    .replace(/export\s+const\s+([A-Za-z0-9_]+)\s*=/g, 'const $1 = exports.$1 =');
+}
+
+async function loadRealTsService(relPath, forceZeroDepFallback = false) {
+  const fullPath = path.resolve(__dirname, relPath);
+  const cacheKey = forceZeroDepFallback ? `${fullPath}#zeroDep` : fullPath;
+  if (tsModuleCache[cacheKey]) return tsModuleCache[cacheKey];
+  const code = fs.readFileSync(fullPath, 'utf8');
+  let transformedCode = '';
+  if (!forceZeroDepFallback && viteCompiler && typeof viteCompiler.transformWithEsbuild === 'function') {
+    const res = await viteCompiler.transformWithEsbuild(code, fullPath, {
+      loader: 'ts',
+      format: 'cjs',
+      target: 'node20',
+    });
+    transformedCode = res.code;
+  } else if (!forceZeroDepFallback && viteCompiler && typeof viteCompiler.transform === 'function') {
+    const res = await viteCompiler.transform(code, {
+      loader: 'ts',
+      format: 'cjs',
+      target: 'node20',
+    });
+    transformedCode = res.code;
+  } else {
+    // 零依赖环境兜底：健壮剥离 TS interface、type、泛型及类型注解，转为合法 CJS
+    transformedCode = stripTsTypesForCjs(code);
+  }
+  const mod = { exports: {} };
+  const customRequire = (reqPath) => {
+    if (reqPath === './bridge') {
+      return {
+        bridge: {
+          getWorkbookOverview: async () => null,
+          traceDependencies: async () => null,
+          previewExternalData: async () => null,
+        },
+      };
+    }
+    if (reqPath === './config') return { loadLlmConfig: () => ({}) };
+    if (reqPath === './conversationManager') return { checkMacroReferenceContext: () => ({}), formatMacroReferenceForPrompt: () => '' };
+    if (reqPath === './compaction') return tsModuleCache[path.resolve(__dirname, './web/src/services/compaction.ts')];
+    if (reqPath === './toolRegistry') return tsModuleCache[path.resolve(__dirname, './web/src/services/toolRegistry.ts')];
+    if (reqPath === './conventions') return tsModuleCache[path.resolve(__dirname, './web/src/services/conventions.ts')];
+    if (reqPath === './macroSaveEligibility') return tsModuleCache[path.resolve(__dirname, './web/src/services/macroSaveEligibility.ts')];
+    if (reqPath === './mcpClient') return { mcpGateway: {} };
+    return require(reqPath);
+  };
+  const fn = new Function('module', 'exports', 'require', '__dirname', '__filename', transformedCode);
+  fn(mod, mod.exports, customRequire, path.dirname(fullPath), fullPath);
+  tsModuleCache[cacheKey] = mod.exports;
+  return mod.exports;
+}
+
+
+let realConventions, realCompaction, realToolRegistry, realDecisionEngine, realLlm, realMacroSaveEligibility;
+
+
 /**
  * 模拟生产环境的双入口发送分发逻辑
  * 唯一模式来源：用户显式选中的模式 / 点击的模式按钮
@@ -91,76 +183,9 @@ function handleResponseLifecycle(currentRequest, rawModelResponse, finishReason 
 }
 
 
-function extractVbaCode(content, finishReason) {
-  if (!content) {
-    return { code: '', isTruncated: false, status: 'no_code', error: '响应内容为空' };
-  }
+// extractVbaCode 直接从 web/src/services/llm.ts 生产服务真实加载，彻底淘汰测试副本
+let extractVbaCode;
 
-  const openFenceMatch = content.match(/```(?:vba|vb)?\s*/i);
-  let extractedCode = '';
-  let isFenceEnclosed = false;
-
-  if (openFenceMatch && openFenceMatch.index !== undefined) {
-    const codeStart = openFenceMatch.index + openFenceMatch[0].length;
-    const rest = content.slice(codeStart);
-    const closeFenceIndex = rest.indexOf('```');
-
-    if (closeFenceIndex !== -1) {
-      extractedCode = rest.slice(0, closeFenceIndex).trim();
-      isFenceEnclosed = true;
-    } else {
-      extractedCode = rest.trim();
-      return {
-        code: extractedCode,
-        isTruncated: true,
-        status: 'truncated',
-        error: '代码块未闭合 (缺少配对的 ```)，说明大模型输出已被截断，已安全停止执行。',
-      };
-    }
-  } else {
-    // 兜底检测裸代码
-    const subMatch = content.match(/(?:^|\n)\s*(?:Public\s+|Private\s+)?Sub\s+[a-zA-Z0-9_\u4e00-\u9fa5]+/i);
-    if (subMatch && subMatch.index !== undefined) {
-      extractedCode = content.slice(subMatch.index).trim();
-    } else {
-      return {
-        code: '',
-        isTruncated: false,
-        status: 'no_code',
-        error: '模型回复未包含可执行的 VBA 过程源码（普通文字回答）。',
-      };
-    }
-  }
-
-  // 检查基本过程完整性
-  const hasSubOrFunction = /(?:^|\n)\s*(?:Public\s+|Private\s+)?(?:Sub|Function)\s+[a-zA-Z0-9_\u4e00-\u9fa5]+/i.test(extractedCode);
-  if (!hasSubOrFunction) {
-    return {
-      code: extractedCode,
-      isTruncated: false,
-      status: 'invalid_structure',
-      error: '提取出的代码中未包含有效的 Sub 或 Function 过程定义。',
-    };
-  }
-
-  // 检查未闭合的 Sub / Function
-  const hasSubStart = /(?:^|\n)\s*(?:Public\s+|Private\s+)?Sub\s+/i.test(extractedCode);
-  const hasSubEnd = /(?:^|\n)\s*End\s+Sub\b/i.test(extractedCode);
-  if (hasSubStart && !hasSubEnd) {
-    return {
-      code: extractedCode,
-      isTruncated: true,
-      status: 'truncated',
-      error: '代码过程未闭合 (缺少配对的 End Sub)，可能模型生成被中途截断，已安全拦截未执行。',
-    };
-  }
-
-  return {
-    code: extractedCode,
-    isTruncated: false,
-    status: 'valid',
-  };
-}
 
 function verifyExecutionResult(prompt, readback) {
   if (!readback) {
@@ -247,7 +272,16 @@ function assert(desc, condition, details = '') {
   }
 }
 
-console.log('=== 1. Explicit Dual-Entry Routing & Lifecycle Suite ===');
+(async () => {
+  realConventions = await loadRealTsService('./web/src/services/conventions.ts');
+  realCompaction = await loadRealTsService('./web/src/services/compaction.ts');
+  realToolRegistry = await loadRealTsService('./web/src/services/toolRegistry.ts');
+  realDecisionEngine = await loadRealTsService('./web/src/services/decisionEngine.ts');
+  realLlm = await loadRealTsService('./web/src/services/llm.ts');
+  realMacroSaveEligibility = await loadRealTsService('./web/src/services/macroSaveEligibility.ts');
+  extractVbaCode = realLlm.extractVbaCode;
+
+  console.log('=== 1. Explicit Dual-Entry Routing & Lifecycle Suite ===');
 
 // 1.1 对话入口测试 (无论输入什么文本，均锁定 CHAT 通道，绝不调用执行器)
 const chatInput1 = '你是';
@@ -814,7 +848,6 @@ assert(
 // === 6. Multi-Turn History Formal Chain & Fidelity Verification Suite     ===
 // ============================================================================
 
-(async () => {
   console.log('\n=== 6. Multi-Turn History Formal Chain & Fidelity Verification Suite ===');
 
   const fs = require('fs');
@@ -6244,98 +6277,7 @@ console.log('\n=== 19. TASK-R6c-01 Non-Destructive Upgrade & Sanitized Diagnosti
 
 console.log('\n=== 20. TASK-PHASE1 Cache-Safe Prompt & Compaction Pipeline Suite ===');
 
-// 统一动态 TS 模块编译器与加载器：彻底淘汰手写测试副本，直接测试真实生产源码模块
-let viteCompiler = null;
-try {
-  viteCompiler = require('./web/node_modules/vite');
-} catch (e) {
-  try {
-    viteCompiler = require('vite');
-  } catch (e2) {
-    try {
-      viteCompiler = require('./web/node_modules/esbuild');
-    } catch (e3) {
-      viteCompiler = null;
-    }
-  }
-}
-const tsModuleCache = {};
-
-// 零依赖环境兜底转译器：健壮剥离 TS interface、type、泛型及类型注解，转为合法 CJS (响应审查第四轮 P2)
-function stripTsTypesForCjs(code) {
-  return code
-    .replace(/(?:export\s+)?interface\s+[A-Za-z0-9_]+(?:<[^>]+>)?\s*(?:extends\s+[^{]+)?\{[\s\S]*?\n\}/gm, '')
-    .replace(/(?:export\s+)?type\s+[A-Za-z0-9_]+(?:<[^>]+>)?\s*=[\s\S]*?;/g, '')
-    .replace(/import\s+type\s+[\s\S]*?;/g, '')
-    .replace(/import\s*\{([^}]+)\}\s*from\s*['"]([^'"]+)['"];?/g, (m, specifiers, modPath) => {
-      const valid = specifiers.split(',').map((s) => s.trim()).filter((s) => s && !s.startsWith('type '));
-      return valid.length > 0 ? `const { ${valid.join(', ')} } = require('${modPath}');` : '';
-    })
-    .replace(/\)\s*:\s*[A-Za-z0-9_<>\[\]|&\s'"{}:]+\s*(?=\{)/g, ') ')
-    .replace(/([a-zA-Z0-9_]+)\?\s*:/g, '$1:')
-    .replace(/:\s*([A-Za-z0-9_<>\[\]|&\s'"]+)(?=[=,)])/g, '')
-    .replace(/as\s+[A-Za-z0-9_<>\[\]|&]+/g, '')
-    .replace(/export\s+function\s+([A-Za-z0-9_]+)/g, 'exports.$1 = function $1')
-    .replace(/export\s+const\s+([A-Za-z0-9_]+)\s*=/g, 'const $1 = exports.$1 =');
-}
-
-async function loadRealTsService(relPath, forceZeroDepFallback = false) {
-  const fullPath = path.resolve(__dirname, relPath);
-  const cacheKey = forceZeroDepFallback ? `${fullPath}#zeroDep` : fullPath;
-  if (tsModuleCache[cacheKey]) return tsModuleCache[cacheKey];
-  const code = fs.readFileSync(fullPath, 'utf8');
-  let transformedCode = '';
-  if (!forceZeroDepFallback && viteCompiler && typeof viteCompiler.transformWithEsbuild === 'function') {
-    const res = await viteCompiler.transformWithEsbuild(code, fullPath, {
-      loader: 'ts',
-      format: 'cjs',
-      target: 'node20',
-    });
-    transformedCode = res.code;
-  } else if (!forceZeroDepFallback && viteCompiler && typeof viteCompiler.transform === 'function') {
-    const res = await viteCompiler.transform(code, {
-      loader: 'ts',
-      format: 'cjs',
-      target: 'node20',
-    });
-    transformedCode = res.code;
-  } else {
-    // 零依赖环境兜底：健壮剥离 TS interface、type、泛型及类型注解，转为合法 CJS
-    transformedCode = stripTsTypesForCjs(code);
-  }
-  const mod = { exports: {} };
-  const customRequire = (reqPath) => {
-    if (reqPath === './bridge') {
-      return {
-        bridge: {
-          getWorkbookOverview: async () => null,
-          traceDependencies: async () => null,
-          previewExternalData: async () => null,
-        },
-      };
-    }
-    if (reqPath === './config') return { loadLlmConfig: () => ({}) };
-    if (reqPath === './conversationManager') return { checkMacroReferenceContext: () => ({}), formatMacroReferenceForPrompt: () => '' };
-    if (reqPath === './compaction') return tsModuleCache[path.resolve(__dirname, './web/src/services/compaction.ts')];
-    if (reqPath === './toolRegistry') return tsModuleCache[path.resolve(__dirname, './web/src/services/toolRegistry.ts')];
-    if (reqPath === './conventions') return tsModuleCache[path.resolve(__dirname, './web/src/services/conventions.ts')];
-    if (reqPath === './macroSaveEligibility') return tsModuleCache[path.resolve(__dirname, './web/src/services/macroSaveEligibility.ts')];
-    if (reqPath === './mcpClient') return { mcpGateway: {} };
-    return require(reqPath);
-  };
-  const fn = new Function('module', 'exports', 'require', '__dirname', '__filename', transformedCode);
-  fn(mod, mod.exports, customRequire, path.dirname(fullPath), fullPath);
-  tsModuleCache[cacheKey] = mod.exports;
-  return mod.exports;
-}
-
-// 预加载真实服务模块
-const realConventions = await loadRealTsService('./web/src/services/conventions.ts');
-const realCompaction = await loadRealTsService('./web/src/services/compaction.ts');
-const realToolRegistry = await loadRealTsService('./web/src/services/toolRegistry.ts');
-const realDecisionEngine = await loadRealTsService('./web/src/services/decisionEngine.ts');
-const realLlm = await loadRealTsService('./web/src/services/llm.ts');
-const realMacroSaveEligibility = await loadRealTsService('./web/src/services/macroSaveEligibility.ts');
+// [Phase 1 真实生产模块] 已在测试套件启动时于顶部统一加载与注入
 
 // Test 20.0: 零依赖 TS 转译器 stripTsTypesForCjs 自测 (响应审查第四轮 P2，消除未验证死代码)
 {

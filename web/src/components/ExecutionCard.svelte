@@ -35,6 +35,7 @@
   export let isExecuting = false;
   export let allSnapshots: SnapshotItem[] = [];
   export let onSaveScriptSuccess: () => void;
+  export let messageId: string = '';
 
   let cardElement: HTMLElement;
 
@@ -196,7 +197,7 @@
     const isComplete = !execution?.precheckStatus?.includes('fail') && !execution?.error && /End\s+(?:Sub|Function)/i.test(clean);
     dispatch('referenceMacro', {
       id: 'ref_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
-      sourceMessageId: execution?.id || undefined,
+      sourceMessageId: messageId || undefined,
       promptSummary: prompt,
       vbaCode: clean,
       status: isComplete ? 'complete' : 'incomplete',
@@ -804,10 +805,10 @@
             </div>
           {/if}
 
-          {#if execution?.riskNotice}
+          {#if execution?.verificationNote}
             <div class="log-row flex-col">
               <span class="log-label">运行状态说明:</span>
-              <span class="log-val dim-text">{execution.riskNotice}</span>
+              <span class="log-val dim-text">{execution.verificationNote}</span>
             </div>
           {/if}
 

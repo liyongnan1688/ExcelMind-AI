@@ -19,7 +19,7 @@
     mode?: 'AUTOMATION' | 'CHAT',
     selectionSnapshot?: SelectionSnapshot,
     macroReference?: MacroReferenceData
-  ) => void;
+  ) => Promise<boolean | void> | boolean | void;
 
   $: isUnsavedWorkbook = Boolean(workbook && (!workbook.isSaved || !workbook.fullName || !workbook.fullName.includes('\\')));
 
