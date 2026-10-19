@@ -925,6 +925,110 @@ class NativeBridgeClient {
       };
     }
 
+    if (action === 'get_workbook_overview') {
+      return {
+        ok: true,
+        action,
+        message: '工作簿概览读取成功 (共 3 个工作表)',
+        data: {
+          workbookName: payload.targetWorkbookName || '2026年9月部门预算与绩效表.xlsx',
+          fullName: payload.targetWorkbookFullName || 'C:\\Users\\35651\\Documents\\2026年9月部门预算与绩效表.xlsx',
+          activeSheetName: '汇总看板',
+          sheetCount: 3,
+          sheets: [
+            {
+              name: '汇总看板',
+              visibility: 'Visible',
+              usedRange: 'A1:H25',
+              rowCount: 25,
+              columnCount: 8,
+              formulaCellCount: 16,
+              tableCount: 1,
+              chartCount: 1,
+              headerPreview: [
+                ['部门', '负责人', '预算金额', '实际支出', '执行率', '状态', '环比增减', '备注']
+              ]
+            },
+            {
+              name: '部门明细',
+              visibility: 'Visible',
+              usedRange: 'A1:F120',
+              rowCount: 120,
+              columnCount: 6,
+              formulaCellCount: 120,
+              tableCount: 1,
+              chartCount: 0,
+              headerPreview: [
+                ['凭证号', '日期', '部门', '科目', '金额', '经办人']
+              ]
+            },
+            {
+              name: '人员考评',
+              visibility: 'Visible',
+              usedRange: 'A1:D50',
+              rowCount: 50,
+              columnCount: 4,
+              formulaCellCount: 45,
+              tableCount: 0,
+              chartCount: 0,
+              headerPreview: [
+                ['工号', '姓名', '部门', '综合得分']
+              ]
+            }
+          ],
+          blueprintSummary: '工作簿【2026年9月部门预算与绩效表.xlsx】概览 (共 3 个工作表)：\n- 【汇总看板】(Visible, UsedRange: A1:H25, 行数: 25, 列数: 8, 包含公式: 16, 表格: 1, 图表: 1)\n  表头预览: 部门 | 负责人 | 预算金额 | 实际支出 | 执行率 | 状态 | 环比增减 | 备注\n- 【部门明细】(Visible, UsedRange: A1:F120, 行数: 120, 列数: 6, 包含公式: 120, 表格: 1, 图表: 0)\n  表头预览: 凭证号 | 日期 | 部门 | 科目 | 金额 | 经办人\n- 【人员考评】(Visible, UsedRange: A1:D50, 行数: 50, 列数: 4, 包含公式: 45, 表格: 0, 图表: 0)\n  表头预览: 工号 | 姓名 | 部门 | 综合得分'
+        } as any
+      };
+    }
+
+    if (action === 'trace_dependencies' || action === 'explain_formula') {
+      const cellAddress = payload.cellAddress || 'E5';
+      const sheetName = payload.sheetName || '汇总看板';
+      return {
+        ok: true,
+        action,
+        message: '公式血缘分析完成',
+        data: {
+          workbookName: payload.targetWorkbookName || '2026年9月部门预算与绩效表.xlsx',
+          sheetName,
+          cellAddress,
+          hasFormula: true,
+          formula: '=D5/C5',
+          evaluatedValue: '0.85',
+          formattedText: '85.0%',
+          hasError: false,
+          errorType: '',
+          isCircular: false,
+          functionsUsed: [],
+          directPrecedents: [
+            {
+              address: 'D5',
+              sheetName,
+              formula: '',
+              value: '85000',
+              hasError: false,
+              errorType: '',
+              isBlank: false,
+              precedents: []
+            },
+            {
+              address: 'C5',
+              sheetName,
+              formula: '',
+              value: '100000',
+              hasError: false,
+              errorType: '',
+              isBlank: false,
+              precedents: []
+            }
+          ],
+          directDependents: ['F5'],
+          auditSummary: `单元格 ${sheetName}!${cellAddress} 公式: =D5/C5，计算值: 85.0%。直接依赖 2 处输入源，下游从属 1 处引用。`,
+          explanationPrompt: `请用简明业务语言白话解释单元格 ${sheetName}!${cellAddress} 的计算逻辑：\n公式：=D5/C5\n当前计算结果：85.0%\n上游依赖单元格：\n- D5 (当前值: 85000)\n- C5 (当前值: 100000)\n下游依赖单元格：F5\n请说明其业务含义及可能存在的风险（如除零、空值等）。`
+        } as any
+      };
+    }
+
     return {
       ok: true,
       action,
@@ -1554,6 +1658,40 @@ class NativeBridgeClient {
       omittedSensitiveLinesCount: 0,
     };
   }
+
+  public async getWorkbookOverview(params?: { targetWorkbookName?: string; targetWorkbookFullName?: string }): Promise<WorkbookOverviewResult | null> {
+    const res = await this.send<WorkbookOverviewResult>('get_workbook_overview', params || {});
+    if (res.ok && res.data) {
+      return res.data;
+    }
+    return null;
+  }
+
+  public async traceDependencies(params: {
+    targetWorkbookName?: string;
+    targetWorkbookFullName?: string;
+    sheetName?: string;
+    cellAddress?: string;
+  }): Promise<FormulaAuditResult | null> {
+    const res = await this.send<FormulaAuditResult>('trace_dependencies', params);
+    if (res.ok && res.data) {
+      return res.data;
+    }
+    return null;
+  }
+
+  public async explainFormula(params: {
+    targetWorkbookName?: string;
+    targetWorkbookFullName?: string;
+    sheetName?: string;
+    cellAddress?: string;
+  }): Promise<FormulaAuditResult | null> {
+    const res = await this.send<FormulaAuditResult>('explain_formula', params);
+    if (res.ok && res.data) {
+      return res.data;
+    }
+    return null;
+  }
 }
 
 export interface QuickChartParams {
@@ -1982,5 +2120,52 @@ export interface DiagnosticsExportResult {
   omittedSensitiveLinesCount: number;
 }
 
+export interface CellDependencyNode {
+  address: string;
+  sheetName: string;
+  formula: string;
+  value: string;
+  hasError: boolean;
+  errorType: string;
+  isBlank: boolean;
+  precedents: CellDependencyNode[];
+}
 
+export interface FormulaAuditResult {
+  workbookName: string;
+  sheetName: string;
+  cellAddress: string;
+  hasFormula: boolean;
+  formula: string;
+  evaluatedValue: string;
+  formattedText: string;
+  hasError: boolean;
+  errorType: string;
+  isCircular: boolean;
+  functionsUsed: string[];
+  directPrecedents: CellDependencyNode[];
+  directDependents: string[];
+  auditSummary: string;
+  explanationPrompt: string;
+}
 
+export interface SheetOverviewDto {
+  name: string;
+  visibility: string;
+  usedRange: string;
+  rowCount: number;
+  columnCount: number;
+  formulaCellCount: number;
+  tableCount: number;
+  chartCount: number;
+  headerPreview: string[][];
+}
+
+export interface WorkbookOverviewResult {
+  workbookName: string;
+  fullName: string;
+  activeSheetName: string;
+  sheetCount: number;
+  sheets: SheetOverviewDto[];
+  blueprintSummary: string;
+}

@@ -1,6 +1,13 @@
 <script lang="ts">
   import { Zap, MessageSquare, Code } from 'lucide-svelte';
-  import { bridge, type SelectionContextData, type SelectionSendOptions, type SelectionSnapshot } from '../services/bridge';
+  import {
+    bridge,
+    type SelectionContextData,
+    type SelectionSendOptions,
+    type SelectionSnapshot,
+    type FormulaAuditResult,
+    type WorkbookOverviewResult,
+  } from '../services/bridge';
   import { formatSelectionContextForPrompt } from '../services/llm';
   import type { MacroReferenceData } from '../services/conversationManager';
 
@@ -37,6 +44,72 @@
     includeFormulas: false, // 默认不勾选公式
     firstRowAsHeader: true, // 默认首行为候选表头
   };
+
+  // Phase 2: 公式血缘体检与全簿架构透视状态
+  let isAuditingFormula = false;
+  let isScanningOverview = false;
+  let auditModalData: FormulaAuditResult | null = null;
+  let showAuditModal = false;
+
+  async function handleAuditCurrentFormula() {
+    if (!selectionContext || isAuditingFormula) return;
+    isAuditingFormula = true;
+    selectionError = '';
+    try {
+      const cell = selectionContext.address.split(':')[0];
+      const res = await bridge.traceDependencies({
+        targetWorkbookName: selectionContext.workbookName,
+        targetWorkbookFullName: selectionContext.workbookFullName,
+        sheetName: selectionContext.sheetName,
+        cellAddress: cell,
+      });
+      if (res) {
+        auditModalData = res;
+        showAuditModal = true;
+      } else {
+        selectionError = '未检测到公式或解析失败';
+      }
+    } catch (e: any) {
+      selectionError = '公式血缘分析异常: ' + (e?.message || e);
+    } finally {
+      isAuditingFormula = false;
+    }
+  }
+
+  async function handleScanWorkbookOverview() {
+    if (isScanningOverview || disabled) return;
+    isScanningOverview = true;
+    selectionError = '';
+    try {
+      const res = await bridge.getWorkbookOverview({
+        targetWorkbookName: workbook?.name,
+        targetWorkbookFullName: workbook?.fullName,
+      });
+      if (res && res.blueprintSummary) {
+        inputText = `【工作簿全局架构透视】\n${res.blueprintSummary}\n\n请根据以上各工作表结构，帮我：`;
+        currentMode = 'CHAT';
+        if (textareaEl) {
+          textareaEl.focus();
+        }
+      } else {
+        selectionError = '未能读取到工作簿结构，请确保已打开工作簿';
+      }
+    } catch (e: any) {
+      selectionError = '获取工作簿透视失败: ' + (e?.message || e);
+    } finally {
+      isScanningOverview = false;
+    }
+  }
+
+  function handleInsertExplanationPrompt() {
+    if (!auditModalData) return;
+    inputText = auditModalData.explanationPrompt;
+    currentMode = 'CHAT';
+    showAuditModal = false;
+    if (textareaEl) {
+      textareaEl.focus();
+    }
+  }
 
   function formatCaptureTime(ts?: number): string {
     if (!ts) return '';
@@ -235,19 +308,33 @@
       </button>
     </div>
 
-    <!-- 附加当前选区按钮 (双模式均可用，用于首次添加或替换附件) -->
-    <button
-      class="attach-selection-btn {selectionContext ? 'has-attached' : ''}"
-      on:click={handleAttachSelection}
-      disabled={disabled || isLoadingSelection || isRefreshingArea}
-      type="button"
-      title="只读读取当前 Excel 选中的单元格区域（用于替换现有附件）"
-    >
-      <svg class="btn-icon {isLoadingSelection ? 'spin' : ''}" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
-      </svg>
-      <span>{isLoadingSelection ? '读取中...' : (selectionContext ? '替换为当前选区' : '附加当前选区')}</span>
-    </button>
+    <div class="header-action-group">
+      <!-- 全簿架构透视按钮 -->
+      <button
+        class="overview-btn"
+        on:click={handleScanWorkbookOverview}
+        disabled={disabled || isScanningOverview}
+        type="button"
+        title="只读透视工作簿所有工作表清单、表头结构与公式密度"
+      >
+        <span class="overview-icon {isScanningOverview ? 'spin' : ''}">🌐</span>
+        <span>{isScanningOverview ? '透视中...' : '全簿透视'}</span>
+      </button>
+
+      <!-- 附加当前选区按钮 (双模式均可用，用于首次添加或替换附件) -->
+      <button
+        class="attach-selection-btn {selectionContext ? 'has-attached' : ''}"
+        on:click={handleAttachSelection}
+        disabled={disabled || isLoadingSelection || isRefreshingArea}
+        type="button"
+        title="只读读取当前 Excel 选中的单元格区域（用于替换现有附件）"
+      >
+        <svg class="btn-icon {isLoadingSelection ? 'spin' : ''}" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+        </svg>
+        <span>{isLoadingSelection ? '读取中...' : (selectionContext ? '替换为当前选区' : '附加当前选区')}</span>
+      </button>
+    </div>
   </div>
 
   <!-- 未存盘工作簿前置预警条 -->
@@ -324,6 +411,17 @@
           {/if}
         </div>
         <div class="card-actions-group">
+          {#if selectionContext.formulaStatus === 'has_formula' || selectionContext.address}
+            <button
+              class="text-action-btn audit-btn {isAuditingFormula ? 'refreshing' : ''}"
+              type="button"
+              on:click={handleAuditCurrentFormula}
+              disabled={isAuditingFormula || disabled}
+              title="向上追溯单元格公式输入源，向下分析从属影响与计算错误"
+            >
+              <span>{isAuditingFormula ? '体检中...' : '🔍 公式血缘'}</span>
+            </button>
+          {/if}
           <button class="text-action-btn" type="button" on:click={() => (showDetails = !showDetails)}>
             {showDetails ? '收起详情 ▲' : '查看/设置 ▼'}
           </button>
@@ -459,6 +557,100 @@
       </div>
     </div>
   </div>
+
+  <!-- 公式血缘穿透审计弹窗 -->
+  {#if showAuditModal && auditModalData}
+    <div
+      class="formula-audit-overlay"
+      role="button"
+      tabindex="-1"
+      on:click|self={() => (showAuditModal = false)}
+      on:keydown={(e) => { if (e.key === 'Escape') showAuditModal = false; }}
+    >
+      <div class="formula-audit-dialog" role="dialog" aria-modal="true" aria-labelledby="audit-dialog-title">
+        <div class="dialog-header">
+          <div class="dialog-title-group">
+            <span class="audit-icon">🔍</span>
+            <h3 id="audit-dialog-title">公式血缘穿透审计</h3>
+            <span class="cell-tag">{auditModalData.sheetName}!{auditModalData.cellAddress}</span>
+          </div>
+          <button class="icon-close-btn" type="button" on:click={() => (showAuditModal = false)} title="关闭">✕</button>
+        </div>
+
+        <div class="dialog-body">
+          <!-- 公式原貌与计算状态 -->
+          <div class="audit-formula-box">
+            <div class="formula-line">
+              <span class="label">公式：</span>
+              <code class="formula-text">{auditModalData.formula}</code>
+            </div>
+            <div class="eval-line">
+              <span class="label">计算值：</span>
+              <span class="val-text">{auditModalData.formattedText || auditModalData.evaluatedValue}</span>
+              {#if auditModalData.hasError}
+                <span class="badge-err">⚠️ 错误: {auditModalData.errorType}</span>
+              {:else if auditModalData.isCircular}
+                <span class="badge-warn">🔄 循环引用风险</span>
+              {:else}
+                <span class="badge-ok">✓ 结果正常</span>
+              {/if}
+            </div>
+          </div>
+
+          <!-- 上游依赖列表 -->
+          <div class="audit-section">
+            <div class="section-title">
+              <span>上游依赖输入源 ({auditModalData.directPrecedents.length} 处)：</span>
+            </div>
+            {#if auditModalData.directPrecedents.length === 0}
+              <div class="empty-tip">未发现直接上游单元格（常数或独立运算）</div>
+            {:else}
+              <div class="nodes-list">
+                {#each auditModalData.directPrecedents as node}
+                  <div class="node-item {node.hasError ? 'node-err' : ''}">
+                    <span class="node-addr">{node.sheetName ? `${node.sheetName}!` : ''}{node.address}</span>
+                    <span class="node-val" title="当前取值: {node.value}">值: {node.value || '(空)'}</span>
+                    {#if node.hasError}
+                      <span class="node-badge-err">异常: {node.errorType}</span>
+                    {/if}
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          </div>
+
+          <!-- 下游从属引用 -->
+          <div class="audit-section">
+            <div class="section-title">
+              <span>下游从属引用 ({auditModalData.directDependents.length} 处)：</span>
+            </div>
+            {#if auditModalData.directDependents.length === 0}
+              <div class="empty-tip">暂无下游单元格直接引用此结果</div>
+            {:else}
+              <div class="dependents-chips">
+                {#each auditModalData.directDependents as dep}
+                  <span class="dep-chip">{dep}</span>
+                {/each}
+              </div>
+            {/if}
+          </div>
+
+          <div class="audit-summary-note">
+            ℹ️ {auditModalData.auditSummary}
+          </div>
+        </div>
+
+        <div class="dialog-footer">
+          <button class="action-btn-primary" type="button" on:click={handleInsertExplanationPrompt}>
+            <span>🤖 让 AI 白话解读此公式</span>
+          </button>
+          <button class="action-btn-secondary" type="button" on:click={() => (showAuditModal = false)}>
+            关闭
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -529,6 +721,36 @@
   .mode-tab:disabled {
     opacity: 0.6;
     cursor: not-allowed;
+  }
+
+  .header-action-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .overview-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    font-size: var(--font-size-xs);
+    font-weight: 500;
+    border-radius: var(--office-radius-sm);
+    border: 1px solid #bfdbfe;
+    background: #eff6ff;
+    color: #1d4ed8;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .overview-btn:hover:not(:disabled) {
+    background: #dbeafe;
+    border-color: #93c5fd;
+  }
+
+  .overview-icon {
+    font-size: 12px;
   }
 
   /* 附加选区按钮 */
@@ -731,6 +953,28 @@
 
   .refresh-btn:hover:not(:disabled) {
     background: #dff0e6;
+  }
+
+  .audit-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    background: #f0fdf4;
+    color: #15803d;
+    font-weight: 500;
+    padding: 1px 5px;
+    border-radius: 3px;
+    border: 1px solid #bbf7d0;
+  }
+
+  .audit-btn:hover:not(:disabled) {
+    background: #dcfce7;
+    border-color: #86efac;
+  }
+
+  .audit-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
   }
 
   .refresh-btn:disabled {
@@ -1081,5 +1325,265 @@
     white-space: pre-wrap;
     word-break: break-all;
     font-family: Consolas, monospace;
+  }
+
+  /* 公式血缘穿透审计弹窗样式 */
+  .formula-audit-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    backdrop-filter: blur(2px);
+  }
+
+  .formula-audit-dialog {
+    background: #ffffff;
+    border-radius: 8px;
+    width: 90%;
+    max-width: 480px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+    display: flex;
+    flex-direction: column;
+    max-height: 85vh;
+    animation: fadeIn 0.2s ease-out;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: scale(0.96); }
+    to { opacity: 1; transform: scale(1); }
+  }
+
+  .dialog-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid #e2e8f0;
+  }
+
+  .dialog-title-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .dialog-title-group h3 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: #0f172a;
+  }
+
+  .cell-tag {
+    background: #eff6ff;
+    color: #1d4ed8;
+    font-size: 11px;
+    font-family: monospace;
+    padding: 1px 6px;
+    border-radius: 4px;
+    border: 1px solid #bfdbfe;
+  }
+
+  .dialog-body {
+    padding: 12px 14px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    font-size: 12px;
+  }
+
+  .audit-formula-box {
+    background: #f8fafc;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .formula-line {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+  }
+
+  .formula-line .label, .eval-line .label {
+    color: #64748b;
+    font-size: 11px;
+    flex-shrink: 0;
+  }
+
+  .formula-text {
+    color: #0972d3;
+    font-family: Consolas, monospace;
+    font-size: 12px;
+    font-weight: bold;
+    word-break: break-all;
+  }
+
+  .eval-line {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .val-text {
+    font-weight: 600;
+    color: #0f172a;
+  }
+
+  .badge-err {
+    background: #fef2f2;
+    color: #b91c1c;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    border: 1px solid #fecaca;
+  }
+
+  .badge-warn {
+    background: #fffbeb;
+    color: #b45309;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    border: 1px solid #fde68a;
+  }
+
+  .badge-ok {
+    background: #f0fdf4;
+    color: #15803d;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    border: 1px solid #bbf7d0;
+  }
+
+  .audit-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .section-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: #475569;
+  }
+
+  .nodes-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .node-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #f1f5f9;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+  }
+
+  .node-item.node-err {
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+  }
+
+  .node-addr {
+    font-family: monospace;
+    font-weight: 600;
+    color: #334155;
+  }
+
+  .node-val {
+    color: #64748b;
+  }
+
+  .node-badge-err {
+    color: #dc2626;
+    font-weight: 500;
+  }
+
+  .dependents-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .dep-chip {
+    background: #e2e8f0;
+    color: #334155;
+    font-family: monospace;
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+
+  .empty-tip {
+    color: #94a3b8;
+    font-size: 11px;
+    font-style: italic;
+  }
+
+  .audit-summary-note {
+    background: #eff6ff;
+    border: 1px solid #dbeafe;
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-size: 11px;
+    color: #1e40af;
+    line-height: 1.4;
+  }
+
+  .dialog-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 10px 14px;
+    border-top: 1px solid #e2e8f0;
+    background: #fafafa;
+    border-radius: 0 0 8px 8px;
+  }
+
+  .action-btn-primary {
+    background: #0078d4;
+    color: white;
+    border: none;
+    padding: 5px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .action-btn-primary:hover {
+    background: #106ebe;
+  }
+
+  .action-btn-secondary {
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    color: #334155;
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .action-btn-secondary:hover {
+    background: #f1f5f9;
   }
 </style>

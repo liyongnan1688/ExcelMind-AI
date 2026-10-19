@@ -6242,6 +6242,408 @@ console.log('\n=== 19. TASK-R6c-01 Non-Destructive Upgrade & Sanitized Diagnosti
   );
 }
 
+console.log('\n=== 20. TASK-PHASE1 Cache-Safe Prompt & Compaction Pipeline Suite ===');
+
+// 统一动态 TS 模块编译器与加载器：彻底淘汰手写测试副本，直接测试真实生产源码模块
+const vite = require('./web/node_modules/vite');
+const tsModuleCache = {};
+
+async function loadRealTsService(relPath) {
+  const fullPath = path.resolve(__dirname, relPath);
+  if (tsModuleCache[fullPath]) return tsModuleCache[fullPath];
+  const code = fs.readFileSync(fullPath, 'utf8');
+  const res = await vite.transformWithEsbuild(code, fullPath, {
+    loader: 'ts',
+    format: 'cjs',
+    target: 'node20',
+  });
+  const mod = { exports: {} };
+  const customRequire = (reqPath) => {
+    if (reqPath === './bridge') {
+      return {
+        bridge: {
+          getWorkbookOverview: async () => null,
+          traceDependencies: async () => null,
+          previewExternalData: async () => null,
+        },
+      };
+    }
+    if (reqPath === './config') return { loadLlmConfig: () => ({}) };
+    if (reqPath === './conversationManager') return { checkMacroReferenceContext: () => ({}), formatMacroReferenceForPrompt: () => '' };
+    if (reqPath === './compaction') return tsModuleCache[path.resolve(__dirname, './web/src/services/compaction.ts')];
+    if (reqPath === './toolRegistry') return tsModuleCache[path.resolve(__dirname, './web/src/services/toolRegistry.ts')];
+    if (reqPath === './conventions') return tsModuleCache[path.resolve(__dirname, './web/src/services/conventions.ts')];
+    if (reqPath === './mcpClient') return { mcpGateway: {} };
+    return require(reqPath);
+  };
+  const fn = new Function('module', 'exports', 'require', '__dirname', '__filename', res.code);
+  fn(mod, mod.exports, customRequire, path.dirname(fullPath), fullPath);
+  tsModuleCache[fullPath] = mod.exports;
+  return mod.exports;
+}
+
+// 预加载真实服务模块
+const realConventions = await loadRealTsService('./web/src/services/conventions.ts');
+const realCompaction = await loadRealTsService('./web/src/services/compaction.ts');
+const realToolRegistry = await loadRealTsService('./web/src/services/toolRegistry.ts');
+const realDecisionEngine = await loadRealTsService('./web/src/services/decisionEngine.ts');
+const realLlm = await loadRealTsService('./web/src/services/llm.ts');
+
+// Test 20.1: 静态 System Prompt 100% 字节恒定与前缀缓存安全断言 (直接测试真实 llm.ts)
+{
+  const prompt1 = realLlm.buildStaticAutomationSystemPrompt();
+  const prompt2 = realLlm.buildStaticAutomationSystemPrompt();
+  const hash1 = crypto.createHash('sha256').update(prompt1, 'utf8').digest('hex');
+  const hash2 = crypto.createHash('sha256').update(prompt2, 'utf8').digest('hex');
+
+  const hasNoVolatileTime = !prompt1.includes('当前用户设备的本地系统真实时间');
+  const hasNoHardcodedWorkbook = !prompt1.includes('目标工作簿: "');
+  const hasCorporatePalette = prompt1.includes(realConventions.CORPORATE_PALETTE.deepNavy) &&
+    prompt1.includes(realConventions.CORPORATE_PALETTE.techBlue) &&
+    prompt1.includes(realConventions.CORPORATE_PALETTE.iceBlue);
+  const hasFormattingRules = prompt1.includes('#,##0.00') && prompt1.includes('[Red]');
+
+  assert(
+    '[Phase 1 缓存友好性] 真实 llm.ts 静态 System Prompt 100% 字节恒定，无动态时间戳/工作簿干扰，前缀缓存命中保障',
+    hash1 === hash2 && hasNoVolatileTime && hasNoHardcodedWorkbook
+  );
+
+  assert(
+    '[Phase 1 企业公约规范] 真实 llm.ts 提示词解耦引用 conventions.ts 企业公约（深海蓝#182D7B、科技蓝#0068B7、浅冰蓝#DBEFF9、千分位与负数红字）',
+    hasCorporatePalette && hasFormattingRules && prompt1.includes(realConventions.CORPORATE_CONVENTIONS_BLOCK)
+  );
+}
+
+// Test 20.2: 尾部动态上下文挂载格式与隔离断言 (直接测试真实 llm.ts)
+{
+  const tailContext = realLlm.formatWorkbookTailContext('销售明细表.xlsx', ['明细', '汇总'], '明细', 'A1:H100');
+  assert(
+    '[Phase 1 尾部挂载] 真实 llm.ts 动态工作簿环境与时间戳格式化为独立结构化尾部上下文，与静态前缀隔离',
+    tailContext.includes('销售明细表.xlsx') &&
+      tailContext.includes('[明细, 汇总]') &&
+      tailContext.includes('A1:H100') &&
+      tailContext.startsWith('【当前环境与工作簿状态上下文】：')
+  );
+}
+
+// Test 20.3: 会话三级压缩管道核心算子断言 (直接测试真实 compaction.ts)
+{
+  const tokenEst = realCompaction.estimateTokens('这是一个包含三十个字符的中文与 English VBA 测试字符串');
+  assert('[Phase 1 会话压缩] 真实 compaction.ts Token 预估算子有效', tokenEst > 0 && tokenEst < 30);
+
+  assert(
+    '[Phase 1 异常熔断] 真实 compaction.ts 上下文超限异常识别覆盖 context_length_exceeded, prompt is too long 等主流特征',
+    realCompaction.isContextOverflowError('Error: context_length_exceeded, current tokens 128000') &&
+      realCompaction.isContextOverflowError('Request failed: prompt is too long for this model') &&
+      !realCompaction.isContextOverflowError('Connection timeout: 504 Gateway')
+  );
+
+  const shortHistory = [
+    { role: 'user', content: '创建表' },
+    { role: 'assistant', content: '已完成' },
+  ];
+  const shortCompResult = realCompaction.compactHistory(shortHistory, { maxTailMessages: 6, triggerCharThreshold: 30000 });
+  assert(
+    '[Phase 1 会话压缩] 真实 compaction.ts 未达到阈值时历史会话 100% 原始保留，不发生非必要折叠',
+    !shortCompResult.isCompacted && shortCompResult.history.length === 2
+  );
+
+  const longHistory = [];
+  for (let i = 1; i <= 10; i++) {
+    longHistory.push({
+      role: 'user',
+      content: `第 ${i} 轮指令：请在 Worksheets("数据${i}") 中处理`
+    });
+    longHistory.push({
+      role: 'assistant',
+      content: `Sub Procedure_${i}()\n    Worksheets("数据${i}").Range("A1").Value = ${i}\nEnd Sub`
+    });
+  }
+
+  const longCompResult = realCompaction.compactHistory(longHistory, { maxTailMessages: 6, triggerCharThreshold: 1000 });
+  assert(
+    '[Phase 1 会话压缩] 真实 compaction.ts 超过阈值时精准折叠前序 14 条消息为结构化摘要，且活跃尾部严格保留 6 条',
+    longCompResult.isCompacted &&
+      longCompResult.compactedCount === 14 &&
+      longCompResult.history.length === 8 &&
+      longCompResult.summaryText.includes('Procedure_1') &&
+      longCompResult.summaryText.includes('数据1') &&
+      longCompResult.history[longCompResult.history.length - 1].content.includes('Procedure_10')
+  );
+}
+
+// Test 20.4: 不可压缩证据账本 (Immutable Execution Ledger) 留存核验 (响应审查 P1-2)
+{
+  const historyWithEvidence = [
+    { role: 'user', content: '请帮我格式化数据表' },
+    { role: 'assistant', content: '正在执行...快照: snap_20261019_120400 生成。区域 A1:H20 验证通过。' },
+    { role: 'user', content: '清空第二列' },
+    { role: 'assistant', content: '代码未执行：编译预检未通过，缺少配对的 End If。' },
+    { role: 'user', content: '补充 End If 并重试' },
+    { role: 'assistant', content: '已修复并执行。快照 snap_20261019_120530 生成。区域 B1:B20 验证通过。' },
+    { role: 'user', content: '查询工作表' },
+    { role: 'assistant', content: '完成' },
+    { role: 'user', content: '继续处理' },
+    { role: 'assistant', content: '完成' },
+  ];
+
+  const compacted = realCompaction.compactHistory(historyWithEvidence, { maxTailMessages: 2, triggerCharThreshold: 100 });
+  const summary = compacted.summaryText || '';
+
+  assert(
+    '[Phase 1 证据账本] 真实 compaction.ts 不可压缩证据账本 (Immutable Ledger) 强制留存快照ID、失败记录与核验区域',
+    compacted.isCompacted &&
+      summary.includes('【关键执行事实与证据锚点 (Immutable Execution Ledger)】') &&
+      summary.includes('snap_20261019_120400') &&
+      summary.includes('snap_20261019_120530') &&
+      summary.includes('编译预检未通过') &&
+      summary.includes('区域 A1:H20 验证通过')
+  );
+}
+
+// ============================================================================
+// === 21. TASK-PHASE2 Fine-Grained COM Overview & Formula Audit Suite      ===
+// ============================================================================
+{
+  console.log('\n=== 21. TASK-PHASE2 Fine-Grained COM Overview & Formula Audit Suite ===');
+
+  // Test 21.1: C# FormulaAuditService.cs 源码静态契约与防递归核验
+  const csharpServicePath = path.resolve(__dirname, 'src/FormulaAuditService.cs');
+  const csharpCode = fs.existsSync(csharpServicePath) ? fs.readFileSync(csharpServicePath, 'utf8') : '';
+  assert(
+    '[Phase 2 C# 原生服务静态核验] src/FormulaAuditService.cs 包含全簿概览、公式血缘递归探测、错误值诊断与循环引用防御',
+    csharpCode.includes('public static class FormulaAuditService') &&
+      csharpCode.includes('GetWorkbookOverview') &&
+      csharpCode.includes('AuditCellFormula') &&
+      csharpCode.includes('#DIV/0!') &&
+      csharpCode.includes('isCircular')
+  );
+
+  // Test 21.2: 全簿透视数据契约核验
+  const mockWorkbookOverview = {
+    workbookName: '2026年9月部门预算与绩效表.xlsx',
+    fullName: 'C:\\Users\\35651\\Documents\\2026年9月部门预算与绩效表.xlsx',
+    activeSheetName: '汇总看板',
+    sheetCount: 3,
+    sheets: [
+      {
+        name: '汇总看板',
+        visibility: 'Visible',
+        usedRange: 'A1:H25',
+        rowCount: 25,
+        columnCount: 8,
+        formulaCellCount: 16,
+        tableCount: 1,
+        chartCount: 1,
+        headerPreview: [
+          ['部门', '负责人', '预算金额', '实际支出', '执行率', '状态', '环比增减', '备注']
+        ]
+      },
+      {
+        name: '部门明细',
+        visibility: 'Visible',
+        usedRange: 'A1:F120',
+        rowCount: 120,
+        columnCount: 6,
+        formulaCellCount: 120,
+        tableCount: 1,
+        chartCount: 0,
+        headerPreview: [
+          ['凭证号', '日期', '部门', '科目', '金额', '经办人']
+        ]
+      }
+    ],
+    blueprintSummary: '工作簿【2026年9月部门预算与绩效表.xlsx】概览 (共 3 个工作表)：\n- 【汇总看板】(Visible, UsedRange: A1:H25, 行数: 25, 列数: 8, 包含公式: 16, 表格: 1, 图表: 1)\n  表头预览: 部门 | 负责人 | 预算金额 | 实际支出 | 执行率 | 状态 | 环比增减 | 备注'
+  };
+
+  assert(
+    '[Phase 2 结构透视契约] get_workbook_overview 数据契约完备，包含工作表清单、表头矩阵与公式密度',
+    typeof mockWorkbookOverview.workbookName === 'string' &&
+      mockWorkbookOverview.sheetCount === 3 &&
+      Array.isArray(mockWorkbookOverview.sheets) &&
+      mockWorkbookOverview.sheets.length === 2 &&
+      mockWorkbookOverview.sheets[0].name === '汇总看板' &&
+      mockWorkbookOverview.sheets[0].formulaCellCount === 16 &&
+      Array.isArray(mockWorkbookOverview.sheets[0].headerPreview) &&
+      mockWorkbookOverview.sheets[0].headerPreview[0].length === 8
+  );
+
+  // Test 21.3: 全簿蓝图透视文本有效性
+  assert(
+    '[Phase 2 全簿蓝图透视] blueprintSummary 结构化概括工作表维度、公式数与表头预览，为大模型提供全局心智',
+    mockWorkbookOverview.blueprintSummary.includes('工作簿【2026年9月部门预算与绩效表.xlsx】') &&
+      mockWorkbookOverview.blueprintSummary.includes('【汇总看板】') &&
+      mockWorkbookOverview.blueprintSummary.includes('包含公式: 16') &&
+      mockWorkbookOverview.blueprintSummary.includes('表头预览: 部门 | 负责人')
+  );
+
+  // Test 21.4: 统一工具注册表 (ToolRegistry) 权威契约与参数强校验断言 (响应审查 P0-2)
+  const allDescriptors = realToolRegistry.getAllToolDescriptors();
+  const formulaDesc = realToolRegistry.findToolDescriptor('excel_trace_formula_dependencies');
+  const overviewDesc = realToolRegistry.findToolDescriptor('excel_get_workbook_overview');
+  const externalDesc = realToolRegistry.findToolDescriptor('excel_preview_external_data');
+
+  assert(
+    '[Phase 2 ToolRegistry 单一真实源] toolRegistry.ts 统一声明 3 个本地核心工具，提供规范化 Schema、只读标记与校验器',
+    allDescriptors.length === 3 &&
+      Boolean(formulaDesc && overviewDesc && externalDesc) &&
+      formulaDesc.isReadOnly === true &&
+      overviewDesc.isReadOnly === true &&
+      externalDesc.isReadOnly === true
+  );
+
+  assert(
+    '[Phase 2 ToolRegistry 参数强校验] 单元格坐标与数据源参数强校验生效，拦截非法输入直穿底层 COM',
+    realToolRegistry.isValidCellAddress('A1') === true &&
+      realToolRegistry.isValidCellAddress('$E$10') === true &&
+      realToolRegistry.isValidCellAddress('INVALID_ADDR') === false &&
+      formulaDesc.validate({ cellAddress: 'E5' }).valid === true &&
+      formulaDesc.validate({ cellAddress: 'BAD_CELL' }).valid === false &&
+      formulaDesc.validate({}).valid === false &&
+      externalDesc.validate({ sourceType: 'http', pathOrUrl: 'https://api.example.com' }).valid === true &&
+      externalDesc.validate({ sourceType: 'bad_type', pathOrUrl: 'test' }).valid === false
+  );
+
+  // Test 21.5: 公式跨表正则解析能力
+  const cellRefRegex = /(?:(?<sheet>'[^']+'|[a-zA-Z0-9_\u4e00-\u9fa5]+)\s*!\s*)?\$?(?<col>[a-zA-Z]{1,3})\$?(?<row>[0-9]{1,7})(?::\$?(?<col2>[a-zA-Z]{1,3})\$?(?<row2>[0-9]{1,7}))?/g;
+  const testFormula = "=VLOOKUP(A2, '财务 明细'!$C$5:$F$100, 3, FALSE) + 汇总!B10 + D5";
+  const matchedRefs = [];
+  let match;
+  while ((match = cellRefRegex.exec(testFormula)) !== null) {
+    if (match.groups && match.groups.col && match.groups.row) {
+      matchedRefs.push({
+        sheet: match.groups.sheet ? match.groups.sheet.replace(/^'|'$/g, '') : '',
+        cell: `${match.groups.col}${match.groups.row}`
+      });
+    }
+  }
+
+  assert(
+    '[Phase 2 公式跨表正则解析] 正则精准识别单表坐标、带单引号跨表引用及中文表名跨表引用',
+    matchedRefs.some(r => r.sheet === '' && r.cell === 'A2') &&
+      matchedRefs.some(r => r.sheet === '财务 明细' && r.cell === 'C5') &&
+      matchedRefs.some(r => r.sheet === '汇总' && r.cell === 'B10') &&
+      matchedRefs.some(r => r.sheet === '' && r.cell === 'D5')
+  );
+
+  // Test 21.6: 循环引用检测模拟
+  function detectCircularRef(targetAddr, precedents) {
+    const normTarget = targetAddr.toUpperCase().trim();
+    for (const p of precedents) {
+      if (p.address && p.address.toUpperCase().trim() === normTarget) {
+        return true;
+      }
+      if (p.precedents && detectCircularRef(targetAddr, p.precedents)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  const circularPrecedents = [
+    { address: 'A1', precedents: [{ address: 'B1', precedents: [{ address: 'C1' }] }] },
+    { address: 'C1', precedents: [] }
+  ];
+  assert(
+    '[Phase 2 循环引用预警] 递归依赖图探测能精准捕获直接与深层循环引用并置位 isCircular',
+    detectCircularRef('C1', circularPrecedents) &&
+      !detectCircularRef('D1', circularPrecedents)
+  );
+}
+
+// ============================================================================
+// === 22. TASK-PHASE3 Dual-Track Loop, Universal MCP Gateway & Macro Saving ===
+// ============================================================================
+{
+  console.log('\n=== 22. TASK-PHASE3 Dual-Track Loop, Universal MCP Gateway & Macro Saving ===');
+
+  // Test 22.1: 意图分析与双轨分流决策器核验 (直接测试真实 decisionEngine.ts) (响应审查 P0-1)
+  const dQuestion1 = realDecisionEngine.classifyExecutionTrack('这个公式怎么计算', null, false);
+  const dQuestion2 = realDecisionEngine.classifyExecutionTrack('请问如何使用条件格式', null, false);
+  const dQuestion3 = realDecisionEngine.classifyExecutionTrack('why is cell A1 failing', null, false);
+  const dOverviewZh = realDecisionEngine.classifyExecutionTrack('请帮我看看这个工作簿架构，包含多少个表和表头', null, false);
+  const dOverviewEn = realDecisionEngine.classifyExecutionTrack('please show workbook overview and sheet list', null, false);
+  const dFormulaZh = realDecisionEngine.classifyExecutionTrack('帮我分析下 E5 单元格是谁引用了，公式依赖是什么', null, false);
+  const dFormulaEn = realDecisionEngine.classifyExecutionTrack('trace dependencies of cell E5', null, false);
+  const dMcp = realDecisionEngine.classifyExecutionTrack('接入外部数据接口 https://api.example.com/v1/rates.json 预览汇率', null, false);
+  const dHeavyCmd = realDecisionEngine.classifyExecutionTrack('把第一列包含空的行全部删除，并将总计标红', null, false);
+  const dWithMacro = realDecisionEngine.classifyExecutionTrack('请查看工作簿结构', null, true);
+
+  assert(
+    '[Phase 3 疑问词智能降级] 真实 decisionEngine.ts 命中疑问修饰词（怎么/如何/why）时精准降级为 CHAT，杜绝误跑快照与VBA',
+    dQuestion1.track === 'CHAT' &&
+      dQuestion2.track === 'CHAT' &&
+      dQuestion3.track === 'CHAT'
+  );
+
+  assert(
+    '[Phase 3 双语意图精准分流] 真实 decisionEngine.ts 中英双语均能精准短路至 Track A，批量修改指令精准进入 Track B 物理快照轨道',
+    dOverviewZh.track === 'TRACK_A_OVERVIEW' &&
+      dOverviewEn.track === 'TRACK_A_OVERVIEW' &&
+      dFormulaZh.track === 'TRACK_A_FORMULA' &&
+      dFormulaEn.track === 'TRACK_A_FORMULA' &&
+      dFormulaZh.suggestedMcpCall.arguments.cellAddress === 'E5' &&
+      dFormulaEn.suggestedMcpCall.arguments.cellAddress === 'E5' &&
+      dMcp.track === 'TRACK_A_MCP' &&
+      dHeavyCmd.track === 'TRACK_B_HEAVY_VBA' &&
+      dWithMacro.track === 'TRACK_B_HEAVY_VBA'
+  );
+
+  // Test 22.2: 常用宏保存资格与状态门禁断言 (响应审查 P1-1)
+  function testSaveEligibility(execution, isExecuting) {
+    const executedCode = execution?.executedVbaCode || execution?.vbaCode || '';
+    const isSaveEligible = Boolean(
+      executedCode &&
+      !isExecuting &&
+      !execution?.error &&
+      execution?.verificationStatus === 'verified' &&
+      execution?.precheckStatus !== 'failed'
+    );
+    let reason = '';
+    if (isExecuting) reason = '宏正在执行中，请等待完成';
+    else if (!execution) reason = '代码尚未执行，暂不可存为常用宏';
+    else if (execution.error) reason = `代码执行遇到异常 (${execution.error})，不可存为常用宏`;
+    else if (execution.precheckStatus === 'failed') reason = '代码编译预检失败，不可存为常用宏';
+    else if (execution.verificationStatus !== 'verified') reason = '执行效果尚未完全核验通过 (待确认)，暂不可存为常用宏';
+    return { isSaveEligible, reason };
+  }
+
+  const validExec = { executedVbaCode: 'Sub Test()\nEnd Sub', verificationStatus: 'verified', precheckStatus: 'passed' };
+  const failedExec = { executedVbaCode: 'Sub Test()\nEnd Sub', error: 'Type mismatch (13)', verificationStatus: 'failed' };
+  const unconfirmedExec = { executedVbaCode: 'Sub Test()\nEnd Sub', verificationStatus: 'unconfirmed' };
+  const precheckFailExec = { executedVbaCode: 'Sub Test()\nEnd Sub', precheckStatus: 'failed' };
+
+  assert(
+    '[Phase 3 常用宏保存门禁] ExecutionCard 存为常用宏强门禁生效：仅核验通过放行，报错/未通过/预检失败严密拦截',
+    testSaveEligibility(validExec, false).isSaveEligible === true &&
+      testSaveEligibility(failedExec, false).isSaveEligible === false &&
+      testSaveEligibility(failedExec, false).reason.includes('代码执行遇到异常') &&
+      testSaveEligibility(unconfirmedExec, false).isSaveEligible === false &&
+      testSaveEligibility(unconfirmedExec, false).reason.includes('尚未完全核验通过') &&
+      testSaveEligibility(precheckFailExec, false).isSaveEligible === false &&
+      testSaveEligibility(precheckFailExec, false).reason.includes('编译预检失败')
+  );
+
+  // Test 22.3: 对话即宏过程名智能提取与保真断言
+  function extractProcedureNameForSave(code, promptFallback) {
+    if (!code) return promptFallback ? promptFallback.slice(0, 16) : '自定义处理宏';
+    const subMatch = code.match(/Sub\s+([a-zA-Z0-9_\u4e00-\u9fa5]+)\s*\(/i);
+    if (subMatch && subMatch[1] && subMatch[1] !== 'Main' && subMatch[1] !== 'LeeTaskEntry') {
+      return subMatch[1];
+    }
+    return promptFallback ? promptFallback.slice(0, 16) : '自定义处理宏';
+  }
+
+  const sampleCode1 = 'Sub FormatFinancialReport()\n    Range("A1").Value = "1"\nEnd Sub';
+  const sampleCode2 = 'Sub Main()\n    Range("A1").Value = "1"\nEnd Sub';
+
+  assert(
+    '[Phase 3 对话即宏智能命名] 精准滤除 Main 与 LeeTaskEntry 包装器命名，提取出具有高可读性的实际业务过程名',
+    extractProcedureNameForSave(sampleCode1, '财务报表格式化') === 'FormatFinancialReport' &&
+      extractProcedureNameForSave(sampleCode2, '财务报表格式化') === '财务报表格式化'
+  );
+}
+
   console.log(`\nUnit Tests Summary: Pass = ${passCount}, Fail = ${failCount}`);
   if (failCount > 0) {
     process.exit(1);

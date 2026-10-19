@@ -53,6 +53,27 @@
       ? wrapperCode
       : executedCode;
 
+  // 常用宏保存资格强校验门禁：代码必须执行完成、无错误、且通过写后验证 (verified)
+  $: isSaveEligible = Boolean(
+    (executedCode || displayCode) &&
+    !isExecuting &&
+    !execution?.error &&
+    execution?.verificationStatus === 'verified' &&
+    execution?.precheckStatus !== 'failed'
+  );
+
+  $: saveDisabledReason = isExecuting
+    ? '宏正在执行中，请等待完成'
+    : !execution
+    ? '代码尚未执行，暂不可存为常用宏'
+    : execution.error
+    ? `代码执行遇到异常 (${execution.error})，不可存为常用宏`
+    : execution.precheckStatus === 'failed'
+    ? '代码编译预检失败，不可存为常用宏'
+    : execution.verificationStatus !== 'verified'
+    ? '执行效果尚未完全核验通过 (待确认)，暂不可存为常用宏'
+    : '';
+
   let showSaveDialog = false;
   let scriptName = '';
   let scriptDesc = '';
@@ -370,8 +391,13 @@
                 <span class="btn-label-text">复制当前</span>
               {/if}
             </button>
-            <button class="btn btn-sm" on:click={() => (showSaveDialog = !showSaveDialog)} title="存入本地脚本目录">
-              <Save size={12} />
+            <button
+              class="btn btn-sm btn-save-tab"
+              disabled={!isSaveEligible}
+              on:click={() => { if (isSaveEligible) showSaveDialog = !showSaveDialog; }}
+              title={isSaveEligible ? "存入本地脚本目录" : saveDisabledReason}
+            >
+              <Save size={12} color={isSaveEligible ? "currentColor" : "#999999"} />
               <span class="btn-label-text">存入脚本库</span>
             </button>
             {#if (originalCode || executedCode || streamCode)}
@@ -877,23 +903,46 @@
           {/if}
         </div>
 
-        {#if selectedSnapshotId || execution?.snapshot?.id}
-          <button
-            class="btn btn-sm btn-rollback"
-            on:click={() => openRestoreConfirm(selectedSnapshotId || execution?.snapshot?.id || '')}
-            disabled={isRestoring}
-          >
-            {#if restoreSuccess}
-              <Check size={13} color="#107C41" />
-              <span class="restore-success-text">已恢复整本！</span>
-            {:else if isRestoring}
-              <Loader2 size={13} class="spinner" /> 恢复中...
-            {:else}
-              <RotateCcw size={13} />
-              <span>恢复到执行前</span>
-            {/if}
-          </button>
-        {/if}
+        <div class="footer-actions-group">
+          {#if executedCode || displayCode}
+            <button
+              class="btn btn-sm btn-save-macro"
+              type="button"
+              disabled={!isSaveEligible}
+              on:click={() => {
+                if (!isSaveEligible) return;
+                showSaveDialog = !showSaveDialog;
+                if (showSaveDialog && !scriptName) {
+                  const subMatch = (executedCode || displayCode).match(/Sub\s+([a-zA-Z0-9_\u4e00-\u9fa5]+)\s*\(/i);
+                  scriptName = subMatch && subMatch[1] !== 'Main' && subMatch[1] !== 'LeeTaskEntry' ? subMatch[1] : (prompt ? prompt.slice(0, 16) : '实用自动化宏');
+                  scriptDesc = prompt || '';
+                }
+              }}
+              title={isSaveEligible ? "将本次执行验证通过的代码一键沉淀为本地宏库 (.bas)，随时可在 Ribbon 常用菜单中复用" : saveDisabledReason}
+            >
+              <Save size={13} color={isSaveEligible ? "#0078d4" : "#999999"} />
+              <span>{showSaveDialog ? '收起' : '存为常用宏'}</span>
+            </button>
+          {/if}
+
+          {#if selectedSnapshotId || execution?.snapshot?.id}
+            <button
+              class="btn btn-sm btn-rollback"
+              on:click={() => openRestoreConfirm(selectedSnapshotId || execution?.snapshot?.id || '')}
+              disabled={isRestoring}
+            >
+              {#if restoreSuccess}
+                <Check size={13} color="#107C41" />
+                <span class="restore-success-text">已恢复整本！</span>
+              {:else if isRestoring}
+                <Loader2 size={13} class="spinner" /> 恢复中...
+              {:else}
+                <RotateCcw size={13} />
+                <span>恢复到执行前</span>
+              {/if}
+            </button>
+          {/if}
+        </div>
       </div>
 
       {#if showRestoreConfirm}
@@ -1283,6 +1332,16 @@
   .btn-sm {
     padding: 2px 7px;
     font-size: var(--font-size-xs);
+  }
+
+  .btn:disabled,
+  .btn-save-macro:disabled,
+  .btn-save-tab:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background: rgba(0, 0, 0, 0.03);
+    border-color: var(--office-border-subtle, #e1dfdd);
+    color: var(--office-muted, #605e5c);
   }
 
   .copy-success-text {
@@ -1877,6 +1936,28 @@
   .snap-none {
     color: var(--office-dim);
     font-style: italic;
+  }
+
+  .footer-actions-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .btn-save-macro {
+    color: #0078d4;
+    background: #eff6fc;
+    border-color: #c7e0f4;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .btn-save-macro:hover {
+    background: #deecf9;
+    border-color: #9cd1f7;
   }
 
   .btn-rollback {

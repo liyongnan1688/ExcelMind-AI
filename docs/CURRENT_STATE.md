@@ -1,7 +1,7 @@
 # ExcelMind AI 当前系统状态与基线入口 (CURRENT_STATE.md)
 
 > **文档定位**：后续开发者与 AI 识别项目真实状态的唯一当前入口  
-> **更新时间**：2026-10-18  
+> **更新时间**：2026-10-19  
 > **维护原则**：事实驱动、基线清晰、边界分明；旧报告只证明当时测试，不作为当前假设。
 
 ---
@@ -39,15 +39,26 @@
 
 ---
 
-## 三、 未提交或未合并修改 (工作区事实)
+## 三、 审计整改专项落地事实 (feat/audit-rectification)
 
-本轮工作区完成以下缺陷排查与闭环修复，并通过全量离线门禁（210/210 PASS）：
-1. **启动器编码与路径修复**：`scripts/core/launch_portable.ps1` 补充 UTF-8 BOM 修复 PowerShell 5.1 解析异常，并补齐源码仓库环境自动回溯 `bin/` 路径。
-2. **前端运行时异常修复**：`web/src/App.svelte` 补齐 `targetWbName` 解构与默认值，彻底修复执行完成时报 `ReferenceError: targetWbName is not defined`。
-3. **数据工具箱字段契约对齐**：`web/src/components/DataToolModal.svelte` 修复多文件汇总确认弹窗字段名不匹配（`sources`、`expectedFinalOutputRows`、`totalExcludedBlankRows`、`alignedColumns`）及工作表名称优先读取。
-4. **桥接层别名兼容**：`web/src/services/bridge.ts` 补齐 `activeSheet` 别名映射与 `VbaParamSignature` 类型导出。
-5. **项目手册与指引补全**：`安装与使用说明(必读).txt` 与 `docs/USER_GUIDE.md` 补充物理快照前置安全门禁及 `Ctrl + S` 解锁说明。
-6. **运行时与静态资源更新**：重新编译生成最新 `bin/dist/` 与 `bin/LeeExcel.dll`。
+本轮针对 2026-10-19 审查报告完成全面闭环整改，并通过全量离线核心门禁（**229/229 PASS**，100% 保持全绿）：
+1. **版本库索引与工程干净度治理 (Phase 0)**：
+   - 彻底将 `web/node_modules/` 从 Git 索引中剔除（`git rm -r --cached`），同时在 `.gitignore` 中固化忽略，本地保留物理文件供编译测试，杜绝巨型依赖误入仓库；
+   - 严格遵守 `AGENTS.md`，不污染 `bin/` 与根目录，无任何无授权进程操作。
+2. **工具契约与安全参数校验门禁 (Phase 1)**：
+   - 新增 `web/src/services/toolRegistry.ts` 作为前端本地与外部工具唯一事实来源（Single Source of Truth），统一声明 Schema、只读标记与参数验证逻辑；
+   - `web/src/services/mcpClient.ts` 重构为基于 `toolRegistry` 的轻量进程内通用网关；
+   - 在 C# `src/NativeBridge.cs` 中增加坐标格式严格正则拦截（`^(\$)?[A-Za-z]{1,3}(\$)?[0-9]{1,7}$`），非法输入直接拒绝穿透底层 COM；
+   - C# 加载项重新编译生成合规 `bin/LeeExcel.dll`。
+3. **不可变事实与证据账本机制 (Phase 2)**：
+   - `web/src/services/compaction.ts` 实现 `extractExecutionEvidence` 机制，在会话压缩时将物理快照 ID（`snap_...`）、预检/执行报错记录与核验通过区域固化为 `【关键执行事实与证据锚点】`，禁止跨压缩周期遗忘或篡改。
+4. **意图自主决策加固、公约解耦与常用宏门禁 (Phase 3)**：
+   - 提取 `web/src/services/conventions.ts` 集中管理商务排版与企业主题公约，`web/src/services/llm.ts` 解耦引用，确保静态 Prompt 100% 字节恒定；
+   - `web/src/services/decisionEngine.ts` 接入 `toolRegistry`，增加疑问修饰词（怎么/如何/why/how等）短路降级规则与中英文精准双语分流；在 `web/src/App.svelte` 实施有效请求模式降级（CHAT 模式绝不自动触发物理快照与 VBA 执行）；
+   - `web/src/components/ExecutionCard.svelte` 增加 `isSaveEligible` 与原因提示，物理禁用未通过核验、执行报错或预检失败时的“存为常用宏”操作。
+5. **动态测试架构彻底升级**：
+   - `test_suite_unit.cjs` 淘汰重复手写的 mock 副本，改用 Vite 的 `transformWithEsbuild` 在内存中实时转译加载 TS 源码模块进行断言，门禁通过数升至 **229/229 PASS**；
+   - 前端工作台重新构建生成最终单文件静态包 `bin/dist/`。
 
 *注：遵守 AGENTS.md 规范，不盲目执行 `git reset` 或 `git clean` 丢弃工作区文件。*
 

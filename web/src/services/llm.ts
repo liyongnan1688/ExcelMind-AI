@@ -1,6 +1,8 @@
 import { loadLlmConfig, type LlmConfig } from './config';
 import type { WorkbookReadback, VbaExecutionData, SelectionContextData, SelectionSendOptions, SelectionSnapshot } from './bridge';
 import { checkMacroReferenceContext, formatMacroReferenceForPrompt, type MacroReferenceData } from './conversationManager';
+import { compactHistory, isContextOverflowError } from './compaction';
+import { CORPORATE_CONVENTIONS_BLOCK } from './conventions';
 
 export type UserIntent = 'CHAT' | 'AUTOMATION' | 'AMBIGUOUS';
 
@@ -48,14 +50,12 @@ export function getCurrentDateTimeInfo(): string {
 }
 
 /**
- * 构建纯自然语言对话通道系统提示词
+ * 构建纯自然语言对话通道系统提示词 (静态缓存安全)
  */
 export function buildChatSystemPrompt(addition?: string): string {
-  const timeInfo = getCurrentDateTimeInfo();
   let base = `你是一名精通 Microsoft Excel 和 VBA 的专业顾问。
-当前用户设备的本地系统真实时间: 【${timeInfo}】。
 当前处于【问答咨询与解释通道】。请用专业、亲切、通俗易懂的中文直接解答用户的问题、解释代码含义或进行日常交流。
-若用户咨询当前日期、今天几号、明天星期几、节假日或与时间相关的推算，请严格基于上述系统真实时间准确回答。
+若用户咨询当前日期、今天几号、明天星期几、节假日或与时间相关的推算，请严格基于用户消息尾部提供的真实系统时间准确回答。
 【核心边界规则】：
 1. 本通道为问答与咨询通道，不会自动在 Excel 中执行宏代码。若用户要求编写、展示或提供 VBA 代码供参考，可以用 Markdown 代码块（如 \`\`\`vba）清晰展示，无需引导执行。
 2. 若用户询问代码含义，请用文字清晰分步剖析。
@@ -135,30 +135,25 @@ export function getPromptConstraintsCatalog(): PromptRuleItem[] {
       isHostCapabilityLimitation: true,
       limitationReason: '【宿主能力限制说明】当前宿主自动化执行内核运行在非交互式后台调用管道中，阻塞式 UI 弹窗会导致 Excel 主线程永久挂死，属于宿主执行器施加的安全能力边界，并非中性协议，亦非模型自然选择。',
     },
+    {
+      name: '企业视觉与排版公约',
+      category: '输出格式协议',
+      description: '遵循标准千分位、保留两位小数、负数红字、标题行深海蓝(#182D7B)或科技蓝(#0068B7)与细边框等商务排版公约。',
+      isHostCapabilityLimitation: false,
+    },
   ];
 }
 
 /**
- * 构建自动化执行通道系统提示词
- * 严格按照【运行入口协议】、【输出格式协议】、【执行交互边界】与【模型能力限制】四类组织
+ * 构建静态、字节级恒定的自动化执行通道系统提示词 (100% 稳定前缀，保证大模型 Prompt Caching 命中)
+ * 严格按照【运行入口协议】、【输出格式协议】、【执行交互边界】、【企业排版公约规范】与【宿主能力限制】组织
  */
-export function buildAutomationSystemPrompt(
-  targetWorkbookName: string,
-  sheets: string[],
-  activeSheet: string = '',
-  usedRange: string = '',
-  addition?: string
-): string {
-  const timeInfo = getCurrentDateTimeInfo();
+export function buildStaticAutomationSystemPrompt(addition?: string): string {
   let base = `你是一名精通 Microsoft Windows 桌面 Excel 和 VBA 自动化的专业 AI 助手。
-当前用户设备的本地系统真实时间: 【${timeInfo}】。
-当前任务目标工作簿: "${targetWorkbookName || '当前活动工作簿'}"。
-目标工作簿包含的工作表: [${sheets.join(', ')}]。
-当前活动工作表: "${activeSheet || '默认'}"，使用区域: "${usedRange || '空'}"。
 
 【运行入口协议】：
 1. 运行环境：你的代码将在 Windows 桌面 Excel 进程中编译并执行。
-2. 主入口声明：主执行过程建议声明为 Sub Main(targetWb As Workbook)，通过 targetWb 显式操作目标工作簿中的工作表（如 targetWb.Worksheets("${activeSheet || '默认'}") 或 targetWb.ActiveSheet）；亦可使用标准无参入口 Sub Main()，此时宏执行器将在激活目标工作簿后调用该过程，通过 ActiveSheet 或 ActiveWorkbook 操作。
+2. 主入口声明：主执行过程建议声明为 Sub Main(targetWb As Workbook)，通过 targetWb 显式操作目标工作簿中的工作表；亦可使用标准无参入口 Sub Main()，此时宏执行器将在激活目标工作簿后调用该过程，通过 ActiveSheet 或 ActiveWorkbook 操作。
 3. 算法与辅助过程自由度：除主过程入口外，你可以根据任务需求自由定义任何辅助 Sub、Function、常量、自定义类型或选择最佳算法，无任何固定范式限制。
 
 【输出格式协议】：
@@ -170,6 +165,8 @@ export function buildAutomationSystemPrompt(
 1. 控制流与语法严格闭合：如需声明变量，请完整规范声明；代码逻辑必须完整闭合（For 与 Next、If 与 End If 等严格配对）；
 2. 无法完成时单行拒绝：如果根据现有上下文确实无法完成任务，请不要生成伪造代码，直接输出单行说明原因。
 
+${CORPORATE_CONVENTIONS_BLOCK}
+
 【模型能力限制（宿主环境安全约束）】：
 1. 严禁调用 MsgBox、InputBox 等会导致自动化流程挂起的阻塞式交互对话框（说明：由于插件执行内核处于后台自动化链路，此类弹窗会阻塞 Excel UI 线程并导致自动化执行永久挂死，属于宿主执行器施加的能力限制，并非中性协议或模型自然选择）。`;
 
@@ -177,6 +174,39 @@ export function buildAutomationSystemPrompt(
     base += `\n\n【用户自定义附加指令】：\n${addition.trim()}`;
   }
   return base;
+}
+
+/**
+ * 格式化动态环境与工作簿尾部上下文
+ * 严格挂载在用户轮次尾部，避免破坏大模型 System Prompt 与历史前缀缓存
+ */
+export function formatWorkbookTailContext(
+  targetWorkbookName?: string,
+  sheets?: string[],
+  activeSheet: string = '',
+  usedRange: string = '',
+  timeInfo?: string
+): string {
+  const time = timeInfo || getCurrentDateTimeInfo();
+  const sheetsText = Array.isArray(sheets) && sheets.length > 0 ? sheets.join(', ') : '无工作表或未读取';
+  return `【当前环境与工作簿状态上下文】：
+- 系统本地真实时间: 【${time}】
+- 目标工作簿: "${targetWorkbookName || '当前活动工作簿'}"
+- 包含工作表: [${sheetsText}]
+- 当前活动工作表: "${activeSheet || '默认'}"，使用区域: "${usedRange || '空'}"`;
+}
+
+/**
+ * 构建自动化执行通道系统提示词 (保持向下兼容)
+ */
+export function buildAutomationSystemPrompt(
+  targetWorkbookName?: string,
+  sheets?: string[],
+  activeSheet: string = '',
+  usedRange: string = '',
+  addition?: string
+): string {
+  return buildStaticAutomationSystemPrompt(addition);
 }
 
 /**
@@ -636,33 +666,39 @@ export async function callLlmStream(
     baseUrl += '/chat/completions';
   }
 
-  // 根据通道选择对应的系统提示词
+  // 根据通道选择对应的静态系统提示词 (100% 字节稳定前缀，保证前缀缓存命中)
   const systemPrompt =
     intent === 'CHAT'
       ? buildChatSystemPrompt(config.systemPromptAddition)
-      : buildAutomationSystemPrompt(targetWorkbookName, sheets, activeSheet, usedRange, config.systemPromptAddition);
+      : buildStaticAutomationSystemPrompt(config.systemPromptAddition);
 
-  // 历史上下文策略：保留最近 6 条消息（注：仅在标准一问一答时近似对应 3 轮，实际按消息条数精确截断）
-  const MAX_HISTORY_MESSAGES = 6;
+  // 动态环境与工作簿上下文 (移至尾部注入)
+  const workbookTailContext =
+    intent === 'AUTOMATION'
+      ? formatWorkbookTailContext(targetWorkbookName, sheets, activeSheet, usedRange)
+      : `【当前环境状态】：\n- 系统本地真实时间: 【${getCurrentDateTimeInfo()}】`;
+
+  // 历史上下文三级智能压缩管道：当超过阈值时沉淀为事实摘要，否则完整保留
+  const compactionRes = compactHistory(history, {
+    maxTailMessages: isCompactionRetry ? 2 : 6,
+    triggerCharThreshold: isCompactionRetry ? 10000 : 30000,
+  });
+  const actualHistory = compactionRes.history;
   const totalHistoryAvailable = history.length;
-  const actualHistory = history
-    .slice(-MAX_HISTORY_MESSAGES)
-    .filter((h) => h && h.content && h.content.trim().length > 0)
-    .map((h) => ({
-      role: h.role,
-      content: h.content,
-    }));
+  const excludedHistoryCount = compactionRes.compactedCount;
 
-  const excludedHistory = history.slice(0, Math.max(0, history.length - MAX_HISTORY_MESSAGES));
-  const excludedHistoryCount = excludedHistory.length;
+  // 检查是否引用了已超出发送窗口的宏（结合压缩结果分析）
+  const macroContextCheck = checkMacroReferenceContext(
+    prompt,
+    actualHistory,
+    history.slice(0, Math.max(0, history.length - (isCompactionRetry ? 2 : 6)))
+  );
 
-  // 检查是否引用了已超出发送窗口的宏（仅作提示，不改变请求模式，不修改用户输入或代码，不自动补造宏）
-  const macroContextCheck = checkMacroReferenceContext(prompt, actualHistory, excludedHistory);
-
-  // 组装用户消息：
-  // 1. 若显式引用了前序宏，将来源保真的只读代码段附加在用户文字下方
-  // 2. 若附加了选区快照，将选区数据段追加在下方
-  let userContent = prompt;
+  // 组装用户消息（尾部上下文）：
+  // 1. 动态环境与工作簿上下文放在尾部
+  // 2. 若显式引用了前序宏，将来源保真的只读代码段附加在用户文字下方
+  // 3. 若附加了选区快照，将选区数据段追加在下方
+  let userContent = `${workbookTailContext}\n\n---\n${prompt}`;
   let macroRefChars = 0;
   let macroRefAuditSummary: any = undefined;
 
@@ -743,8 +779,10 @@ export async function callLlmStream(
     historyCountSent: actualHistory.length,
     totalHistoryAvailable,
     excludedHistoryCount,
-    historyStrategy: `保留最近 ${MAX_HISTORY_MESSAGES} 条消息（时间倒序截取前 6 条，含完整原始模型代码与文字，按时序排列，无宿主包装器污染、无静默压缩）`,
-    isHistoryCompressedOrStripped: false,
+    historyStrategy: compactionRes.isCompacted
+      ? `长会话三级智能压缩：已将前序 ${compactionRes.compactedCount} 条历史沉淀为结构化事实摘要检查点，尾部完整保留活跃会话`
+      : `完整保留历史消息 (共 ${actualHistory.length} 条，无截断)`,
+    isHistoryCompressedOrStripped: compactionRes.isCompacted,
     macroContextWarning: macroContextCheck.warning,
     selectionAudit: selectionSnapshot ? selectionSnapshot.summary : undefined,
     macroReferenceAudit: macroRefAuditSummary,
@@ -808,6 +846,22 @@ export async function callLlmStream(
   if (!response.ok) {
     if (chunkTimer) clearTimeout(chunkTimer);
     const errText = await response.text().catch(() => '');
+    if (isContextOverflowError(errText) && !isCompactionRetry && history.length > 0) {
+      onChunk('\n> ⚠️ 检测到大模型上下文长度超限，正在执行智能历史会话压缩并自动重试...\n\n');
+      return callLlmStream(
+        prompt,
+        targetWorkbookName,
+        sheets,
+        activeSheet,
+        usedRange,
+        intent,
+        onChunk,
+        history,
+        selectionSnapshot,
+        macroReference,
+        true
+      );
+    }
     throw new Error(`API 请求失败 (${response.status}): ${errText || response.statusText}`);
   }
 

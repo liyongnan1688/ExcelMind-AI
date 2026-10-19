@@ -273,6 +273,18 @@ namespace LeeExcel
                         resp = HandleExportDiagnostics(jsonString, app);
                         break;
 
+                    case "get_workbook_overview":
+                        resp = HandleGetWorkbookOverview(req, app);
+                        break;
+
+                    case "trace_dependencies":
+                        resp = HandleTraceDependencies(req, app);
+                        break;
+
+                    case "explain_formula":
+                        resp = HandleExplainFormula(req, app);
+                        break;
+
                     default:
                         resp = new BridgeResponse
                         {
@@ -2810,6 +2822,111 @@ namespace LeeExcel
                     ok = false,
                     action = "export_diagnostics",
                     error = "导出诊断包异常: " + ex.Message
+                };
+            }
+        }
+
+        private static BridgeResponse HandleGetWorkbookOverview(Dictionary<string, string> req, dynamic app)
+        {
+            try
+            {
+                string targetFullName = req.ContainsKey("targetWorkbookFullName") ? req["targetWorkbookFullName"] : null;
+                string targetName = req.ContainsKey("targetWorkbookName") ? req["targetWorkbookName"] : null;
+
+                var data = FormulaAuditService.GetWorkbookOverview(app, targetFullName, targetName);
+                return new BridgeResponse
+                {
+                    ok = true,
+                    action = "get_workbook_overview",
+                    data = data,
+                    message = string.Format("工作簿概览读取成功 (共 {0} 个工作表)", data.sheetCount)
+                };
+            }
+            catch (Exception ex)
+            {
+                return new BridgeResponse
+                {
+                    ok = false,
+                    action = "get_workbook_overview",
+                    error = "读取工作簿结构失败: " + ex.Message
+                };
+            }
+        }
+
+        private static BridgeResponse HandleTraceDependencies(Dictionary<string, string> req, dynamic app)
+        {
+            try
+            {
+                string targetFullName = req.ContainsKey("targetWorkbookFullName") ? req["targetWorkbookFullName"] : null;
+                string targetName = req.ContainsKey("targetWorkbookName") ? req["targetWorkbookName"] : null;
+                string sheetName = req.ContainsKey("sheetName") ? req["sheetName"] : null;
+                string cellAddress = req.ContainsKey("cellAddress") ? req["cellAddress"] : null;
+
+                if (string.IsNullOrEmpty(cellAddress) || !System.Text.RegularExpressions.Regex.IsMatch(cellAddress.Trim(), @"^(\$)?[A-Za-z]{1,3}(\$)?[0-9]{1,7}$"))
+                {
+                    return new BridgeResponse
+                    {
+                        ok = false,
+                        action = "trace_dependencies",
+                        error = "参数校验未通过: 单元格坐标为空或格式不合法 (" + (cellAddress ?? "null") + ")"
+                    };
+                }
+
+                var data = FormulaAuditService.AuditCellFormula(app, targetFullName, targetName, sheetName, cellAddress);
+                return new BridgeResponse
+                {
+                    ok = true,
+                    action = "trace_dependencies",
+                    data = data,
+                    message = string.Format("公式血缘追溯完成: 依赖 {0} 处，从属 {1} 处", data.directPrecedents.Count, data.directDependents.Count)
+                };
+            }
+            catch (Exception ex)
+            {
+                return new BridgeResponse
+                {
+                    ok = false,
+                    action = "trace_dependencies",
+                    error = "公式血缘追溯失败: " + ex.Message
+                };
+            }
+        }
+
+        private static BridgeResponse HandleExplainFormula(Dictionary<string, string> req, dynamic app)
+        {
+            try
+            {
+                string targetFullName = req.ContainsKey("targetWorkbookFullName") ? req["targetWorkbookFullName"] : null;
+                string targetName = req.ContainsKey("targetWorkbookName") ? req["targetWorkbookName"] : null;
+                string sheetName = req.ContainsKey("sheetName") ? req["sheetName"] : null;
+                string cellAddress = req.ContainsKey("cellAddress") ? req["cellAddress"] : null;
+
+                if (string.IsNullOrEmpty(cellAddress) || !System.Text.RegularExpressions.Regex.IsMatch(cellAddress.Trim(), @"^(\$)?[A-Za-z]{1,3}(\$)?[0-9]{1,7}$"))
+                {
+                    return new BridgeResponse
+                    {
+                        ok = false,
+                        action = "explain_formula",
+                        error = "参数校验未通过: 单元格坐标为空或格式不合法 (" + (cellAddress ?? "null") + ")"
+                    };
+                }
+
+                var data = FormulaAuditService.AuditCellFormula(app, targetFullName, targetName, sheetName, cellAddress);
+                return new BridgeResponse
+                {
+                    ok = true,
+                    action = "explain_formula",
+                    data = data,
+                    message = data.auditSummary
+                };
+            }
+            catch (Exception ex)
+            {
+                return new BridgeResponse
+                {
+                    ok = false,
+                    action = "explain_formula",
+                    error = "公式审计失败: " + ex.Message
                 };
             }
         }

@@ -18,6 +18,8 @@
     verifyExecutionResult,
   } from './services/llm';
   import { buildChatHistory, type ChatMessage, type MacroReferenceData } from './services/conversationManager';
+  import { classifyExecutionTrack } from './services/decisionEngine';
+  import { mcpGateway } from './services/mcpClient';
 
   let workbook: WorkbookInfo | null = null;
   let messages: ChatMessage[] = [];
@@ -326,6 +328,42 @@
   async function runSendWorkflow(currentRequest: any, assistantMsg: ChatMessage) {
     const text = currentRequest.text || assistantMsg.prompt || '';
     const targetWbName = currentRequest.targetWbName || '当前工作簿';
+    let effectiveRequestMode = currentRequest.requestMode;
+
+    // Phase 3: 双轨自主分流 (Track A: 原生 COM / MCP 轻量感知与即时审计闭环)
+    if (currentRequest.requestMode === 'AUTOMATION') {
+      const decision = classifyExecutionTrack(
+        text,
+        currentRequest.selectionSnapshot,
+        Boolean(currentRequest.macroReference)
+      );
+
+      if (decision.track.startsWith('TRACK_A_') && decision.suggestedMcpCall) {
+        assistantMsg.content = `【轨道一：轻量感知与即时审计通道】\n${decision.reason}\n正在通过原生 COM/MCP 快速读取...`;
+        messages = [...messages];
+
+        try {
+          const mcpRes = await mcpGateway.executeTool(decision.suggestedMcpCall);
+          if (mcpRes.ok) {
+            const outputText = mcpRes.content.find((c) => c.type === 'text')?.text || '操作成功完成';
+            assistantMsg.content = `【轻量感知即时响应】\n${outputText}`;
+            assistantMsg.rawContent = assistantMsg.content;
+            assistantMsg.isExecuting = false;
+            assistantMsg.execution = null;
+            messages = [...messages];
+            isProcessing = false;
+            return;
+          }
+        } catch (e: any) {
+          console.warn('[Track A] 轻量执行遇到异常，安全降级至大模型常规通道:', e);
+        }
+      } else if (decision.track === 'CHAT') {
+        // 疑问修饰词/技术咨询智能降级：用户虽处在 AUTOMATION 模式，但提问明显属于疑问答疑（如“怎么计算”、“为什么报错”）
+        // 自动降级为 CHAT 模式回答，杜绝误触发整本快照与 VBA 写入
+        effectiveRequestMode = 'CHAT';
+      }
+    }
+
     try {
       // 提取多轮历史上下文：优先取各轮助手消息的 rawContent（大模型真实原始回复），执行摘要不污染历史
       const chatHistory = buildChatHistory(messages, {
@@ -333,17 +371,17 @@
         assistantMsgId: currentRequest.assistantMsgId,
       });
 
-      // 调用大模型流式生成 (严格使用本次请求锁定的 requestMode，按用户主动要求注入选区与显式引用宏)
+      // 调用大模型流式生成 (严格使用本次决策判定的 effectiveRequestMode)
       const streamRes = await callLlmStream(
         text,
         currentRequest.targetWbName,
         currentRequest.sheets,
         currentRequest.activeSheet,
         currentRequest.usedRange,
-        currentRequest.requestMode,
+        effectiveRequestMode,
         (partialText) => {
           assistantMsg.rawContent = partialText;
-          if (currentRequest.requestMode === 'AUTOMATION') {
+          if (effectiveRequestMode === 'AUTOMATION') {
             const parsed = parseStreamOutput(partialText);
             if (parsed.hasCode) {
               assistantMsg.content = parsed.explanation || '正在执行自动化指令...';
@@ -371,7 +409,7 @@
       assistantMsg.rawContent = rawResponse;
 
       // 四、处理 CHAT 通道：完整展示模型回答，绝对不进入自动化执行链
-      if (currentRequest.requestMode === 'CHAT') {
+      if (effectiveRequestMode === 'CHAT') {
         assistantMsg.content = rawResponse;
         assistantMsg.rawContent = rawResponse;
         assistantMsg.streamVbaCode = '';
