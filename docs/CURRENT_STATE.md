@@ -41,20 +41,19 @@
 
 ## 三、 审计整改专项落地事实 (feat/audit-rectification)
 
-本轮针对 2026-10-19 审查报告（第一至第四轮）完成全面闭环整改，并通过全量离线核心门禁（**232/232 PASS**，100% 保持全绿）：
-1. **纯文本兜底双向兼容与证据防漏 (解决第四轮审查 P1-新)**：
-   - 修复 `compaction.ts` 纯文本兜底提取正则，升级为同时兼容新文案“抽样核验一致”与历史存量“验证通过”；
-   - 解决纯文本会话折叠时因文案调整导致的证据静默丢失问题，且在门禁 `Test 20.4` 中完成双向提取断言。
-2. **彻底清除 `verified` 死状态（解决第四轮审查 P2/类型诚实性）**：
+本轮针对 2026-10-19 审查报告（第一至第五轮）完成全面闭环整改，并通过全量离线核心门禁（**233/233 PASS**，100% 保持全绿）：
+1. **降级分支接线完整链路断言 (解决第五轮审查 P2/接线盲区)**：
+   - 增强 `loadRealTsService` 支持 `forceZeroDepFallback` 显式参数，增加 `Test 20.0b` 门禁断言；
+   - 强行触发纯 Node 降级 else 分支加载并执行真实的 `macroSaveEligibility.ts` 纯函数，彻底覆盖从源码读取、语法剥离到沙箱注入执行的完整接线链路。
+2. **纯文本兜底正则技术债显式标注 (解决第五轮审查 P2/架构清晰度)**：
+   - 在 `compaction.ts` 中明确增加架构演进注释，将 `verifiedRegex` 散文兜底定性为“服务无元数据旧会话的过渡兼容技术债”，明确后续废弃收敛路径。
+3. **彻底清除 `verified` 死状态（第四轮审查 P2 彻底闭环）**：
    - 真实底层 `verifyExecutionResult` 仅产出 `matched`、`unconfirmed`、`failed` 三态；
    - 彻底将 `bridge.ts`、`llm.ts`、`conversationManager.ts`、`App.svelte` 与 `ExecutionCard.svelte` 中的联合类型及判断收敛，移除虚假的 `verified` 成员，使类型契约 100% 反映生产真实。
-3. **零依赖转译器加固与自测覆盖（解决第四轮审查 P2/消除未验证死代码）**：
-   - 提取独立的 `stripTsTypesForCjs` 语法剥离器，加固对 TS 可选参数（`param?: Type`）及复杂类型的剥离能力；
-   - 在 `test_suite_unit.cjs` 中增设自测断言（`Test 20.0`），强行绕过 Vite 与 esbuild 执行生产服务编译运行，确保在无任何外部编译器依赖的极端环境下测试门禁依然稳健。
-4. **证据载荷真实性门控 (解决第三轮审查 P1-新/载荷失真)**：
+4. **证据载荷真实性门控 (第三轮审查 P1-新 彻底闭环)**：
    - 彻底解决“管道已通但载荷失真”漏洞：在 `conversationManager.ts` 组装结构化元数据时，增加严格状态门控 `verificationStatus === 'matched' && !error`；
    - 仅当抽样核验真正一致且无运行异常时，才向证据账本写入 `区域 ${usedRangeAddress} 抽样核验一致`；对未确认的排版任务或失败报错任务，绝不虚构“验证通过”，确保不可变证据账本内容 100% 真实。
-5. **抽离门禁为独立纯 TS 模块并测真身 (解决第三轮审查 P1-新/测试副本)**：
+5. **抽离门禁为独立纯 TS 模块并测真身 (第三轮审查 P1-新 彻底闭环)**：
    - 新增独立纯函数服务模块 `web/src/services/macroSaveEligibility.ts`，导出 `checkMacroSaveEligibility`；
    - `ExecutionCard.svelte` 组件接入该纯函数计算保存资格；
    - `test_suite_unit.cjs` 通过动态转译直接加载该生产服务模块进行断言，生产与测试共享同一真实代码，彻底根治门禁逻辑的“测试抄写副本”弊病。
@@ -62,7 +61,7 @@
    - 清理代码与文档中关于“In-Process Tool Loop”等夸大措辞，实事求是更正为“**Native COM Fast-Path Dispatch（原生轻量快速分派通道）**”；
    - `web/src/services/toolRegistry.ts` 作为前端工具唯一事实来源；C# `src/NativeBridge.cs` 增加坐标格式严格正则拦截；C# 加载项重新编译生成合规 `bin/LeeExcel.dll`。
 7. **仓库根目录卫生与历史报告归档**：
-   - 将根目录的四份审查报告（v1、v2、v3、v4）全部归档至 `docs/history/reviews/`，严格遵循 `AGENTS.md` 规约保持根目录干净；
+   - 将根目录的五份审查报告（v1、v2、v3、v4、v5）全部归档至 `docs/history/reviews/`，严格遵循 `AGENTS.md` 规约保持根目录干净；
    - 前端工作台重新构建生成最终单文件静态包 `bin/dist/`。
 
 *注：遵守 AGENTS.md 规范，不盲目执行 `git reset` 或 `git clean` 丢弃工作区文件。*

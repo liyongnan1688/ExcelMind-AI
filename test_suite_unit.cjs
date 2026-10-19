@@ -6279,19 +6279,20 @@ function stripTsTypesForCjs(code) {
     .replace(/export\s+const\s+([A-Za-z0-9_]+)\s*=/g, 'const $1 = exports.$1 =');
 }
 
-async function loadRealTsService(relPath) {
+async function loadRealTsService(relPath, forceZeroDepFallback = false) {
   const fullPath = path.resolve(__dirname, relPath);
-  if (tsModuleCache[fullPath]) return tsModuleCache[fullPath];
+  const cacheKey = forceZeroDepFallback ? `${fullPath}#zeroDep` : fullPath;
+  if (tsModuleCache[cacheKey]) return tsModuleCache[cacheKey];
   const code = fs.readFileSync(fullPath, 'utf8');
   let transformedCode = '';
-  if (viteCompiler && typeof viteCompiler.transformWithEsbuild === 'function') {
+  if (!forceZeroDepFallback && viteCompiler && typeof viteCompiler.transformWithEsbuild === 'function') {
     const res = await viteCompiler.transformWithEsbuild(code, fullPath, {
       loader: 'ts',
       format: 'cjs',
       target: 'node20',
     });
     transformedCode = res.code;
-  } else if (viteCompiler && typeof viteCompiler.transform === 'function') {
+  } else if (!forceZeroDepFallback && viteCompiler && typeof viteCompiler.transform === 'function') {
     const res = await viteCompiler.transform(code, {
       loader: 'ts',
       format: 'cjs',
@@ -6324,7 +6325,7 @@ async function loadRealTsService(relPath) {
   };
   const fn = new Function('module', 'exports', 'require', '__dirname', '__filename', transformedCode);
   fn(mod, mod.exports, customRequire, path.dirname(fullPath), fullPath);
-  tsModuleCache[fullPath] = mod.exports;
+  tsModuleCache[cacheKey] = mod.exports;
   return mod.exports;
 }
 
@@ -6351,6 +6352,18 @@ const realMacroSaveEligibility = await loadRealTsService('./web/src/services/mac
   assert(
     '[Phase 1 CI 依赖断崖防御] 零依赖 TS 转译器 stripTsTypesForCjs 自测：强行绕过 Vite/esbuild 成功转译真实生产服务并执行',
     typeof testMod.exports.checkMacroSaveEligibility === 'function' && zeroDepRes.isSaveEligible === true
+  );
+
+  // Test 20.0b: loadRealTsService 降级分支接线完整链路断言 (响应审查第五轮 P2)
+  const zeroDepFallbackLoadedMod = await loadRealTsService('./web/src/services/macroSaveEligibility.ts', true);
+  const zeroDepWiringRes = zeroDepFallbackLoadedMod.checkMacroSaveEligibility(
+    { executedVbaCode: 'Sub Test()\nEnd Sub', verificationStatus: 'matched' },
+    false,
+    'Sub Test()\nEnd Sub'
+  );
+  assert(
+    '[Phase 1 CI 依赖断崖防御] loadRealTsService 降级分支接线断言：forceZeroDepFallback 强制触发 else 分支，完整走通沙箱包装与依赖注入',
+    typeof zeroDepFallbackLoadedMod.checkMacroSaveEligibility === 'function' && zeroDepWiringRes.isSaveEligible === true
   );
 }
 

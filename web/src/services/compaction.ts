@@ -106,7 +106,10 @@ export function extractExecutionEvidence(content: string): ExecutionEvidence {
     }
   }
 
-  // 3. 提取已核验通过的变更区域与已运行宏 (兼容新文案“抽样核验一致”与历史存量“验证通过”)
+  // 3. 提取已核验通过的变更区域与已运行宏 (双向兼容新文案“抽样核验一致”与历史存量“验证通过”)
+  // [架构生命周期技术债说明 - 响应审查第五轮 P2]:
+  // 结构化元数据 evidence.verifiedChange 是系统主干事实唯一来源；
+  // 下方 verifiedRegex 仅作为无元数据旧会话与外部纯文本导入的过渡兜底，后续大版本完成历史迁移后将完全废弃。
   const verifiedRegex = /(?:区域\s*([a-zA-Z]{1,3}[0-9]{1,7}:[a-zA-Z]{1,3}[0-9]{1,7})\s*(?:抽样核验一致|验证通过)|宏【([^】]+)】已运行完成)/gi;
   let verMatch;
   while ((verMatch = verifiedRegex.exec(content)) !== null) {
