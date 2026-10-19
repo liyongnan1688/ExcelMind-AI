@@ -22,7 +22,12 @@ if (-not (Test-Path $ArtifactsDir)) {
 }
 
 if ([string]::IsNullOrEmpty($ZipPath)) {
-    $ZipPath = Join-Path $ProjectRoot ".artifacts\release\ExcelMindAI-v1.3.0-rc1.zip"
+    $candidates = Get-ChildItem -Path (Join-Path $ProjectRoot "release"), (Join-Path $ProjectRoot ".artifacts\release") -Filter "*.zip" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
+    if ($candidates -and $candidates.Count -gt 0) {
+        $ZipPath = $candidates[0].FullName
+    } else {
+        $ZipPath = Join-Path $ProjectRoot "release\ExcelMindAI-v1.3.1.zip"
+    }
 }
 if (-not (Test-Path $ZipPath)) {
     Write-Host "[ERROR] Release ZIP not found: $ZipPath" -ForegroundColor Red
