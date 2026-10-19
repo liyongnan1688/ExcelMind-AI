@@ -14,18 +14,21 @@
 | **当前发布版本** | `v1.3.0` (Official Production Release) | 正式稳定发行版本 |
 | **前序候选版本** | `v1.3.0-rc1` (Pre-release Candidate 1) | 历史候选发布（Tag `v1.3.0-rc1`，Commit `b4402a9`） |
 | **Git Tag** | `v1.3.0` | 正式发行 Tag |
-| **本地构建资产 (Local Release ZIP)** | **SHA-256**:<br>`cef7ed1bbb427c6fb1c2774ca5fe06bed878e85a89c1734d5b6e3274dbbc5da9` | **物理位置**：`release/ExcelMindAI-v1.3.0.zip`<br>由本地全自动流水线编译打包生成（1.55 MB） |
+| **本地构建资产 (Local Release ZIP)** | **SHA-256**:<br>`2dd5be642a3b78ab67001e6f0206f2a80e579bc8de50cacd898206f915eeeb3e` | **物理位置**：`release/ExcelMindAI-v1.3.0.zip`<br>由审计整改后最新代码打包生成（1.57 MB） |
 
-### 两个 ZIP 文件差异与冒烟证据结论
+### 独立隔离解压冒烟与五大真机验收确证
 
-1. **文件清单完全一致**：解压比对表明，两份 ZIP 内均包含完全一致的 26 个文件。
-2. **二进制依赖完全一致**：包内 6 个核心依赖 DLL（`ExcelDna.Integration.dll`、`LeeExcel.xll`、`LeeExcel64.xll`、`Microsoft.Web.WebView2.Core.dll`、`Microsoft.Web.WebView2.WinForms.dll`、`WebView2Loader.dll`）SHA-256 100% 比对一致。
-3. **文本文件差异根因**：所有脚本与 Markdown（`.bat`、`.dna`、`README.md`、前端 `dist/index.html`、`dist/assets/*.js`、`dist/assets/*.css`）在去除换行符差异（GitHub CI 为 CRLF，本地为 LF）后，**正文内容 100% 完全相同**。
-4. **`LeeExcel.dll` 差异根因**：两份 DLL 文件大小均为 590,336 字节。二进制逐字节对比显示，仅 44 字节存在差异（0.0075%），具体为 PE 头部编译时间戳（`TimeDateStamp`）与 .NET 4.0 编译器为程序集自动生成的随机模块版本标识（MVID GUID）。
-5. **两份包均已拥有独立真机冒烟验证证据（杜绝仅凭静态推断）**：
-   - **本地构建包 (`f5441...`)**：在独立隔离目录运行 6 项解压冒烟全部通过（存证报告：`.artifacts/tests/smoke_isolated_20261007_203405/smoke_report.md`）；
-   - **GitHub 官方下载包 (`445ef...`)**：在独立隔离目录运行 6 项解压冒烟全部通过（存证报告：`.artifacts/tests/smoke_github_release_20261007_214500/smoke_report.md`，测试 Excel PID=8672，包内 26 项清单核验 100% 通过，WebView2 任务窗格及 Ribbon 截图存证已固化，脱敏诊断导出全流程通过，固定无害宏读回 `A1 == 'RELEASE_SMOKE_VERIFIED'`、`B1 == '20261003'`，测试进程安全释放）；
-   - 本地包与 CI 包不是逐字节相同，文档分别记录构建与实际运行证据，不称为逐字节一致；两者均已在真实 64 位 Excel 宿主上获得直接端到端运行验证证据。
+1. **发行包解压冒烟验证（“能不能跑” - 6/6 PASS）**：
+   - **存证报告**：`.artifacts/tests/smoke_isolated_20261019_150904/smoke_report.md`；
+   - **动态标题**：`# ExcelMind AI v1.3.0 发行包独立隔离解压冒烟验证报告`（已彻底修复历史报告标题写死版本号的技术债）；
+   - **结果**：清单核验（26项）、便携入口、64位加载、WebView2窗格展示与Ribbon截图、脱敏诊断导出全流程、固定无害宏读回全量通过，宿主进程安全退出。
+2. **五大真机验收场景矩阵（“跑得对不对” - 26/26 PASS）**：
+   - **存证报告**：`.artifacts/acceptance/20261019/acceptance_summary_report.md`；
+   - **场景 1 (Track A 只读工具)**：毫秒级全簿概览、跨表引用血缘分析、循环引用探测、空单元格受控、关闭容错全部通过 (5/5 PASS)；
+   - **场景 2 (Track B 读回契约)**：字面匹配 `matched`、排版样式诚实标为 `unconfirmed`（杜绝虚假抽样通过徽章）、写脏数据报错与快照物理回滚、跨簿越权写入拦截、目标错乱拦截全部通过 (5/5 PASS)；
+   - **场景 3 (证据账本与压缩)**：真实 Token 算子、阈值压缩保留成对锚点与 6 条活跃尾部、不可变账本生命周期固化、待确认任务防伪核查全部通过 (5/5 PASS)；
+   - **场景 4 (UI 保存门禁 6 分支)**：抽样匹配放行、待确认放行、报错拦截、预检失败拦截、越权拦截、目标错乱拦截全量与生产服务精准映射 (6/6 PASS)；
+   - **场景 5 (部署兼容与缓存保障)**：便携启动支持中文与空格路径、32位架构客观声明、System Prompt 字节恒定命中缓存保障、脱机宏库离线运行、升级无损全部通过 (5/5 PASS)。
 
 ---
 
