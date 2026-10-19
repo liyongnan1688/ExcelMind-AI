@@ -658,7 +658,8 @@ export async function callLlmStream(
   onChunk: (text: string) => void,
   history: ChatHistoryItem[] = [],
   selectionSnapshot?: SelectionSnapshot,
-  macroReference?: MacroReferenceData
+  macroReference?: MacroReferenceData,
+  isCompactionRetry: boolean = false
 ): Promise<LlmStreamResponse> {
   const config: LlmConfig = loadLlmConfig();
 

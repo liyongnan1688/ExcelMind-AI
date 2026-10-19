@@ -921,7 +921,7 @@ class NativeBridgeClient {
       return {
         ok: true,
         action,
-        data: 'C:\\Users\\MockUser\\Documents\\macros_export.exmpack',
+        data: ('C:\\Users\\MockUser\\Documents\\macros_export.exmpack' as any),
       };
     }
 

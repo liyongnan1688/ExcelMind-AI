@@ -226,9 +226,9 @@ export const TOOL_REGISTRY: Record<string, ToolDescriptor> = {
     execute: async (args) => {
       try {
         const res: ExternalDataPreviewResult = await bridge.previewExternalData({
-          sourceType: args.sourceType,
+          sourceType: (args.sourceType === 'http' ? 'http_get' : args.sourceType) as 'csv' | 'json' | 'http_get',
           filePath: args.pathOrUrl,
-          url: args.sourceType === 'http' ? args.pathOrUrl : undefined,
+          httpOptions: args.sourceType === 'http' ? { url: args.pathOrUrl } : undefined,
           previewRowCount: 5,
         });
         return {
