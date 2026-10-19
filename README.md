@@ -3,18 +3,14 @@
 > **智能表格助手 · 桌面原生 · 安全可逆**  
 > 专为 Windows Microsoft Excel 打造的 AI 智能加载项。结合大语言模型意图理解与 Office COM 原生自动化，让数据清洗、复杂计算、多维汇总与 VBA 宏复用像日常对话一样自然。
 
-> 📌 **项目当前真实状态入口**：参见 [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md)  
-> 唯一主规划路线图：[docs/product-roadmap.md](docs/product-roadmap.md) · 测试资产手册：[tests/README.md](tests/README.md)
-
 ---
 
-## 📌 当前发布基线 (v1.3.0-rc1)
+## 📌 当前发布基线 (v1.3.1)
 
-- **当前发布版本**：[v1.3.0-rc1](https://github.com/liyongnan1688/ExcelMind-AI/releases/tag/v1.3.0-rc1)
-- **发布提交**：`b4402a9ead90d8e74c451ccb6683a22e20da3ae4`
-- **官方发行包**：`ExcelMindAI-v1.3.0-rc1.zip`
-- **用户下载权威 SHA-256 校验值**：  
-  `445ef8b481491bc99b31dcd286b1ac109ae6b519fafc51fc456aaa22687ff25e`
+- **当前发布版本**：[v1.3.1](https://github.com/liyongnan1688/ExcelMind-AI/releases/tag/v1.3.1)
+- **官方发行包**：`ExcelMindAI-v1.3.1.zip`
+- **官方 Release SHA-256 校验值**：  
+  `51b5dfbc1bccd555e84f1487d4e2656b25bf31c0ebb65c69233e84b08480fc07`
 
 ---
 
@@ -57,7 +53,7 @@
 
 ## 🚀 快速开始
 
-从 [Releases](https://github.com/liyongnan1688/ExcelMind-AI/releases/tag/v1.3.0-rc1) 页面下载 `ExcelMindAI-v1.3.0-rc1.zip` 并校验 SHA-256 哈希：
+从 [Releases](https://github.com/liyongnan1688/ExcelMind-AI/releases/tag/v1.3.1) 页面下载 `ExcelMindAI-v1.3.1.zip` 并校验 SHA-256 哈希：
 
 > ⚠️ **未签名运行说明**：本候选包尚未导入商业 CA 证书。运行前请核对哈希值并遵守所在组织 IT 安全政策，由用户自主决定运行，本向导不默认引导用户绕过系统安全防护。
 
@@ -93,7 +89,7 @@
 cd web && pnpm install && pnpm run build && cd ..
 
 # 2. 自动化打包跨机器发布包
-pwsh -File scripts/package_release.ps1 -Version "v1.3.0-rc1"
+pwsh -File scripts/package_release.ps1 -Version "v1.3.1"
 ```
 
 离线自动化质量门禁检验：
