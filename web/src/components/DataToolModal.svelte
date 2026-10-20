@@ -1016,8 +1016,8 @@
             <!-- 主键列选择 -->
             <div class="space-y-1.5 pt-1">
               <div class="flex items-center justify-between">
-                <span class="text-xs font-semibold text-gray-700">判断主键列 (单列或复合键)</span>
-                <span class="text-[11px] text-gray-400">已选 {selectedColIndices.length} 列复合比较</span>
+                <span class="text-xs font-semibold text-gray-700">按哪几列判断重复</span>
+                <span class="text-[11px] text-gray-400">已选 {selectedColIndices.length} 列</span>
               </div>
               <div class="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto p-1 bg-white border border-gray-200 rounded-md">
                 {#each Array.from({ length: Math.max(availableColsCount, 5) }, (_, i) => i + 1) as colIdx}
@@ -1049,7 +1049,7 @@
                   <span>正在批量分析...</span>
                 {:else}
                   <Filter size={14} />
-                  <span>开始只读去重分析</span>
+                  <span>查找重复项</span>
                 {/if}
               </button>
             </div>
@@ -1088,20 +1088,20 @@
                   </div>
                 </div>
                 <div class="bg-white p-2.5 rounded border border-gray-100 shadow-2xs">
-                  <div class="text-[11px] text-gray-400">排除隔离行</div>
+                  <div class="text-[11px] text-gray-400">排除行</div>
                   <div class="text-base font-bold text-gray-500">{analysisResult.excludedCount}</div>
                 </div>
               </div>
 
-              <!-- 统计恒等式 -->
+              <!-- 数据校验 -->
               <div class="text-[11px] text-gray-600 bg-white/80 p-2 rounded border border-gray-200/60 font-mono text-center">
-                恒等式核验：{analysisResult.dataRowCount} = {analysisResult.uniqueCount} (唯一) + {analysisResult.duplicateCount} (重复) + {analysisResult.excludedCount} (排除)
-                <span class="text-emerald-600 font-bold ml-1">✓ 100% 严密自洽</span>
+                数据校验：总计 {analysisResult.dataRowCount} = 唯一 {analysisResult.uniqueCount} + 重复 {analysisResult.duplicateCount} + 排除 {analysisResult.excludedCount}
+                <span class="text-emerald-600 font-bold ml-1">✓ 一致</span>
               </div>
 
               {#if analysisResult.excludedCount > 0}
                 <div class="p-2.5 bg-amber-50/80 rounded border border-amber-200 text-[11px] text-amber-800 space-y-1">
-                  <p class="font-semibold">⚠️ 排除说明：{analysisResult.excludedReason}</p>
+                  <p class="font-semibold">排除说明：{analysisResult.excludedReason}</p>
                   <p class="text-gray-600">说明：排除行（空键/错误值）原封不动保留在源表中，导出唯一表时绝不写入，绝非无提示丢弃。</p>
                 </div>
               {/if}
@@ -1204,7 +1204,7 @@
 
               <div class="space-y-1">
                 <div class="flex items-center justify-between text-[11px] text-gray-500">
-                  <span>主键列索引 (1-based，复合键用逗号隔开)</span>
+                  <span>对账依据列 (如 1 或 1, 2)</span>
                 </div>
                 <input
                   type="text"
@@ -1258,7 +1258,7 @@
 
               <div class="space-y-1">
                 <div class="flex items-center justify-between text-[11px] text-gray-500">
-                  <span>主键列索引 (1-based，复合键用逗号隔开)</span>
+                  <span>对账依据列 (如 1 或 1, 2)</span>
                 </div>
                 <input
                   type="text"
@@ -1334,7 +1334,7 @@
                   <span>正在执行对账分析...</span>
                 {:else}
                   <GitCompare size={14} />
-                  <span>执行只读对账分析</span>
+                  <span>开始对账分析</span>
                 {/if}
               </button>
             </div>
@@ -1625,7 +1625,7 @@
                 >
                   {#if isAnalyzingConsolidation}
                     <Clock size={14} class="animate-spin" />
-                    <span>正在进行只读分析...</span>
+                    <span>正在分析数据...</span>
                   {:else}
                     <SlidersHorizontal size={14} />
                     <span>开始分析与列名对齐预览</span>
@@ -1641,7 +1641,7 @@
               <div class="flex items-center justify-between pb-2 border-b border-indigo-100">
                 <span class="text-xs font-bold text-gray-900 flex items-center gap-1.5">
                   <CheckCircle2 size={15} class="text-indigo-600" />
-                  <span>列名对齐只读分析完成 (耗时: {consolidationAnalysis.analysisElapsedMs} ms)</span>
+                  <span>列名对齐完成 ({consolidationAnalysis.analysisElapsedMs} ms)</span>
                 </span>
                 <span class="text-[11px] text-indigo-700 font-mono">
                   来源文件: {consolidationAnalysis.sources.length} 个 | 输出列数: {consolidationAnalysis.alignedColumns.length} 列
@@ -1671,8 +1671,8 @@
               <!-- 各来源读取明细小表 -->
               <div class="bg-white rounded border border-gray-200 overflow-hidden text-xs">
                 <div class="px-3 py-1.5 bg-gray-50 border-b border-gray-200 font-semibold text-gray-700 flex items-center justify-between text-[11px]">
-                  <span>各来源选区与数据行统计 (只读安全加载，宏已阻断)</span>
-                  <span class="text-emerald-600 font-mono">恒等式核对: 最终数据行 = 各来源纳入行之和</span>
+                  <span>各来源选区与数据行统计</span>
+                  <span class="text-emerald-600 font-mono">校验: 最终行数 = 各来源行数之和</span>
                 </div>
                 <div class="max-h-32 overflow-y-auto divide-y divide-gray-100">
                   {#each consolidationAnalysis.sources as prof}
@@ -1729,7 +1729,7 @@
                 >
                   {#if isExecutingConsolidation}
                     <Clock size={14} class="animate-spin" />
-                    <span>正在安全写入并读回核验...</span>
+                    <span>正在写入并核对...</span>
                   {:else}
                     <FileCheck size={14} />
                     <span>导出独立新工作簿</span>
@@ -1745,7 +1745,7 @@
               <div class="flex items-center justify-between">
                 <div class="flex items-center gap-2 text-xs font-bold text-emerald-900">
                   <CheckCircle2 size={16} class="text-emerald-600" />
-                  <span>多文件汇总结果导出成功并真机读回核验！</span>
+                  <span>多文件汇总导出完成！</span>
                 </div>
                 <button
                   type="button"
@@ -1761,7 +1761,7 @@
               </p>
               <div class="pt-1 flex items-center justify-between text-[11px] text-emerald-700/80 font-mono">
                 <span>汇总行数: {consolidationExecution.finalDataRows} 行 (含表头) | 列数: {consolidationExecution.finalDataCols} 列</span>
-                <span>读回核验: {consolidationExecution.verifiedReadback ? '已通过' : '未通过'} ({consolidationExecution.finalDataRows} 行) | 耗时: {consolidationExecution.elapsedMs} ms</span>
+                <span>结果核对: {consolidationExecution.verifiedReadback ? '一致' : '有差异'} ({consolidationExecution.finalDataRows} 行) | 耗时: {consolidationExecution.elapsedMs} ms</span>
               </div>
             </div>
           {/if}
@@ -1773,11 +1773,10 @@
           <div class="p-3 bg-indigo-50/80 border border-indigo-200 rounded-lg text-xs text-indigo-900 leading-relaxed flex items-start gap-2.5">
             <BarChart2 size={16} class="mt-0.5 shrink-0 text-indigo-600" />
             <div>
-              <div class="font-bold text-indigo-950">快捷图表工具定位与安全规范</div>
+              <div class="font-bold text-indigo-950">图表工具说明</div>
               <div class="text-[11px] text-indigo-800 mt-0.5">
-                • <strong>定位说明</strong>：本工具为本地确定性原生 COM 辅助工具，首切片支持柱状图、折线图、饼图，绝不作为大模型自然语言操作请求的隐式替代；零第三方图表库。<br>
-                • <strong>防旧结果叠加</strong>：图表采用稳定标识 (<code>__EM_CHART_xxxx</code>)，新建与替换行为明确隔离，绝不误删用户已有手工图表。<br>
-                • <strong>快照与恢复承诺</strong>：执行前强制整本物理快照；如遇异常，用户可按已验证范围安全恢复。
+                • 支持柱状图、折线图、饼图，基于当前选区直接生成。<br>
+                • 图表带独立标识，更新时不影响已有手工图表。
               </div>
             </div>
           </div>
@@ -2051,7 +2050,7 @@
               >
                 {#if isExecutingChart}
                   <Clock size={14} class="animate-spin" />
-                  <span>正在执行图表生成与 COM 核验...</span>
+                  <span>正在生成图表...</span>
                 {:else}
                   <BarChart2 size={14} />
                   <span>{chartAction === 'replace_existing' ? '确认替换指定图表' : '确认生成快捷图表'}</span>
@@ -2066,7 +2065,7 @@
               <div class="flex items-center justify-between">
                 <div class="flex items-center gap-2 text-xs font-bold text-emerald-900">
                   <CheckCircle2 size={16} class="text-emerald-600" />
-                  <span>快捷图表已成功生成并经 COM 读回客观核验！</span>
+                  <span>图表生成成功！</span>
                 </div>
                 {#if chartResult.snapshotId}
                   <span class="text-[10px] px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-300 font-mono">
@@ -2115,7 +2114,7 @@
           <div class="bg-gray-50/80 rounded-lg p-4 border border-gray-200/80 space-y-3.5">
             <div class="flex items-center justify-between text-xs text-gray-600">
               <span class="font-medium">目标工作簿: <strong class="text-gray-900">{workbook?.name || '当前工作簿'}</strong></span>
-              <span>写入模式: <strong class="text-emerald-700">强制新建唯一工作表（绝不覆盖现有表）</strong></span>
+              <span>写入模式: <strong class="text-emerald-700">新建工作表</strong></span>
             </div>
 
             <!-- 数据源类型选择 -->
@@ -2261,8 +2260,8 @@
 
                 <div class="space-y-1">
                   <label for="http-whitelist-input" class="text-[11px] text-gray-600 flex items-center justify-between">
-                    <span>安全白名单规则（分号/逗号隔开，精确匹配协议、主机、端口及路径前缀）</span>
-                    <span class="text-indigo-600 text-[10px]">严格防 SSRF</span>
+                    <span>允许访问的网址前缀（多个用逗号隔开）</span>
+                    <span class="text-indigo-600 text-[10px]">地址限制</span>
                   </label>
                   <input
                     id="http-whitelist-input"
@@ -2290,7 +2289,7 @@
                       id="http-header-val"
                       type="password"
                       bind:value={extHttpHeaderVal}
-                      placeholder="敏感信息日志自动脱敏"
+                      placeholder="不记录敏感信息"
                       class="w-full px-2.5 py-1 text-xs border border-gray-300 rounded-md font-mono"
                     />
                   </div>
@@ -2298,7 +2297,7 @@
 
                 <div class="flex items-center gap-1.5 text-[11px] text-gray-500 bg-gray-50 p-2 rounded border border-gray-100">
                   <Lock size={13} class="text-indigo-600 shrink-0" />
-                  <span>凭据安全隔离：由 Windows DPAPI 加密隔离，绝不以明文 JSON 存储，绝不流入工作簿或模型上下文。</span>
+                  <span>密码凭据加密保存在本机，不随工作簿保存或上传。</span>
                 </div>
               </div>
             {/if}
@@ -2328,7 +2327,7 @@
                   <span>正在安全拉取与解析...</span>
                 {:else}
                   <Download size={14} />
-                  <span>只读拉取并预览数据</span>
+                  <span>预览数据</span>
                 {/if}
               </button>
             </div>
@@ -2340,7 +2339,7 @@
               <div class="flex items-center justify-between pb-2 border-b border-indigo-100">
                 <span class="text-xs font-bold text-gray-900 flex items-center gap-1.5">
                   <CheckCircle2 size={15} class="text-indigo-600" />
-                  <span>只读数据源解析就绪</span>
+                  <span>数据源解析就绪</span>
                 </span>
                 <span class="text-[11px] text-indigo-700 font-mono">
                   共计约 {extPreviewResult.totalRowsEstimate} 行 · {extPreviewResult.totalCols} 列
@@ -2428,7 +2427,7 @@
               <!-- 数据样本预览表格 -->
               <div class="space-y-1 bg-white p-3 rounded-lg border border-gray-200">
                 <div class="flex items-center justify-between text-xs text-gray-700">
-                  <span class="font-medium">样本数据只读预览 (前 {extPreviewResult.sampleRows.length} 行)</span>
+                  <span class="font-medium">数据预览 (前 {extPreviewResult.sampleRows.length} 行)</span>
                   <span class="text-[11px] text-gray-400">仅展示，未写入工作簿</span>
                 </div>
                 <div class="max-h-48 overflow-auto border border-gray-200 rounded text-[11px]">
@@ -2622,10 +2621,10 @@
         <div><strong>输出列数清单：</strong>共 {(consolidationAnalysis.alignedColumns || []).length} 列 [{(consolidationAnalysis.alignedColumns || []).slice(0, 5).join(', ')}{(consolidationAnalysis.alignedColumns || []).length > 5 ? '...' : ''}]</div>
         
         <div class="pt-1 text-[11px] text-emerald-700 space-y-1 bg-emerald-50/60 p-2.5 rounded border border-emerald-200">
-          <div class="font-semibold">数据保真与安全承诺：</div>
-          <div>• 来源文件只读打开，强制阻断 VBA 自动宏与外部链接，零修改来源文件；</div>
-          <div>• 19位长编号、前导零、'='公式文本逐字符保真输出（防截断与科学计数法）；</div>
-          <div>• 保存后强制重新打开真机核验行列数一致性，核验无误才标记成功。</div>
+          <div class="font-semibold">安全保证：</div>
+          <div>• 不修改来源文件；</div>
+          <div>• 保留长编号、前导零与公式原文；</div>
+          <div>• 保存后自动核对行列数。</div>
         </div>
       </div>
 
@@ -2672,17 +2671,16 @@
           {:else if extSourceType === 'json'}
             <span>本地 JSON [{extFilePath}] {extJsonArrayPath ? `(数组路径: ${extJsonArrayPath})` : '(根数组)'}</span>
           {:else}
-            <span class="break-all">受控 HTTP GET [{extHttpUrl}] (白名单校验通过)</span>
+            <span class="break-all">GET [{extHttpUrl}] (已验证)</span>
           {/if}
         </div>
         <div><strong>导入字段规模：</strong>选择导入 {extSelectedColumns.length} 列 / 总计 {extPreviewResult.columns.length} 列 (预估行数: {extPreviewResult.totalRowsEstimate} 行)</div>
 
         <div class="pt-1 text-[11px] text-emerald-700 space-y-1 bg-emerald-50/60 p-2.5 rounded border border-emerald-200">
-          <div class="font-semibold">安全保障与保真策略：</div>
-          <div>• 写入前自动创建目标工作簿全量物理快照（快照失败承诺零业务写入）；</div>
-          <div>• 19位长编号、前导零、'='公式样文本强制按纯数据防注入写入（绝不被 Excel 执行为恶意公式）；</div>
-          <div>• 目标工作簿锁定，若写入前目标文件被关闭或重命名，立即安全阻断；</div>
-          <div>• 凭据经 Windows DPAPI 隔离加密，敏感 Token 绝不进入工作簿、日志或提示词。</div>
+          <div class="font-semibold">安全保证：</div>
+          <div>• 写入前自动备份工作簿，支持撤销；</div>
+          <div>• 保持长编号、前导零与文本格式完整；</div>
+          <div>• 凭据加密保存在本机，不随工作簿保存。</div>
         </div>
       </div>
 

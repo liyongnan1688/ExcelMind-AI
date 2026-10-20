@@ -114,7 +114,7 @@ End Sub`;
     <div class="header-badge-row">
       <span class="pill pill-green">
         <ShieldCheck size={12} />
-        <span>运行前核验</span>
+        <span>运行前确认</span>
       </span>
       {#if isSimulation}
         <span class="pill pill-amber">原型模拟状态</span>
@@ -157,7 +157,7 @@ End Sub`;
       </div>
       {#if showDetailedScope}
         <div class="fact-sub-hint">
-          当前活动表为【{activeSheetName}】。由于宏具有完整 VBA 运行权限，执行可能影响其他工作表或新建工作表，真实影响以源码逻辑为准。
+          当前活动表为【{activeSheetName}】。宏将以完整权限运行，真实影响以代码逻辑为准。
         </div>
       {/if}
     </div>
@@ -185,7 +185,7 @@ End Sub`;
       </div>
       {#if showDetailedRecovery}
         <div class="fact-sub-hint">
-          回滚基于执行前捕获的物理副本文件；仅限当前会话内已验证范围，不作任意外部副作用无损撤销的绝对承诺。
+          支持一键撤销对目标工作簿的改动。若宏涉及外部文件读写或系统命令，无法自动撤销。
         </div>
       {/if}
     </div>
@@ -242,10 +242,10 @@ End Sub`;
     >
       <div class="toggle-left">
         <Code2 size={13} />
-        <span>VBA 源码核验</span>
+        <span>VBA 代码详情</span>
       </div>
       <div class="toggle-right">
-        <span class="toggle-hint">{isCodeExpanded ? '收起源码' : '展开查看'}</span>
+        <span class="toggle-hint">{isCodeExpanded ? '收起代码' : '展开查看'}</span>
         {#if isCodeExpanded}
           <ChevronUp size={14} />
         {:else}
@@ -257,7 +257,7 @@ End Sub`;
     {#if isCodeExpanded}
       <div class="code-body-wrapper">
         <div class="code-toolbar">
-          <span class="code-syntax-label">纯 VBA 源码（正文零修改）</span>
+          <span class="code-syntax-label">纯 VBA 代码（正文零修改）</span>
           <button type="button" class="mini-btn" on:click={handleCopyCode}>
             {#if copied}
               <Check size={12} color="#107c41" />
@@ -285,7 +285,7 @@ End Sub`;
         <div class="rollback-bar">
           <button type="button" class="btn btn-sm btn-rollback" on:click={handleRollback}>
             <RotateCcw size={12} />
-            <span>按快照恢复已验证范围</span>
+            <span>撤销改动</span>
           </button>
         </div>
       </div>
@@ -302,7 +302,7 @@ End Sub`;
       </label>
       <label class="opt-checkbox-item">
         <input type="checkbox" bind:checked={includeCodeInChat} />
-        <span>VBA 源码</span>
+        <span>VBA 代码</span>
       </label>
     </div>
 

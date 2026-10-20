@@ -496,7 +496,7 @@
         <div class="header-title-box">
           <Layers size={18} class="text-emerald-700" />
           <h2 id="batch-modal-title">批量处理</h2>
-          <span class="badge-stage">隔离工作副本 · 遇错即停</span>
+          <span class="badge-stage">出错就停</span>
         </div>
         <button class="close-btn" on:click={handleCloseModal} aria-label="关闭面板">
           <X size={16} />
@@ -505,7 +505,7 @@
 
       <!-- 提示栏：面板关闭不取消任务 -->
       <div class="header-notice-bar">
-        <span>💡 提示：面板关闭不会中断后台批量任务。重新打开将自动恢复显示最新进度。</span>
+        <span>💡 提示：关闭面板不影响后台处理，重开可查看进度。</span>
       </div>
 
       <!-- 主体内容 -->
@@ -592,7 +592,7 @@
               <div class="section-title-row">
                 <div class="title-with-count">
                   <span class="step-num">2</span>
-                  <h3>选择执行宏与过程入口</h3>
+                  <h3>选择执行宏与过程</h3>
                 </div>
               </div>
 
@@ -608,7 +608,7 @@
                   </select>
                 </div>
 
-                <!-- 过程入口下拉 -->
+                <!-- 过程下拉 -->
                 <div class="form-item">
                   <label for="entry-point-select">执行过程 (Sub)：</label>
                   {#if candidateEntryPoints.length > 0}
@@ -629,9 +629,9 @@
                 </div>
               </div>
 
-              <!-- VBA 源码预览/编辑 -->
+              <!-- VBA 代码预览/编辑 -->
               <div class="form-item mt-2">
-                <label for="macro-code-textarea">VBA 源码：</label>
+                <label for="macro-code-textarea">VBA 代码：</label>
                 <textarea
                   id="macro-code-textarea"
                   class="code-textarea"
@@ -646,7 +646,7 @@
               {#if currentParameters.length > 0}
                 <div class="param-binding-card mt-2">
                   <div class="param-header">
-                    <span class="font-medium">过程参数配置 (将逐文件在隔离副本中求值绑定)：</span>
+                    <span class="font-medium">过程参数配置：</span>
                   </div>
                   <div class="param-fields-grid">
                     {#each currentParameters as param}
@@ -665,7 +665,7 @@
                     {/each}
                   </div>
                   <p class="param-tip">
-                    注：Worksheet / Range 参数将在各文件的独立隔离副本中自动绑定；若文件缺少对应表名或区域将在流水线预检阶段阻断。
+                    注：参数将自动绑定；缺少对应表名或区域时将自动停止。
                   </p>
                 </div>
               {/if}
@@ -691,7 +691,7 @@
                 />
               </div>
               <p class="section-tip">
-                所有成功处理的文件将保存在此目录下，同名文件将自动递增编号防覆盖。原文件绝对保持逐字节恒定。
+                处理后的文件保存在此目录，同名自动递增编号，原文件不作改动。
               </p>
             </section>
 
@@ -700,30 +700,29 @@
               <div class="section-title-row">
                 <div class="title-with-count">
                   <span class="step-num">4</span>
-                  <h3 class="text-amber-800">执行策略与安全风险声明</h3>
+                  <h3 class="text-amber-800">安全说明</h3>
                 </div>
-                <span class="policy-pill">执行策略：遇错即停 (Stop on Error，固定)</span>
+                <span class="policy-pill">出错就停</span>
               </div>
 
               <!-- 风险声明明文展示 -->
               <div class="risk-notice-card">
                 <div class="risk-card-header">
                   <ShieldAlert size={16} class="text-amber-600" />
-                  <strong>重要安全声明（请务必在启动前充分阅读）：</strong>
+                  <strong>安全说明：</strong>
                 </div>
                 <ul class="risk-list">
                   <li>
                     <strong>原文件保护：</strong>
-                    本插件使用专用受控工作副本执行宏，保证原文件与当前 Excel 中已打开的工作簿不被修改或覆盖。
+                    执行过程中不修改原文件与当前 Excel 中已打开的工作簿。
                   </li>
                   <li>
-                    <strong>非安全沙箱：</strong>
-                    工作副本机制绝不是任意 VBA 的安全沙箱！若宏代码中包含固定绝对文件路径、外部文件写入/删除 (如 Kill,
-                    FileSystemObject) 或系统命令，仍会直接作用于外部环境。
+                    <strong>外部影响：</strong>
+                    若代码包含外部文件写入或系统命令，仍会作用于外部环境。
                   </li>
                   <li>
-                    <strong>责任提示：</strong>
-                    严禁对未知、不可信或包含外部系统副作用的宏进行批量执行。
+                    <strong>注意事项：</strong>
+                    请勿对未知或包含外部副作用的代码进行批量执行。
                   </li>
                 </ul>
 
@@ -769,7 +768,7 @@
                       disabled={isLocking || fileList.length === 0}
                       on:click={handleValidateAndLock}
                     >
-                      {isLocking ? '正在预检固化...' : '预检并固化队列'}
+                      {isLocking ? '正在确认队列...' : '确认并锁定队列'}
                     </button>
                   {:else}
                     <button
@@ -779,7 +778,7 @@
                       on:click={handleStartBatch}
                     >
                       <Play size={14} />
-                      {isStarting ? '正在启动...' : '开始批量执行'}
+                      {isStarting ? '正在启动...' : '开始执行'}
                     </button>
                   {/if}
                 </div>
@@ -950,7 +949,7 @@
 
                       {#if res.workingCopyPath && (res.status === 'failed' || res.status === 'blocked')}
                         <div class="result-sub-line tip-line">
-                          <span class="sub-label">现场副本保留在:</span>
+                          <span class="sub-label">现场备份保存在:</span>
                           <span class="sub-content" title={res.workingCopyPath}>{res.workingCopyPath}</span>
                         </div>
                       {/if}

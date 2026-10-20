@@ -348,7 +348,7 @@
                         <input type="text" class="input-text" bind:value={editModel.steps[0].macroParams.scriptId} placeholder="如 script_001" />
                       </div>
                       <div class="param-col">
-                        <span class="form-label">入口过程</span>
+                        <span class="form-label">执行过程</span>
                         <input type="text" class="input-text" bind:value={editModel.steps[0].macroParams.entryPoint} placeholder="如 Sub Main" />
                       </div>
                       <div class="param-col">
@@ -416,7 +416,7 @@
                         <input type="text" class="input-text" bind:value={editModel.steps[1].macroParams.scriptId} />
                       </div>
                       <div class="param-col">
-                        <span class="form-label">入口过程</span>
+                        <span class="form-label">执行过程</span>
                         <input type="text" class="input-text" bind:value={editModel.steps[1].macroParams.entryPoint} />
                       </div>
                     </div>
@@ -481,8 +481,8 @@
               <div class="safety-banner">
                 <ShieldAlert size={14} class="text-amber-600" />
                 <div class="safety-text">
-                  <strong>任务目标与快照恢复契约：</strong>
-                  <span>任务执行严格绑定工作簿【<code>{workbook?.name || activeWorkflow.targetWorkbookName || '未指定'}</code>】。执行前强制创建整本物理副本。若失败，停止后续步骤并保留现场，用户可按已验证范围安全恢复。</span>
+                  <strong>安全说明：</strong>
+                  <span>绑定工作簿【<code>{workbook?.name || activeWorkflow.targetWorkbookName || '未指定'}</code>】。执行前自动备份，遇错即停并可撤销。</span>
                 </div>
               </div>
 
@@ -516,9 +516,9 @@
                 {#if isExecuting}
                   <button class="btn btn-danger" on:click={handleCancel}>
                     <StopCircle size={14} />
-                    <span>在步骤边界取消</span>
+                    <span>取消执行</span>
                   </button>
-                  <span class="running-indicator">正在受控调度 COM 串联执行，请稍候...</span>
+                  <span class="running-indicator">正在执行任务，请稍候...</span>
                 {:else}
                   <button
                     class="btn btn-success execute-btn"
@@ -526,7 +526,7 @@
                     on:click={handleExecute}
                   >
                     <Play size={14} />
-                    <span>开始执行流水线</span>
+                    <span>开始执行</span>
                   </button>
                   {#if !workbook || workbook.name === '未检测到活动工作簿'}
                     <span class="tip-warn">请先在 Excel 中打开目标工作簿</span>

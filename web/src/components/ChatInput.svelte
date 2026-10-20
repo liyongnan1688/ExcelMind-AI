@@ -330,7 +330,7 @@
         </div>
         <div class="card-actions-group">
           <button class="text-action-btn" type="button" on:click={() => (showMacroCodeModal = !showMacroCodeModal)}>
-            {showMacroCodeModal ? '收起源码 ▲' : '查看源码 ▼'}
+            {showMacroCodeModal ? '收起代码 ▲' : '查看代码 ▼'}
           </button>
           <button class="text-action-btn remove-btn" type="button" on:click={() => (referencedMacro = null)} title="取消引用此宏">
             ✕
