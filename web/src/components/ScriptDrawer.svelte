@@ -44,6 +44,7 @@
   import { showConfirm } from '../services/dialog';
 
   export let isOpen = false;
+  export let inline = false;
   export let workbook: WorkbookInfo | null = null;
   export let onClose: () => void;
   export let onRunScript: (script: ScriptItem, entryPoint?: string, parameters?: Record<string, any>) => void;
@@ -1066,35 +1067,62 @@
   }
 </script>
 
-{#if isOpen}
-  <div class="drawer-backdrop" on:click|self={onClose} on:keydown={(e) => e.key === 'Escape' && onClose()} role="presentation">
-    <div class="drawer-content" role="dialog" aria-modal="true" aria-label="宏管理与脚本库">
-      <!-- 抽屉顶部标题栏与 Tab 切换 -->
-      <div class="drawer-header">
-        <div class="header-left">
-          <div class="header-title">
-            <Code2 size={18} color="#107C41" />
-            <span>宏工具</span>
+{#if inline || isOpen}
+  {#if !inline}
+    <div class="drawer-backdrop" on:click|self={onClose} on:keydown={(e) => e.key === 'Escape' && onClose()} role="presentation">
+      <div class="drawer-content" role="dialog" aria-modal="true" aria-label="宏管理与脚本库">
+        <div class="drawer-header">
+          <div class="header-left">
+            <div class="header-title">
+              <Code2 size={18} color="#107C41" />
+              <span>宏工具</span>
+            </div>
+            <div class="header-tabs">
+              <button
+                class="tab-btn {activeTab === 'list' ? 'active' : ''}"
+                on:click={() => (activeTab = 'list')}
+              >
+                宏库 <span class="badge-count">{scripts.length}</span>
+              </button>
+              <button
+                class="tab-btn {activeTab === 'import' ? 'active' : ''}"
+                on:click={() => (activeTab = 'import')}
+              >
+                <PlusCircle size={13} />
+                导入
+              </button>
+            </div>
           </div>
-          <div class="header-tabs">
-            <button
-              class="tab-btn {activeTab === 'list' ? 'active' : ''}"
-              on:click={() => (activeTab = 'list')}
-            >
-              宏库 <span class="badge-count">{scripts.length}</span>
-            </button>
-            <button
-              class="tab-btn {activeTab === 'import' ? 'active' : ''}"
-              on:click={() => (activeTab = 'import')}
-            >
-              <PlusCircle size={13} />
-              导入
-            </button>
-          </div>
+          <button class="btn-icon" on:click={onClose} aria-label="关闭"><X size={16} /></button>
         </div>
-        <button class="btn-icon" on:click={onClose} aria-label="关闭"><X size={16} /></button>
+        {@render drawerBody()}
       </div>
+    </div>
+  {:else}
+    <div class="drawer-content inline-mode" role="region" aria-label="宏管理与脚本库">
+      <div class="drawer-header inline-header">
+        <div class="header-tabs">
+          <button
+            class="tab-btn {activeTab === 'list' ? 'active' : ''}"
+            on:click={() => (activeTab = 'list')}
+          >
+            宏库 <span class="badge-count">{scripts.length}</span>
+          </button>
+          <button
+            class="tab-btn {activeTab === 'import' ? 'active' : ''}"
+            on:click={() => (activeTab = 'import')}
+          >
+            <PlusCircle size={13} />
+            导入
+          </button>
+        </div>
+      </div>
+      {@render drawerBody()}
+    </div>
+  {/if}
+{/if}
 
+{#snippet drawerBody()}
       <!-- 抽屉主体内容 -->
       <div class="drawer-body">
         {#if activeTab === 'list'}
@@ -1867,9 +1895,7 @@
           </div>
         {/if}
       </div>
-    </div>
-  </div>
-{/if}
+{/snippet}
 
 <!-- 运行前目标工作簿与入口确认弹窗 -->
 {#if runModalScript}
@@ -2423,6 +2449,23 @@
     display: flex;
     flex-direction: column;
     animation: slideIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .drawer-content.inline-mode {
+    height: 100%;
+    max-height: 100%;
+    box-shadow: none;
+    animation: none;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .drawer-header.inline-header {
+    height: auto;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--office-border-subtle);
+    background: var(--office-card-subtle);
+    justify-content: flex-start;
   }
 
   @keyframes slideIn {

@@ -2,48 +2,22 @@
   import {
     FileSpreadsheet,
     RefreshCw,
-    MoreHorizontal,
     Bot,
     FolderGit2,
-    Wrench,
-    Layers,
-    GitBranch,
     Settings,
-    ShieldCheck,
   } from 'lucide-svelte';
   import type { WorkbookInfo } from '../services/bridge';
 
   export let workbook: WorkbookInfo | null = null;
-  export let activeWorkspace: 'assistant' | 'scripts' | 'datatools' = 'assistant';
-  export let onSelectWorkspace: (ws: 'assistant' | 'scripts' | 'datatools') => void;
+  export let activeWorkspace: 'assistant' | 'scripts' = 'assistant';
+  export let onSelectWorkspace: (ws: 'assistant' | 'scripts') => void;
   export let onOpenSettings: () => void;
-  export let onOpenBatch: () => void;
-  export let onOpenWorkflow: () => void;
   export let onRefresh: () => void;
 
-  let showMoreMenu = false;
-
-  function handleSelect(ws: 'assistant' | 'scripts' | 'datatools') {
+  function handleSelect(ws: 'assistant' | 'scripts') {
     onSelectWorkspace(ws);
-    showMoreMenu = false;
-  }
-
-  function toggleMoreMenu() {
-    showMoreMenu = !showMoreMenu;
-  }
-
-  function handleMenuAction(action: () => void) {
-    showMoreMenu = false;
-    action();
   }
 </script>
-
-<svelte:window on:click={(e) => {
-  const target = e.target as HTMLElement;
-  if (!target.closest('.more-menu-container')) {
-    showMoreMenu = false;
-  }
-}} />
 
 <header class="app-header">
   <!-- 第一行：品牌、工作簿状态与快捷操作 -->
@@ -81,55 +55,18 @@
         <RefreshCw size={13} />
       </button>
 
-      <!-- 更多功能下拉 -->
-      <div class="more-menu-container">
-        <button
-          class="header-btn {showMoreMenu ? 'active' : ''}"
-          title="更多功能与系统管理"
-          on:click|stopPropagation={toggleMoreMenu}
-          aria-label="更多功能"
-        >
-          <MoreHorizontal size={15} />
-        </button>
-
-        {#if showMoreMenu}
-          <div class="dropdown-popover" role="menu">
-            <div class="menu-section-label">更多任务</div>
-            <button
-              class="menu-item"
-              role="menuitem"
-              on:click={() => handleMenuAction(onOpenBatch)}
-            >
-              <Layers size={14} class="menu-icon" />
-              <span>多工作簿批量处理</span>
-            </button>
-            <button
-              class="menu-item"
-              role="menuitem"
-              on:click={() => handleMenuAction(onOpenWorkflow)}
-            >
-              <GitBranch size={14} class="menu-icon" />
-              <span>双步骤任务流水线</span>
-            </button>
-
-            <div class="menu-divider"></div>
-
-            <div class="menu-section-label">系统管理</div>
-            <button
-              class="menu-item"
-              role="menuitem"
-              on:click={() => handleMenuAction(onOpenSettings)}
-            >
-              <Settings size={14} class="menu-icon" />
-              <span>模型服务与参数设置</span>
-            </button>
-          </div>
-        {/if}
-      </div>
+      <button
+        class="header-btn"
+        title="模型服务与参数设置"
+        on:click={onOpenSettings}
+        aria-label="设置"
+      >
+        <Settings size={14} />
+      </button>
     </div>
   </div>
 
-  <!-- 第二行：分段工作区导航 (Segmented Workspace Tabs) -->
+  <!-- 第二行：分段工作区导航 (Segmented Workspace Tabs: 2项) -->
   <nav class="workspace-nav" aria-label="工作区导航">
     <div class="segmented-bar">
       <button
@@ -145,13 +82,6 @@
       >
         <FolderGit2 size={13} />
         <span>宏库</span>
-      </button>
-      <button
-        class="segmented-tab {activeWorkspace === 'datatools' ? 'active' : ''}"
-        on:click={() => handleSelect('datatools')}
-      >
-        <Wrench size={13} />
-        <span>数据工具</span>
       </button>
     </div>
   </nav>
@@ -292,72 +222,9 @@
     color: var(--office-text);
   }
 
-  .header-btn.active {
-    background: var(--office-active);
-    color: var(--excel-green);
-  }
 
-  /* 下拉菜单 */
-  .more-menu-container {
-    position: relative;
-  }
 
-  .dropdown-popover {
-    position: absolute;
-    top: 30px;
-    right: 0;
-    width: 180px;
-    background: #ffffff;
-    border: 1px solid var(--office-border);
-    border-radius: var(--office-radius);
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
-    padding: 4px;
-    z-index: 100;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
 
-  .menu-section-label {
-    font-size: 10px;
-    font-weight: 600;
-    color: var(--office-dim);
-    padding: 4px 8px 2px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-
-  .menu-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-    padding: 6px 8px;
-    font-size: var(--font-size-sm);
-    color: var(--office-text);
-    background: transparent;
-    border: none;
-    border-radius: var(--office-radius-xs);
-    cursor: pointer;
-    text-align: left;
-    transition: background 0.1s ease;
-  }
-
-  .menu-item:hover {
-    background: var(--office-hover);
-    color: var(--excel-green);
-  }
-
-  :global(.menu-icon) {
-    color: var(--office-muted);
-    flex-shrink: 0;
-  }
-
-  .menu-divider {
-    height: 1px;
-    background: var(--office-border-subtle);
-    margin: 3px 0;
-  }
 
   /* 第二行：分段标签 */
   .workspace-nav {

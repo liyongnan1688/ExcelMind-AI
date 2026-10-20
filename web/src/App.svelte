@@ -32,8 +32,8 @@
   let inspectingSnapshot: SelectionSnapshot | null = null;
   let activeMacroReference: MacroReferenceData | null = null;
 
-  // 企业级工作区状态：高频主入口 / 次级工作区 (支持通过 URL 参数精准切入预览，生产默认纯净 assistant)
-  let activeWorkspace: 'assistant' | 'scripts' | 'datatools' = (typeof window !== 'undefined' && window.location.search.includes('ws=datatools')) ? 'datatools' : 'assistant';
+  // 企业级工作区状态：高频主入口 / 次级工作区
+  let activeWorkspace: 'assistant' | 'scripts' = 'assistant';
   // 严格隔离：默认生产界面不展示 mock 原型，仅当带有 ?preview=true 时展示
   let showConfirmCardPrototype = typeof window !== 'undefined' && window.location.search.includes('preview=true');
 
@@ -50,8 +50,7 @@
   }
 
   let showSettings = false;
-  let showScripts = false;
-  let showDataTools = false;
+  let showDataToolModal = false;
   let showBatchModal = false;
   let showWorkflowModal = false;
   let scriptDrawerRef: any;
@@ -77,7 +76,7 @@
 
     // 监听 Ribbon 动态菜单触发“收藏宏”运行前确认
     unbindPromptRunMacro = bridge.onAction('prompt_run_macro', async (payload: any) => {
-      showScripts = true;
+      activeWorkspace = 'scripts';
       showSettings = false;
       await tick();
       const scriptId = typeof payload === 'string' ? payload : (payload?.scriptId || '');
@@ -85,36 +84,39 @@
     });
 
     // 监听 Ribbon 菜单打开“宏库”/“我的脚本”抽屉
-    unbindOpenMacroLibrary = bridge.onAction('open_macro_library', () => {
-      showScripts = true;
+    unbindOpenMacroLibrary = bridge.onAction('open_macro_library', async () => {
+      activeWorkspace = 'scripts';
       showSettings = false;
+      await tick();
       scriptDrawerRef?.openTab('list');
     });
 
-    unbindOpenScripts = bridge.onAction('open_scripts', () => {
-      showScripts = true;
+    unbindOpenScripts = bridge.onAction('open_scripts', async () => {
+      activeWorkspace = 'scripts';
       showSettings = false;
+      await tick();
       scriptDrawerRef?.openTab('list');
     });
 
     // 监听 Ribbon 菜单打开“我的宏”列表
-    unbindOpenMyMacros = bridge.onAction('open_my_macros', () => {
-      showScripts = true;
+    unbindOpenMyMacros = bridge.onAction('open_my_macros', async () => {
+      activeWorkspace = 'scripts';
       showSettings = false;
+      await tick();
       scriptDrawerRef?.openTab('list');
     });
 
     // 监听 Ribbon 菜单打开“导入宏”窗口
-    unbindOpenImportMacro = bridge.onAction('open_import_macro', () => {
-      showScripts = true;
+    unbindOpenImportMacro = bridge.onAction('open_import_macro', async () => {
+      activeWorkspace = 'scripts';
       showSettings = false;
+      await tick();
       scriptDrawerRef?.openTab('import');
     });
 
-    // 监听 Ribbon 菜单直达“数据工具”工作区
+    // 监听 Ribbon 菜单直达“数据工具”面板
     unbindOpenDataTools = bridge.onAction('open_data_tools', () => {
-      activeWorkspace = 'datatools';
-      showScripts = false;
+      showDataToolModal = true;
       showSettings = false;
     });
 
@@ -153,29 +155,36 @@
 
 
     if (typeof window !== 'undefined') {
-      (window as any).__openScripts = () => {
-        showScripts = true;
+      (window as any).__openScripts = async () => {
+        activeWorkspace = 'scripts';
         showSettings = false;
+        await tick();
         scriptDrawerRef?.openTab('list');
       };
-      (window as any).__openMyMacros = () => {
-        showScripts = true;
+      (window as any).__openMyMacros = async () => {
+        activeWorkspace = 'scripts';
         showSettings = false;
+        await tick();
         scriptDrawerRef?.openTab('list');
       };
-      (window as any).__openImportMacro = () => {
-        showScripts = true;
+      (window as any).__openMacroLibrary = async () => {
+        activeWorkspace = 'scripts';
         showSettings = false;
+        await tick();
+        scriptDrawerRef?.openTab('list');
+      };
+      (window as any).__openImportMacro = async () => {
+        activeWorkspace = 'scripts';
+        showSettings = false;
+        await tick();
         scriptDrawerRef?.openTab('import');
       };
       (window as any).__openSettings = () => {
         showSettings = true;
-        showScripts = false;
-        showDataTools = false;
+        showDataToolModal = false;
       };
       (window as any).__openDataTools = () => {
-        showDataTools = true;
-        showScripts = false;
+        showDataToolModal = true;
         showSettings = false;
       };
       (window as any).__openBatch = () => {
@@ -719,17 +728,12 @@
     {activeWorkspace}
     onSelectWorkspace={(ws) => {
       activeWorkspace = ws;
-      if (ws === 'scripts') {
-        showScripts = true;
-      }
     }}
     onOpenSettings={() => (showSettings = true)}
-    onOpenBatch={() => (showBatchModal = true)}
-    onOpenWorkflow={() => (showWorkflowModal = true)}
     onRefresh={refreshWorkbookInfo}
   />
 
-  {#if activeWorkspace === 'assistant' || activeWorkspace === 'scripts'}
+  {#if activeWorkspace === 'assistant'}
     <div class="workspace-view assistant-view">
       <!-- 消息流区域 -->
       <main class="chat-area {isScrollBottom ? 'scroll-to-bottom' : ''}" bind:this={messagesContainer}>
@@ -828,16 +832,16 @@
       <!-- 底部紧凑输入栏 -->
       <ChatInput bind:this={chatInputRef} {workbook} disabled={isProcessing} bind:referencedMacro={activeMacroReference} onSend={handleSend} />
     </div>
-
-  <!-- 工作区 2: 数据工具工作区 (代表性原型 2，独立视图，彻底解决弹窗遮罩与裸按钮) -->
-  {:else if activeWorkspace === 'datatools'}
-    <div class="workspace-view datatools-view">
-      <DataToolModal
+  {:else if activeWorkspace === 'scripts'}
+    <div class="workspace-view scripts-view">
+      <ScriptDrawer
+        bind:this={scriptDrawerRef}
         isOpen={true}
-        isWorkspaceView={true}
+        inline={true}
         {workbook}
-        onClose={() => (activeWorkspace = 'assistant')}
-        onExecuted={refreshWorkbookInfo}
+        onClose={() => {}}
+        onRunScript={handleRunScript}
+        onCancelWithQuestion={handleCancelWithQuestion}
       />
     </div>
   {/if}
@@ -871,29 +875,14 @@
     <SettingsModal onClose={() => (showSettings = false)} />
   {/if}
 
-  <!-- “宏管理与我的脚本”抽屉 -->
-  <ScriptDrawer
-    bind:this={scriptDrawerRef}
-    isOpen={showScripts}
+  <!-- 数据工具面板 -->
+  <DataToolModal
+    isOpen={showDataToolModal}
+    isWorkspaceView={false}
     {workbook}
-    onClose={() => {
-      showScripts = false;
-      if (activeWorkspace === 'scripts') activeWorkspace = 'assistant';
-    }}
-    onRunScript={handleRunScript}
-    onCancelWithQuestion={handleCancelWithQuestion}
+    onClose={() => (showDataToolModal = false)}
+    onExecuted={refreshWorkbookInfo}
   />
-
-  <!-- 快捷数据工具弹窗（旧接口兼容：如果在 assistant 模式下被外部命令强行触发，转入 datatools 工作区） -->
-  {#if showDataTools}
-    <DataToolModal
-      isOpen={true}
-      isWorkspaceView={false}
-      {workbook}
-      onClose={() => (showDataTools = false)}
-      onExecuted={refreshWorkbookInfo}
-    />
-  {/if}
 
   <!-- 批量宏处理面板 (TASK-R4b) -->
   <BatchModal
@@ -940,7 +929,7 @@
     overflow: hidden;
   }
 
-  .datatools-view {
+  .scripts-view {
     display: flex;
     flex-direction: column;
     flex: 1;
