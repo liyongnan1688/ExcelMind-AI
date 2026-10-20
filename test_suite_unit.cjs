@@ -79,6 +79,7 @@ async function loadRealTsService(relPath, forceZeroDepFallback = false) {
     if (reqPath === './toolRegistry') return tsModuleCache[path.resolve(__dirname, './web/src/services/toolRegistry.ts')];
     if (reqPath === './conventions') return tsModuleCache[path.resolve(__dirname, './web/src/services/conventions.ts')];
     if (reqPath === './macroSaveEligibility') return tsModuleCache[path.resolve(__dirname, './web/src/services/macroSaveEligibility.ts')];
+    if (reqPath === './vbaRiskScanner') return tsModuleCache[path.resolve(__dirname, './web/src/services/vbaRiskScanner.ts')];
     if (reqPath === './mcpClient') return { mcpGateway: {} };
     return require(reqPath);
   };
@@ -89,7 +90,7 @@ async function loadRealTsService(relPath, forceZeroDepFallback = false) {
 }
 
 
-let realConventions, realCompaction, realToolRegistry, realDecisionEngine, realLlm, realMacroSaveEligibility;
+let realConventions, realCompaction, realToolRegistry, realDecisionEngine, realLlm, realMacroSaveEligibility, realVbaRiskScanner;
 
 
 /**
@@ -6716,6 +6717,40 @@ console.log('\n=== 20. TASK-PHASE1 Cache-Safe Prompt & Compaction Pipeline Suite
     '[Phase 3 对话即宏智能命名] 精准滤除 Main 与 LeeTaskEntry 包装器命名，提取出具有高可读性的实际业务过程名',
     extractProcedureNameForSave(sampleCode1, '财务报表格式化') === 'FormatFinancialReport' &&
       extractProcedureNameForSave(sampleCode2, '财务报表格式化') === '财务报表格式化'
+  );
+
+  // === 23. TASK-PHASE5 VBA Execution Risk Classification Suite ===
+  console.log('\n=== 23. TASK-PHASE5 VBA Execution Risk Classification Suite ===');
+  realVbaRiskScanner = await loadRealTsService('./web/src/services/vbaRiskScanner.ts');
+  const { classifyVbaRisk } = realVbaRiskScanner;
+
+  // Test 23.1: L0 只读查询判定
+  const vbaL0 = 'Sub ReadOnlyQuery()\n    MsgBox "当前单元格：" & Range("A1").Value\n    Debug.Print Application.ActiveSheet.Name\nEnd Sub';
+  const analysisL0 = classifyVbaRisk(vbaL0);
+  assert(
+    '[Phase 5 风险分级 L0 只读查询] 无任何写操作的代码精准判定为 L0，免建快照直接执行',
+    analysisL0.riskLevel === 'L0' && analysisL0.reasons.length > 0
+  );
+
+  // Test 23.2: L1 原地普通写操作判定
+  const vbaL1 = 'Sub FormatSheet()\n    Range("A1:D1").Interior.Color = RGB(200, 220, 255)\n    Range("A2").Value = 100\n    Range("B2").Formula = "=SUM(A1:A10)"\nEnd Sub';
+  const analysisL1 = classifyVbaRisk(vbaL1);
+  assert(
+    '[Phase 5 风险分级 L1 原地写入] 普通单元格改写与样式设置精准判定为 L1，支持自动快照与撤销',
+    analysisL1.riskLevel === 'L1' && analysisL1.reasons.length > 0
+  );
+
+  // Test 23.3: L2 不可逆高危操作判定 (删除工作表 / 外部COM组件 / 外部工作簿)
+  const vbaL2_Delete = 'Sub CleanTabs()\n    Application.DisplayAlerts = False\n    Worksheets("旧看板").Delete\n    Application.DisplayAlerts = True\nEnd Sub';
+  const vbaL2_FSO = 'Sub WriteExternalFile()\n    Dim fso As Object\n    Set fso = CreateObject("Scripting.FileSystemObject")\n    fso.DeleteFile "C:\\temp\\data.txt"\nEnd Sub';
+  const analysisL2_Delete = classifyVbaRisk(vbaL2_Delete);
+  const analysisL2_FSO = classifyVbaRisk(vbaL2_FSO);
+  assert(
+    '[Phase 5 风险分级 L2 不可逆高危阻断] 删除工作表与外部系统对象调用精准判定为 L2，提取具体目标并阻断静默执行',
+    analysisL2_Delete.riskLevel === 'L2' &&
+    analysisL2_Delete.targetDetail && analysisL2_Delete.targetDetail.includes('旧看板') &&
+    analysisL2_FSO.riskLevel === 'L2' &&
+    analysisL2_FSO.reasons.some(r => r.includes('FileSystemObject'))
   );
 }
 

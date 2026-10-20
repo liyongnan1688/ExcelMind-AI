@@ -243,6 +243,55 @@
       restoreErrorMsg = res.error || '恢复操作遇到错误';
     }
   }
+
+  let isExecutingL2 = false;
+  async function handleConfirmL2() {
+    if (!execution?.confirmToken) return;
+    isExecutingL2 = true;
+    try {
+      const res = await bridge.send<any>('execute_vba', {
+        code: displayCode,
+        requestId: execution.requestId || messageId,
+        confirmToken: execution.confirmToken,
+        targetWorkbookName: execution.targetWorkbookName || '',
+        targetWorkbookFullName: execution.targetWorkbookFullName || '',
+      });
+      if (res.ok && res.data) {
+        execution = {
+          ...execution,
+          ...res.data,
+          needsConfirm: false,
+        };
+      } else {
+        execution = {
+          ...execution,
+          needsConfirm: false,
+          error: res.error || '执行遇到错误',
+          summary: res.message || res.error || '执行遇到错误'
+        };
+      }
+    } catch (e: any) {
+      execution = {
+        ...execution,
+        needsConfirm: false,
+        error: e.message || '执行异常',
+        summary: '执行异常: ' + (e.message || '')
+      };
+    } finally {
+      isExecutingL2 = false;
+    }
+  }
+
+  function handleCancelL2() {
+    if (execution) {
+      execution = {
+        ...execution,
+        needsConfirm: false,
+        error: '用户已取消操作',
+        summary: '已取消不可逆操作'
+      };
+    }
+  }
 </script>
 
 <div
@@ -255,6 +304,37 @@
     ? 'card-success'
     : 'card-unconfirmed'}"
 >
+  <!-- L2 不可逆高危操作确认卡 (P5 规范) -->
+  {#if execution?.needsConfirm && execution?.riskLevel === 'L2'}
+    <div class="l2-risk-confirm-card">
+      <div class="l2-risk-header">
+        <ShieldAlert size={16} color="var(--office-danger, #C42B1C)" />
+        <span class="l2-risk-title">{execution.riskTargetDetail || '不可逆高危操作确认'}</span>
+      </div>
+      <div class="l2-risk-body">
+        <p class="l2-risk-desc">该操作包含不可逆或越界指令，执行后无法自动撤销：</p>
+        <ul class="l2-risk-list">
+          {#each (execution.riskReasons || []) as reason}
+            <li>• {reason}</li>
+          {/each}
+        </ul>
+      </div>
+      <div class="l2-risk-footer">
+        <button class="btn btn-sm btn-subtle" type="button" on:click|stopPropagation={handleCancelL2}>
+          取消
+        </button>
+        <button class="btn btn-sm btn-danger" type="button" on:click|stopPropagation={handleConfirmL2} disabled={isExecutingL2}>
+          {#if isExecutingL2}
+            <Loader2 size={12} class="spinner" />
+            <span>正在执行...</span>
+          {:else}
+            <span>{execution.riskTargetDetail?.includes('删除') ? '仍要删除' : '仍要执行'}</span>
+          {/if}
+        </button>
+      </div>
+    </div>
+  {/if}
+
   <!-- 默认折叠状态栏 (简洁呈现，客观如实呈现，不伪称满分完成) -->
   <div
     class="summary-bar"
@@ -303,6 +383,20 @@
     </div>
 
     <div class="summary-right-actions">
+      <!-- L1 结果卡首行撤销按钮 (P5 规范) -->
+      {#if !isExecuting && !execution?.needsConfirm && (execution?.canUndo || execution?.snapshot?.id)}
+        <button
+          class="btn-rollback-top"
+          type="button"
+          title="一键撤销对目标工作簿的这次改动"
+          disabled={isRestoring}
+          on:click|stopPropagation={() => openRestoreConfirm(selectedSnapshotId || execution?.snapshot?.id || '')}
+        >
+          <RotateCcw size={12} class={isRestoring ? 'animate-spin' : ''} />
+          <span>{restoreSuccess ? '已撤销' : (isRestoring ? '正在撤销...' : '撤销改动')}</span>
+        </button>
+      {/if}
+
       <!-- 双模态查看：未展开时也可直接全屏放大查看代码与记录 -->
       {#if execution || displayCode}
         <button
@@ -2276,5 +2370,68 @@
     flex-direction: column;
     gap: 12px;
     font-size: var(--font-size-sm);
+  }
+
+  .btn-rollback-top {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    font-size: var(--office-font-size-meta, 11px);
+    font-weight: 500;
+    color: var(--office-danger, #C42B1C);
+    background: #fff;
+    border: 1px solid rgba(196, 43, 28, 0.3);
+    border-radius: var(--office-radius-sm, 4px);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+  }
+
+  .btn-rollback-top:hover {
+    background: #fdf2f2;
+    border-color: var(--office-danger, #C42B1C);
+  }
+
+  .l2-risk-confirm-card {
+    padding: 10px 12px;
+    background: #fff5f5;
+    border: 1px solid rgba(196, 43, 28, 0.4);
+    border-radius: var(--office-radius-md, 6px);
+    margin: 6px;
+  }
+
+  .l2-risk-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+    font-size: var(--office-font-size-body, 13px);
+    color: var(--office-danger, #C42B1C);
+  }
+
+  .l2-risk-body {
+    margin: 6px 0 8px 0;
+    font-size: var(--office-font-size-meta, 11px);
+    color: var(--office-text-secondary, #605e5c);
+    line-height: 1.4;
+  }
+
+  .l2-risk-desc {
+    margin: 0 0 4px 0;
+  }
+
+  .l2-risk-list {
+    margin: 0;
+    padding-left: 0;
+    list-style: none;
+    color: var(--office-danger, #C42B1C);
+  }
+
+  .l2-risk-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
   }
 </style>
