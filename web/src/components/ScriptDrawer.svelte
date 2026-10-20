@@ -40,6 +40,8 @@
     type MacroPackagePreviewResult,
     type MacroPackageImportResult,
   } from '../services/bridge';
+  import { toast } from '../services/toast';
+  import { showConfirm } from '../services/dialog';
 
   export let isOpen = false;
   export let workbook: WorkbookInfo | null = null;
@@ -151,7 +153,7 @@
     if (found) {
       handleOpenRunModal(found);
     } else {
-      alert(`未在本地宏库中找到标识为【${scriptId}】的宏，该宏可能已被重命名或物理移除。`);
+      toast.error(`未在宏库中找到【${scriptId}】。`);
     }
   }
 
@@ -236,7 +238,7 @@
       script.isFavorite = nextVal;
       scripts = [...scripts];
     } else {
-      alert('更新收藏状态失败: ' + (res.error || '未知错误'));
+      toast.error('更新收藏状态失败: ' + (res.error || '未知错误'));
     }
   }
 
@@ -894,12 +896,18 @@
   // 删除宏
   async function handleDelete(script: ScriptItem) {
     const disp = script.displayName || script.name;
-    if (!confirm(`确认删除宏【${disp}】吗？此操作不可撤销。`)) return;
+    const ok = await showConfirm({
+      title: '删除宏',
+      message: `确认删除宏【${disp}】吗？此操作不可撤销。`,
+      confirmText: '删除',
+      danger: true,
+    });
+    if (!ok) return;
     const res = await bridge.send('delete_script', { id: script.id || script.fileName });
     if (res.ok) {
       await refreshScripts();
     } else {
-      alert('删除失败: ' + (res.error || res.message));
+      toast.error('删除失败: ' + (res.error || res.message));
     }
   }
 
@@ -912,7 +920,7 @@
         copiedScriptId = null;
       }, 1500);
     } catch {
-      alert('复制到剪贴板失败，请手动选取复制代码');
+      toast.error('复制到剪贴板失败，请手动选取复制代码');
     }
   }
 
@@ -930,7 +938,7 @@
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch (err: any) {
-      alert('导出失败: ' + err.message);
+      toast.error('导出失败: ' + err.message);
     }
   }
 

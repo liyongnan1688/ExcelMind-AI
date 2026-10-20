@@ -23,6 +23,7 @@
   import { bridge, type SnapshotItem, type VbaExecutionData } from '../services/bridge';
   import { getPromptConstraintsCatalog } from '../services/llm';
   import { checkMacroSaveEligibility } from '../services/macroSaveEligibility';
+  import { toast } from '../services/toast';
   import { createEventDispatcher, tick } from 'svelte';
 
   const dispatch = createEventDispatcher();
@@ -186,7 +187,7 @@
         scriptName = '';
       }, 1000);
     } else {
-      alert('保存失败: ' + res.error);
+      toast.error('保存失败: ' + (res.error || '未知错误'));
     }
   }
 

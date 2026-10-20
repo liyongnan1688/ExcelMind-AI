@@ -10,6 +10,10 @@
   import ExecutionCard from './components/ExecutionCard.svelte';
   import ChatInput from './components/ChatInput.svelte';
   import MacroConfirmCard from './components/MacroConfirmCard.svelte';
+  import Toast from './components/Toast.svelte';
+  import ConfirmDialog from './components/ConfirmDialog.svelte';
+  import { toast } from './services/toast';
+  import { showConfirm } from './services/dialog';
   import { bridge, type WorkbookInfo, type ScriptItem, type VbaExecutionData, type SelectionSnapshot } from './services/bridge';
   import {
     callLlmStream,
@@ -249,16 +253,18 @@
       const currentWbName = (workbook?.name || '').trim();
       const attachedWbName = (selectionSnapshot.context.workbookName || '').trim();
       if (currentWbName && attachedWbName && currentWbName.toLowerCase() !== attachedWbName.toLowerCase()) {
-        alert(`⚠️ 附加选区来自工作簿【${attachedWbName}】，但当前活动工作簿为【${currentWbName}】。\n\n为避免跨工作簿误操作，请重新附加当前工作簿选区或移除附件后再发送。`);
+        toast.error(`附加选区来自工作簿【${attachedWbName}】，当前活动为【${currentWbName}】。请重新附加当前工作簿选区。`);
         return false;
       }
     }
 
     // 未存盘工作簿前置拦截：操作模式下写入未存盘文件无法安全通过重开回退，提示用户确认
     if (requestMode === 'AUTOMATION' && workbook && (!workbook.isSaved || !workbook.fullName || !workbook.fullName.includes('\\'))) {
-      const confirmed = window.confirm(
-        `⚠️ 提示：当前工作簿【${workbook.name || '未保存工作簿'}】尚未保存到本地磁盘。\n\n自动化脚本执行后将直接修改当前表格数据。若未保存，出错时可能无法通过重新打开文件撤销。\n\n建议先按 Ctrl+S 存盘。是否仍要继续？`
-      );
+      const confirmed = await showConfirm({
+        title: '工作簿尚未保存',
+        message: '将直接修改当前表格数据。\n建议先按 Ctrl+S 存盘。',
+        confirmText: '仍要继续',
+      });
       if (!confirmed) {
         return false;
       }
@@ -902,6 +908,10 @@
     onClose={() => (showWorkflowModal = false)}
     onExecuted={refreshWorkbookInfo}
   />
+
+  <!-- 全局反馈层：应用内 Toast 与确认弹窗 -->
+  <Toast />
+  <ConfirmDialog />
 </div>
 
 <style>

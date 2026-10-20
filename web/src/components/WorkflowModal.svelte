@@ -24,6 +24,7 @@
     type WorkflowStepDefinition,
     type WorkflowRunRecord
   } from '../services/bridge';
+  import { showConfirm } from '../services/dialog';
 
   export let isOpen = false;
   export let workbook: WorkbookInfo | null = null;
@@ -167,7 +168,13 @@
 
   async function handleDelete() {
     if (!selectedWorkflowId) return;
-    if (!confirm('确定要删除此工作流定义及其运行历史吗？')) return;
+    const ok = await showConfirm({
+      title: '删除工作流',
+      message: '确定要删除此工作流定义及其运行历史吗？',
+      confirmText: '删除',
+      danger: true,
+    });
+    if (!ok) return;
 
     const res = await bridge.deleteWorkflow(selectedWorkflowId);
     if (res.ok) {
