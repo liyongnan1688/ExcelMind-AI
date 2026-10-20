@@ -495,7 +495,7 @@
       <div class="modal-header">
         <div class="header-title-box">
           <Layers size={18} class="text-emerald-700" />
-          <h2 id="batch-modal-title">批量宏处理面板 (TASK-R4b)</h2>
+          <h2 id="batch-modal-title">批量处理</h2>
           <span class="badge-stage">隔离工作副本 · 遇错即停</span>
         </div>
         <button class="close-btn" on:click={handleCloseModal} aria-label="关闭面板">
@@ -635,7 +635,7 @@
                 <textarea
                   id="macro-code-textarea"
                   class="code-textarea"
-                  placeholder="Sub ProcessCurrent()\n    ActiveSheet.Range('A1').Value = 'Processed'\nEnd Sub"
+                  placeholder={"Sub ProcessCurrent()\n    ActiveSheet.Range(\"A1\").Value = \"Processed\"\nEnd Sub"}
                   bind:value={customMacroCode}
                   on:input={handleCodeInput}
                   rows={4}

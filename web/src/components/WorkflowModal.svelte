@@ -236,7 +236,7 @@
       <div class="modal-header">
         <div class="header-title">
           <GitBranch size={16} class="text-indigo-600" />
-          <span>双步骤任务流水线 (TASK-R5a)</span>
+          <span>任务流水线</span>
           {#if activeWorkflow}
             <span class="version-badge">v{activeWorkflow.definitionVersion}</span>
             {#if activeWorkflow.isPreset}

@@ -1767,7 +1767,7 @@
           <div class="p-3 bg-indigo-50/80 border border-indigo-200 rounded-lg text-xs text-indigo-900 leading-relaxed flex items-start gap-2.5">
             <BarChart2 size={16} class="mt-0.5 shrink-0 text-indigo-600" />
             <div>
-              <div class="font-bold text-indigo-950">快捷图表工具定位与安全规范 (TASK-R5b-01)</div>
+              <div class="font-bold text-indigo-950">快捷图表工具定位与安全规范</div>
               <div class="text-[11px] text-indigo-800 mt-0.5">
                 • <strong>定位说明</strong>：本工具为本地确定性原生 COM 辅助工具，首切片支持柱状图、折线图、饼图，绝不作为大模型自然语言操作请求的隐式替代；零第三方图表库。<br>
                 • <strong>防旧结果叠加</strong>：图表采用稳定标识 (<code>__EM_CHART_xxxx</code>)，新建与替换行为明确隔离，绝不误删用户已有手工图表。<br>
