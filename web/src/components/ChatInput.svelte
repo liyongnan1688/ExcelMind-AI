@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Zap, MessageSquare, Code } from 'lucide-svelte';
+  import { Zap, MessageSquare, Code, Plus, Info } from 'lucide-svelte';
   import {
     bridge,
     type SelectionContextData,
@@ -26,6 +26,8 @@
   let inputText = '';
   let currentMode: 'AUTOMATION' | 'CHAT' = 'AUTOMATION';
   let showMacroCodeModal = false;
+  let showPlusMenu = false;
+  let plusContainerEl: HTMLElement | null = null;
 
   // 选区上下文只读状态
   let selectionContext: SelectionContextData | null = null;
@@ -278,64 +280,15 @@
   }
 </script>
 
+<svelte:window
+  on:click={(e) => {
+    if (showPlusMenu && plusContainerEl && e.target instanceof Node && !plusContainerEl.contains(e.target)) {
+      showPlusMenu = false;
+    }
+  }}
+/>
+
 <div class="input-container">
-  <!-- 模式切换与附加选区操作栏 -->
-  <div class="mode-header">
-    <div class="mode-segmented" role="tablist" aria-label="对话模式选择">
-      <button
-        class="mode-tab {currentMode === 'AUTOMATION' ? 'active-auto' : ''}"
-        on:click={() => setMode('AUTOMATION')}
-        disabled={disabled}
-        type="button"
-        role="tab"
-        aria-selected={currentMode === 'AUTOMATION'}
-        title="操作模式：生成代码并执行，直接修改表格"
-      >
-        <Zap size={13} class="mode-icon" />
-        <span class="mode-title">操作</span>
-      </button>
-      <button
-        class="mode-tab {currentMode === 'CHAT' ? 'active-chat' : ''}"
-        on:click={() => setMode('CHAT')}
-        disabled={disabled}
-        type="button"
-        role="tab"
-        aria-selected={currentMode === 'CHAT'}
-        title="对话模式：纯文本咨询指导，不改动表格"
-      >
-        <MessageSquare size={13} class="mode-icon" />
-        <span class="mode-title">对话</span>
-      </button>
-    </div>
-
-    <div class="header-action-group">
-      <!-- 全簿架构透视按钮 -->
-      <button
-        class="overview-btn"
-        on:click={handleScanWorkbookOverview}
-        disabled={disabled || isScanningOverview}
-        type="button"
-        title="只读透视工作簿所有工作表清单、表头结构与公式密度"
-      >
-        <span class="overview-icon {isScanningOverview ? 'spin' : ''}">🌐</span>
-        <span>{isScanningOverview ? '透视中...' : '全簿透视'}</span>
-      </button>
-
-      <!-- 附加当前选区按钮 (双模式均可用，用于首次添加或替换附件) -->
-      <button
-        class="attach-selection-btn {selectionContext ? 'has-attached' : ''}"
-        on:click={handleAttachSelection}
-        disabled={disabled || isLoadingSelection || isRefreshingArea}
-        type="button"
-        title="只读读取当前 Excel 选中的单元格区域（用于替换现有附件）"
-      >
-        <svg class="btn-icon {isLoadingSelection ? 'spin' : ''}" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
-        </svg>
-        <span>{isLoadingSelection ? '读取中...' : (selectionContext ? '替换为当前选区' : '附加当前选区')}</span>
-      </button>
-    </div>
-  </div>
 
   <!-- 未存盘工作簿前置预警条 -->
   {#if isUnsavedWorkbook}
@@ -392,8 +345,8 @@
     </div>
   {/if}
 
-  <!-- 紧凑选区预览卡片 (当成功附加时展示) -->
-  {#if selectionContext}
+  <!-- 紧凑选区预览卡片 (点击状态条展开时展示) -->
+  {#if selectionContext && showDetails}
     <div class="selection-card">
       <div class="card-header">
         <div class="card-title-group">
@@ -516,45 +469,123 @@
     </div>
   {/if}
 
-  <!-- 输入主框 (加高输入区域，提供更充足的书写空间) -->
+  <!-- 输入主框 (压缩单行，单行最小 38px，最大 96px) -->
   <div class="input-box {currentMode === 'AUTOMATION' ? 'focus-auto' : 'focus-chat'}">
-    <textarea
-      bind:this={textareaEl}
-      placeholder={currentMode === 'AUTOMATION'
-        ? "输入操作指令 (如: 用_分裂D列的名称，不要覆盖后面的列，新增)..."
-        : "向 AI 咨询 Excel 问题或技巧 (如: TEXTSPLIT与分列区别、公式怎么写)..."}
-      bind:value={inputText}
-      on:keydown={handleKeyDown}
-      disabled={disabled}
-      rows="3"
-    ></textarea>
-
-    <div class="input-actions">
-      <div class="shortcut-tip">
-        <span class="key-pill">Enter</span> 发送
-        <span class="key-sep">/</span>
-        <span class="key-pill">Shift+Enter</span> 换行
-      </div>
-      <div class="action-buttons-group">
-        <!-- 唯一发送主按钮：文字与图标随已选模式明确变化，不展示两套等权重按钮 -->
+    <div class="input-main-row">
+      <!-- ＋ 下拉菜单 -->
+      <div class="plus-menu-container" bind:this={plusContainerEl}>
         <button
-          class="send-primary-btn {currentMode === 'AUTOMATION' ? 'send-auto' : 'send-chat'}"
-          on:click={() => handleSubmit()}
-          disabled={disabled || !inputText.trim() || isRefreshingArea}
-          title={isRefreshingArea
-            ? "选区正在刷新原区域，请稍候完成后再发送"
-            : (currentMode === 'AUTOMATION' ? "以【操作】模式发送：生成自动化方案并修改表格" : "以【对话】模式发送：仅解答咨询，不改动表格")}
           type="button"
+          class="plus-btn"
+          on:click={() => (showPlusMenu = !showPlusMenu)}
+          disabled={disabled}
+          title="添加选区或整簿上下文"
+          aria-label="添加选区或整簿上下文"
         >
-          {#if currentMode === 'AUTOMATION'}
-            <Zap size={13} />
-            <span>执行操作</span>
-          {:else}
-            <MessageSquare size={13} />
-            <span>发送提问</span>
-          {/if}
+          <Plus size={14} />
         </button>
+        {#if showPlusMenu}
+          <div class="plus-dropdown" role="menu">
+            <button
+              type="button"
+              class="plus-dropdown-item"
+              on:click={() => { showPlusMenu = false; handleAttachSelection(); }}
+              disabled={disabled || isLoadingSelection}
+            >
+              附加当前选区
+            </button>
+            <button
+              type="button"
+              class="plus-dropdown-item"
+              on:click={() => { showPlusMenu = false; handleScanWorkbookOverview(); }}
+              disabled={disabled || isScanningOverview}
+            >
+              整簿上下文
+            </button>
+          </div>
+        {/if}
       </div>
+
+      <!-- 输入框 -->
+      <textarea
+        bind:this={textareaEl}
+        placeholder={currentMode === 'AUTOMATION'
+          ? "输入操作指令 (如: 用_分裂D列的名称)..."
+          : "向 AI 咨询 Excel 问题或技巧..."}
+        bind:value={inputText}
+        on:keydown={handleKeyDown}
+        disabled={disabled}
+        rows="1"
+      ></textarea>
+
+      <!-- 执行按钮 -->
+      <button
+        class="send-primary-btn {currentMode === 'AUTOMATION' ? 'send-auto' : 'send-chat'}"
+        on:click={() => handleSubmit()}
+        disabled={disabled || !inputText.trim() || isRefreshingArea}
+        title={isRefreshingArea
+          ? "选区正在刷新原区域，请稍候完成后再发送"
+          : (currentMode === 'AUTOMATION' ? "以【操作】模式发送：生成自动化方案并修改表格" : "以【对话】模式发送：仅解答咨询，不改动表格")}
+        type="button"
+      >
+        {#if currentMode === 'AUTOMATION'}
+          <Zap size={13} />
+          <span>执行</span>
+        {:else}
+          <MessageSquare size={13} />
+          <span>发送</span>
+        {/if}
+      </button>
+    </div>
+  </div>
+
+  <!-- 状态条 (12px) -->
+  <div class="chat-status-bar">
+    <div class="status-left">
+      <button
+        type="button"
+        class="status-mode-btn"
+        on:click={() => setMode(currentMode === 'AUTOMATION' ? 'CHAT' : 'AUTOMATION')}
+        disabled={disabled}
+        title="点击切换操作/对话模式"
+      >
+        {currentMode === 'AUTOMATION' ? '操作' : '对话'}
+      </button>
+      <span class="status-sep">·</span>
+      {#if !selectionContext}
+        <button
+          type="button"
+          class="status-attach-btn"
+          on:click={handleAttachSelection}
+          disabled={disabled || isLoadingSelection || isRefreshingArea}
+          title="点击附加当前 Excel 选区"
+        >
+          {isLoadingSelection ? '正在读取...' : '未附加选区'}
+        </button>
+      {:else}
+        <button
+          type="button"
+          class="status-attach-btn attached"
+          on:click={() => (showDetails = !showDetails)}
+          title="已附加选区，点击展开详情"
+        >
+          已附加 {selectionContext.sheetName ? `${selectionContext.sheetName}!` : ''}{selectionContext.address}
+        </button>
+        <button
+          type="button"
+          class="status-remove-btn"
+          on:click={removeSelection}
+          disabled={isRefreshingArea}
+          title="移除选区"
+        >
+          ✕
+        </button>
+      {/if}
+    </div>
+    <div class="status-right">
+      <span class="status-shortcut-info" title="Enter 发送 / Shift+Enter 换行">
+        <Info size={12} />
+      </span>
     </div>
   </div>
 
@@ -657,136 +688,12 @@
   .input-container {
     background: #ffffff;
     border-top: 1px solid var(--office-border);
-    padding: 8px 12px;
+    padding: 4px 8px 6px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
     box-shadow: 0 -1px 3px rgba(0, 0, 0, 0.03);
     flex-shrink: 0;
-  }
-
-  /* 顶部模式切换栏 */
-  .mode-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    min-height: 26px;
-  }
-
-  .mode-segmented {
-    display: inline-flex;
-    background: #f0f2f5;
-    border: 1px solid var(--office-border);
-    border-radius: var(--office-radius);
-    padding: 2px;
-    gap: 2px;
-    flex-shrink: 0;
-  }
-
-  .mode-tab {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 3px 10px;
-    font-size: var(--font-size-xs);
-    font-weight: 500;
-    border: none;
-    border-radius: var(--office-radius-sm);
-    background: transparent;
-    color: var(--office-muted);
-    cursor: pointer;
-    transition: all 0.15s ease;
-    line-height: var(--line-height-tight);
-  }
-
-  .mode-tab:hover:not(:disabled) {
-    color: var(--office-text);
-  }
-
-  .mode-tab.active-auto {
-    background: var(--excel-green);
-    color: #ffffff;
-    font-weight: 600;
-    box-shadow: 0 1px 3px rgba(16, 124, 65, 0.25);
-  }
-
-  .mode-tab.active-chat {
-    background: var(--office-blue);
-    color: #ffffff;
-    font-weight: 600;
-    box-shadow: 0 1px 3px rgba(0, 120, 212, 0.25);
-  }
-
-  .mode-tab:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
-  .header-action-group {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .overview-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 3px 8px;
-    font-size: var(--font-size-xs);
-    font-weight: 500;
-    border-radius: var(--office-radius-sm);
-    border: 1px solid #bfdbfe;
-    background: #eff6ff;
-    color: #1d4ed8;
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-
-  .overview-btn:hover:not(:disabled) {
-    background: #dbeafe;
-    border-color: #93c5fd;
-  }
-
-  .overview-icon {
-    font-size: 12px;
-  }
-
-  /* 附加选区按钮 */
-  .attach-selection-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 3px 8px;
-    font-size: var(--font-size-xs);
-    font-weight: 500;
-    border-radius: var(--office-radius-sm);
-    border: 1px solid var(--office-border);
-    background: #faf9f8;
-    color: #323130;
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-
-  .attach-selection-btn:hover:not(:disabled) {
-    background: #f3f2f1;
-    border-color: #c8c6c4;
-  }
-
-  .attach-selection-btn.has-attached {
-    background: #e7f3ec;
-    border-color: #107c41;
-    color: #107c41;
-    font-weight: 600;
-  }
-
-  .btn-icon {
-    flex-shrink: 0;
-  }
-
-  .spin {
-    animation: rotate 1s linear infinite;
   }
 
   @keyframes rotate {
@@ -1133,7 +1040,7 @@
     margin-left: 2px;
   }
 
-  /* 输入框 (加高设计与舒适边距) */
+  /* 输入主框 (压缩单行，单行最小 38px，最大 96px) */
   .input-box {
     border: 1px solid var(--office-border);
     border-radius: var(--office-radius);
@@ -1141,6 +1048,8 @@
     display: flex;
     flex-direction: column;
     transition: all 0.15s ease;
+    padding: 2px 6px;
+    box-sizing: border-box;
   }
 
   .input-box.focus-auto:focus-within {
@@ -1153,20 +1062,108 @@
     box-shadow: 0 0 0 2px rgba(0, 120, 212, 0.15);
   }
 
+  .input-main-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  /* ＋ 菜单 */
+  .plus-menu-container {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
+  .plus-btn {
+    width: 26px;
+    height: 26px;
+    border-radius: var(--office-radius-xs);
+    border: 1px solid var(--office-border-subtle);
+    background: #f8f9fa;
+    color: var(--office-text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    padding: 0;
+  }
+
+  .plus-btn:hover:not(:disabled) {
+    background: var(--office-hover);
+    color: var(--office-text);
+    border-color: var(--office-border);
+  }
+
+  .plus-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .plus-dropdown {
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    margin-bottom: 6px;
+    background: #ffffff;
+    border: 1px solid var(--office-border);
+    border-radius: var(--office-radius-sm);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    z-index: 50;
+    min-width: 110px;
+  }
+
+  .plus-dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 8px;
+    font-size: var(--font-size-xs);
+    color: var(--office-text);
+    border: none;
+    background: transparent;
+    border-radius: var(--office-radius-xs);
+    cursor: pointer;
+    text-align: left;
+    white-space: nowrap;
+    transition: background 0.12s ease;
+  }
+
+  .plus-dropdown-item:hover:not(:disabled) {
+    background: var(--office-hover);
+    color: var(--excel-green);
+  }
+
+  .plus-dropdown-item:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
   textarea {
+    flex: 1 1 0%;
+    min-width: 0;
     width: 100%;
     resize: none;
     border: none;
     outline: none;
-    padding: 8px 10px;
-    font-size: var(--font-size-base);
+    padding: 8px 4px;
+    font-size: var(--font-size-base, 13px);
     font-family: var(--font-family-ui);
     line-height: var(--line-height-normal);
     color: var(--office-text);
-    min-height: 72px;
-    max-height: 180px;
+    min-height: 38px;
+    max-height: 96px;
     background: transparent;
     overflow-y: auto;
+    box-sizing: border-box;
   }
 
   textarea:disabled {
@@ -1174,81 +1171,147 @@
     color: var(--office-muted);
   }
 
-  /* 底部操作行 */
-  .input-actions {
-    padding: 5px 8px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    background: #faf9f8;
-    border-top: 1px solid var(--office-border-subtle);
-    border-bottom-left-radius: calc(var(--office-radius) - 1px);
-    border-bottom-right-radius: calc(var(--office-radius) - 1px);
-    gap: 8px;
-  }
-
-  .shortcut-tip {
-    font-size: var(--font-size-xs);
-    color: var(--office-dim);
-    display: flex;
-    align-items: center;
-    gap: 3px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    min-width: 0;
-  }
-
-  @media (max-width: 360px) {
-    .key-sep,
-    .shortcut-tip span:last-child {
-      display: none;
-    }
-  }
-
-  .key-pill {
-    display: inline-block;
-    padding: 1px 4px;
-    background: #edebe9;
-    border-radius: var(--office-radius-xs);
-    font-size: 10px;
-    font-weight: 500;
-    color: #323130;
-    line-height: 1.2;
-    border: 1px solid #e1dfdd;
-  }
-
-  .key-sep {
-    color: #c8c6c4;
-    margin: 0 1px;
-  }
-
-  .action-buttons-group {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    flex-shrink: 0;
-  }
-
   .send-primary-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 5px;
-    padding: 5px 14px;
+    gap: 4px;
+    padding: 0 10px;
+    height: 30px;
     font-size: var(--font-size-xs, 12px);
     font-weight: 600;
     border-radius: var(--office-radius-sm);
     cursor: pointer;
     transition: all 0.15s ease;
-    line-height: 1.3;
     white-space: nowrap;
     border: 1px solid transparent;
+    flex-shrink: 0;
+  }
+
+  .send-auto {
+    background: var(--excel-green);
+    border-color: var(--excel-green);
+    color: #ffffff;
+  }
+
+  .send-auto:hover:not(:disabled) {
+    background: var(--excel-hover-bg);
+    border-color: var(--excel-hover-bg);
+  }
+
+  .send-chat {
+    background: var(--office-blue);
+    border-color: var(--office-blue);
+    color: #ffffff;
+  }
+
+  .send-chat:hover:not(:disabled) {
+    background: var(--office-blue-dark);
+    border-color: var(--office-blue-dark);
   }
 
   .send-primary-btn:disabled {
-    opacity: 0.45;
+    border-color: var(--office-dim);
+    opacity: 0.6;
     cursor: not-allowed;
+  }
+
+  /* 状态条 (12px) */
+  .chat-status-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 18px;
+    font-size: 12px;
+    color: var(--office-dim);
+    padding: 0 2px;
+    margin-top: 2px;
+    box-sizing: border-box;
+  }
+
+  .status-left {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .status-mode-btn {
+    background: transparent;
+    border: none;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--office-text-secondary);
+    cursor: pointer;
+    padding: 0 2px;
+    line-height: 1;
+    transition: color 0.15s ease;
+  }
+
+  .status-mode-btn:hover:not(:disabled) {
+    color: var(--excel-green);
+  }
+
+  .status-sep {
+    color: var(--office-dim);
+    font-size: 11px;
+    user-select: none;
+  }
+
+  .status-attach-btn {
+    background: transparent;
+    border: none;
+    font-size: 12px;
+    color: var(--office-dim);
+    cursor: pointer;
+    padding: 0 2px;
+    line-height: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 220px;
+    transition: color 0.15s ease;
+  }
+
+  .status-attach-btn:hover:not(:disabled) {
+    color: var(--office-text);
+  }
+
+  .status-attach-btn.attached {
+    color: var(--excel-green);
+    font-weight: 500;
+  }
+
+  .status-remove-btn {
+    background: transparent;
+    border: none;
+    color: var(--office-dim);
+    font-size: 10px;
+    cursor: pointer;
+    padding: 0 2px;
+    line-height: 1;
+  }
+
+  .status-remove-btn:hover:not(:disabled) {
+    color: var(--office-red, #d13438);
+  }
+
+  .status-right {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
+  .status-shortcut-info {
+    display: flex;
+    align-items: center;
+    color: var(--office-dim);
+    cursor: help;
+  }
+
+  .status-shortcut-info:hover {
+    color: var(--office-text);
   }
 
   /* 操作模式发送按钮：Excel 绿 */

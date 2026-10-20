@@ -29,6 +29,7 @@
     RefreshCw,
     Info,
     Search,
+    ArrowLeft,
   } from 'lucide-svelte';
   import {
     bridge,
@@ -57,6 +58,9 @@
   export let workbook: WorkbookInfo | null = null;
   export let onClose: () => void;
   export let onExecuted: (() => void) | undefined = undefined;
+
+  // 视图状态：网格选择 vs 表单详情
+  let view: 'grid' | 'detail' = 'grid';
 
   // 顶层 Tab
   let activeTab: 'dedup' | 'reconcile' | 'consolidate' | 'chart' | 'external_data' = 'dedup';
@@ -831,132 +835,134 @@
   <div class={isWorkspaceView ? "datatool-workspace-root" : "datatool-modal-overlay"}>
     <div class={isWorkspaceView ? "datatool-workspace-card" : "datatool-modal-card"}>
       
-      <!-- 头部：标题与状态说明 -->
-      <div class="datatool-header">
-        <div class="header-info">
-          <div class="header-icon-box">
-            {#if activeTab === 'dedup'}
-              <Filter size={18} />
-            {:else if activeTab === 'reconcile'}
-              <ArrowRightLeft size={18} />
-            {:else if activeTab === 'consolidate'}
-              <Layers size={18} />
-            {:else if activeTab === 'chart'}
-              <BarChart2 size={18} />
-            {:else}
-              <Download size={18} />
-            {/if}
+      {#if view === 'grid'}
+        <!-- 头部：标题与状态说明 -->
+        <div class="datatool-header">
+          <div class="header-info">
+            <div class="header-title-group">
+              <h2 class="tool-title">数据工具</h2>
+              <p class="tool-desc">选一个工具，按当前选区处理</p>
+            </div>
           </div>
-          <div class="header-title-group">
-            <h2 class="tool-title">
-              {activeTab === 'dedup' ? '按键去重' : activeTab === 'reconcile' ? '两表对账' : activeTab === 'consolidate' ? '多文件汇总' : activeTab === 'chart' ? '快捷图表' : '外部数据导入'}
-            </h2>
-            <p class="tool-desc">
-              {activeTab === 'dedup'
-                ? '比对单列或复合键，高亮或导出唯一记录。'
-                : activeTab === 'reconcile'
-                ? '全量跨表差异比对，输出四分类核对结果。'
-                : activeTab === 'consolidate'
-                ? '多文件同名列自动对齐合并为新工作簿。'
-                : activeTab === 'chart'
-                ? '选定数据区域免公式快速生成业务图表。'
-                : '只读预览并导入 CSV/JSON 外部数据。'}
-            </p>
+
+          <button
+            type="button"
+            on:click={onClose}
+            class="datatool-close-btn"
+            title={isWorkspaceView ? "返回 AI 助手" : "关闭"}
+            aria-label={isWorkspaceView ? "返回 AI 助手" : "关闭"}
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <!-- 网格选择视图：2 列网格，5 个工具全部可见 -->
+        <div class="datatool-grid-body">
+          <div class="datatool-grid">
+            <button
+              type="button"
+              class="datatool-grid-card"
+              on:click={() => { activeTab = 'dedup'; errorMessage = ''; view = 'detail'; }}
+            >
+              <div class="grid-card-icon-box">
+                <Filter size={20} />
+              </div>
+              <div class="grid-card-info">
+                <span class="grid-card-title">去重</span>
+                <span class="grid-card-sub">标记或导出唯一行</span>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              class="datatool-grid-card"
+              on:click={() => { activeTab = 'reconcile'; reconcileError = ''; view = 'detail'; }}
+            >
+              <div class="grid-card-icon-box">
+                <ArrowRightLeft size={20} />
+              </div>
+              <div class="grid-card-info">
+                <span class="grid-card-title">对账</span>
+                <span class="grid-card-sub">跨表全量差异比对</span>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              class="datatool-grid-card"
+              on:click={() => { activeTab = 'consolidate'; consolidationError = ''; view = 'detail'; }}
+            >
+              <div class="grid-card-icon-box">
+                <Layers size={20} />
+              </div>
+              <div class="grid-card-info">
+                <span class="grid-card-title">汇总</span>
+                <span class="grid-card-sub">多文件同名列合并</span>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              class="datatool-grid-card"
+              on:click={() => { activeTab = 'chart'; chartError = ''; view = 'detail'; }}
+            >
+              <div class="grid-card-icon-box">
+                <BarChart2 size={20} />
+              </div>
+              <div class="grid-card-info">
+                <span class="grid-card-title">图表</span>
+                <span class="grid-card-sub">选区免公式绘图</span>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              class="datatool-grid-card"
+              on:click={() => { activeTab = 'external_data'; externalDataError = ''; view = 'detail'; }}
+            >
+              <div class="grid-card-icon-box">
+                <Download size={20} />
+              </div>
+              <div class="grid-card-info">
+                <span class="grid-card-title">导入数据</span>
+                <span class="grid-card-sub">导入CSV或JSON</span>
+              </div>
+            </button>
           </div>
         </div>
 
-        <button
-          type="button"
-          on:click={onClose}
-          class="datatool-close-btn"
-          title={isWorkspaceView ? "返回 AI 助手" : "关闭"}
-          aria-label={isWorkspaceView ? "返回 AI 助手" : "关闭"}
-        >
-          <X size={16} />
-        </button>
-      </div>
+      {:else}
+        <!-- 详情视图：头部返回行 + 当前工具名 -->
+        <div class="datatool-header datatool-detail-header">
+          <div class="header-info detail-nav-row">
+            <button
+              type="button"
+              class="datatool-back-btn"
+              on:click={() => (view = 'grid')}
+              title="返回数据工具列表"
+            >
+              <ArrowLeft size={14} />
+              <span>数据工具</span>
+            </button>
+            <span class="detail-nav-sep">/</span>
+            <span class="detail-nav-current">
+              {activeTab === 'dedup' ? '去重' : activeTab === 'reconcile' ? '对账' : activeTab === 'consolidate' ? '汇总' : activeTab === 'chart' ? '图表' : '导入数据'}
+            </span>
+          </div>
 
-      <!-- 窄屏：工具下拉选择器 (<=380px 优先展示，不强塞横向 Tab) -->
-      <div class="datatool-selector-mobile">
-        <label for="datatool-mobile-select" class="selector-label">选择工具：</label>
-        <select
-          id="datatool-mobile-select"
-          bind:value={activeTab}
-          class="selector-select"
-          on:change={() => {
-            errorMessage = '';
-            reconcileError = '';
-            consolidationError = '';
-            chartError = '';
-            externalDataError = '';
-          }}
-        >
-          <option value="dedup">按键去重 · 标记或导出唯一行</option>
-          <option value="reconcile">两表对账 · 全量跨表差异比对</option>
-          <option value="consolidate">多文件汇总 · 结构对齐合并</option>
-          <option value="chart">快捷图表 · 免公式可视化绘图</option>
-          <option value="external_data">外部数据 · 安全导入预览</option>
-        </select>
-      </div>
-
-      <!-- 宽屏：分段 Tab 栏 (>380px 展示) -->
-      <div class="datatool-tabs-wrapper">
-        <div class="datatool-tabs-bar" role="tablist" aria-label="数据工具导航">
           <button
             type="button"
-            role="tab"
-            aria-selected={activeTab === 'dedup'}
-            on:click={() => { activeTab = 'dedup'; errorMessage = ''; }}
-            class={`datatool-tab-btn ${activeTab === 'dedup' ? 'active' : ''}`}
+            on:click={onClose}
+            class="datatool-close-btn"
+            title={isWorkspaceView ? "返回 AI 助手" : "关闭"}
+            aria-label={isWorkspaceView ? "返回 AI 助手" : "关闭"}
           >
-            <Filter size={13} />
-            <span>按键去重</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'reconcile'}
-            on:click={() => { activeTab = 'reconcile'; reconcileError = ''; }}
-            class={`datatool-tab-btn ${activeTab === 'reconcile' ? 'active' : ''}`}
-          >
-            <GitCompare size={13} />
-            <span>两表对账</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'consolidate'}
-            on:click={() => { activeTab = 'consolidate'; consolidationError = ''; }}
-            class={`datatool-tab-btn ${activeTab === 'consolidate' ? 'active' : ''}`}
-          >
-            <Layers size={13} />
-            <span>多文件汇总</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'chart'}
-            on:click={() => { activeTab = 'chart'; chartError = ''; }}
-            class={`datatool-tab-btn ${activeTab === 'chart' ? 'active' : ''}`}
-          >
-            <BarChart2 size={13} />
-            <span>快捷图表</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'external_data'}
-            on:click={() => { activeTab = 'external_data'; externalDataError = ''; }}
-            class={`datatool-tab-btn ${activeTab === 'external_data' ? 'active' : ''}`}
-          >
-            <Download size={13} />
-            <span>外部数据</span>
+            <X size={16} />
           </button>
         </div>
-      </div>
 
-      <!-- 内容区 -->
-      <div class="datatool-content-body">
+        <!-- 内容区 -->
+        <div class="datatool-content-body">
         
         <!-- ====================== TAB 1: 按键去重 ====================== -->
         {#if activeTab === 'dedup'}
@@ -1031,12 +1037,12 @@
             </div>
 
             <!-- 操作按钮 -->
-            <div class="pt-2 flex justify-end">
+            <div class="pt-2">
               <button
                 type="button"
                 on:click={handleRunAnalysis}
                 disabled={isAnalyzing}
-                class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-md text-xs font-semibold transition-colors flex items-center gap-1.5 shadow-sm"
+                class="w-full h-[34px] bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-md text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 shadow-sm"
               >
                 {#if isAnalyzing}
                   <Clock size={14} class="animate-spin" />
@@ -1316,12 +1322,12 @@
               </div>
             {/if}
 
-            <div class="pt-2 flex justify-end">
+            <div class="pt-2">
               <button
                 type="button"
                 on:click={handleRunReconcileAnalysis}
                 disabled={isAnalyzingReconcile}
-                class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-md text-xs font-semibold transition-colors flex items-center gap-1.5 shadow-sm"
+                class="w-full h-[34px] bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-md text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 shadow-sm"
               >
                 {#if isAnalyzingReconcile}
                   <Clock size={14} class="animate-spin" />
@@ -1615,7 +1621,7 @@
                   type="button"
                   on:click={handleRunConsolidationAnalysis}
                   disabled={isAnalyzingConsolidation}
-                  class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white rounded-md text-xs font-semibold transition-colors flex items-center gap-1.5 shadow-sm"
+                  class="w-full h-[34px] bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white rounded-md text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 shadow-sm"
                 >
                   {#if isAnalyzingConsolidation}
                     <Clock size={14} class="animate-spin" />
@@ -2036,12 +2042,12 @@
             </div>
 
             <!-- 执行按钮 -->
-            <div class="pt-2 flex items-center justify-end">
+            <div class="pt-2">
               <button
                 type="button"
                 on:click={handleExecuteQuickChart}
                 disabled={isExecutingChart}
-                class="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white rounded-md text-xs font-semibold transition-colors flex items-center gap-1.5 shadow-sm"
+                class="w-full h-[34px] bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white rounded-md text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 shadow-sm"
               >
                 {#if isExecutingChart}
                   <Clock size={14} class="animate-spin" />
@@ -2310,12 +2316,12 @@
             </div>
 
             <!-- 只读拉取并预览按钮 -->
-            <div class="pt-2 flex justify-end">
+            <div class="pt-2">
               <button
                 type="button"
                 on:click={handlePreviewExternalData}
                 disabled={isPreviewingExt}
-                class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-md text-xs font-semibold transition-colors flex items-center gap-1.5 shadow-sm"
+                class="w-full h-[34px] bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-md text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 shadow-sm"
               >
                 {#if isPreviewingExt}
                   <Clock size={14} class="animate-spin" />
@@ -2503,7 +2509,8 @@
           {/if}
         {/if}
 
-      </div>
+        </div>
+      {/if}
     </div>
   </div>
 {/if}
@@ -2843,118 +2850,118 @@
     color: var(--office-text);
   }
 
-  /* 窄屏工具下拉选择器 */
-  .datatool-selector-mobile {
-    display: none;
-    padding: 6px 10px;
+  /* 网格工具卡片选择视图 */
+  .datatool-grid-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+    background: var(--office-bg);
+  }
+
+  .datatool-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+
+  .datatool-grid-card {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 12px;
     background: #ffffff;
-    border-bottom: 1px solid var(--office-border);
-    align-items: center;
+    border: 1px solid var(--office-border);
+    border-radius: var(--office-radius-sm);
+    cursor: pointer;
+    text-align: left;
+    transition: all 0.15s ease;
     gap: 8px;
+    width: 100%;
     box-sizing: border-box;
+  }
+
+  .datatool-grid-card:hover {
+    border-color: var(--excel-green);
+    background: var(--office-hover);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+  }
+
+  .grid-card-icon-box {
+    width: 32px;
+    height: 32px;
+    border-radius: var(--office-radius-xs);
+    background: var(--excel-light);
+    color: var(--excel-green);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .grid-card-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
     width: 100%;
   }
 
-  .selector-label {
-    font-size: var(--font-size-xs);
+  .grid-card-title {
+    font-size: var(--font-size-base, 13px);
     font-weight: 600;
+    color: var(--office-text);
+  }
+
+  .grid-card-sub {
+    font-size: 11px;
     color: var(--office-text-secondary);
     white-space: nowrap;
-    flex-shrink: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
-  .selector-select {
-    flex: 1 1 0%;
-    min-width: 0;
-    height: 28px;
-    font-size: var(--font-size-xs);
-    border: 1px solid var(--office-border);
-    border-radius: var(--office-radius-xs);
-    background: #ffffff;
-    color: var(--office-text);
-    padding: 0 6px;
-    outline: none;
-    cursor: pointer;
-  }
-
-  .selector-select:focus {
-    border-color: var(--excel-green);
-  }
-
-  @container (max-width: 380px) {
-    .datatool-selector-mobile {
-      display: flex !important;
-    }
-    .datatool-tabs-wrapper {
-      display: none !important;
-    }
-  }
-
-  @media (max-width: 380px) {
-    .datatool-selector-mobile {
-      display: flex;
-    }
-    .datatool-tabs-wrapper {
-      display: none;
-    }
-  }
-
-  /* Tab 栏 */
-  .datatool-tabs-wrapper {
-    position: relative;
-    background: #ffffff;
-    border-bottom: 1px solid var(--office-border);
-  }
-
-  .datatool-tabs-bar {
+  /* 返回导航行 */
+  .detail-nav-row {
     display: flex;
     align-items: center;
-    background: #ffffff;
-    padding: 0 6px;
-    overflow-x: auto;
-    flex-shrink: 0;
-    gap: 2px;
+    gap: 6px;
+    min-width: 0;
   }
 
-  /* 显式保留纤细滚动条，保证在 320px 窄宽下有清晰滑动感知 */
-  .datatool-tabs-bar::-webkit-scrollbar {
-    height: 3px;
-  }
-
-  .datatool-tabs-bar::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .datatool-tabs-bar::-webkit-scrollbar-thumb {
-    background: rgba(0, 0, 0, 0.18);
-    border-radius: 2px;
-  }
-
-  .datatool-tab-btn {
+  .datatool-back-btn {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    padding: 8px 12px;
-    font-size: var(--font-size-sm);
-    color: var(--office-muted);
-    border: none;
-    border-bottom: 2px solid transparent;
-    background: transparent;
-    cursor: pointer;
+    gap: 4px;
+    padding: 3px 6px;
+    border: 1px solid var(--office-border-subtle);
+    border-radius: var(--office-radius-xs);
+    background: #ffffff;
+    color: var(--office-text-secondary);
+    font-size: var(--font-size-xs);
     font-weight: 500;
-    white-space: nowrap;
+    cursor: pointer;
     transition: all 0.15s ease;
+    flex-shrink: 0;
   }
 
-  .datatool-tab-btn:hover:not(.active) {
-    color: var(--office-text);
+  .datatool-back-btn:hover {
     background: var(--office-hover);
+    color: var(--office-text);
+    border-color: var(--office-border);
   }
 
-  .datatool-tab-btn.active {
-    color: var(--excel-green);
-    border-bottom-color: var(--excel-green);
+  .detail-nav-sep {
+    color: var(--office-dim);
+    font-size: var(--font-size-xs);
+  }
+
+  .detail-nav-current {
+    font-size: var(--font-size-base);
     font-weight: 600;
+    color: var(--office-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   /* 内容主体 */
@@ -3011,13 +3018,6 @@
   .datatool-content-body input[type="text"],
   .datatool-content-body input[type="number"] {
     min-width: 0;
-  }
-
-  @media (max-width: 360px) {
-    .datatool-content-body {
-      padding: 8px;
-      gap: 8px;
-    }
   }
 </style>
 

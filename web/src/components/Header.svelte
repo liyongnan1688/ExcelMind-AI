@@ -100,7 +100,7 @@
   }
 
   .header-top-bar {
-    height: 38px;
+    height: 34px;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -228,7 +228,7 @@
 
   /* 第二行：分段标签 */
   .workspace-nav {
-    padding: 0 8px 6px;
+    padding: 0 8px 4px;
     box-sizing: border-box;
     width: 100%;
   }
@@ -251,7 +251,7 @@
     align-items: center;
     justify-content: center;
     gap: 3px;
-    padding: 5px 2px;
+    padding: 3px 2px;
     font-size: var(--font-size-xs);
     font-weight: 500;
     color: var(--office-muted);
