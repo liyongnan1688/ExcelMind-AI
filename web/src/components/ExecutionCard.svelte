@@ -369,7 +369,7 @@
         <span class="summary-text font-unconfirmed" title={execution.summary || '待确认高危操作，尚未执行'}>
           待确认 · 尚未执行
         </span>
-        <span class="badge badge-amber">待确认</span>
+        <span class="badge badge-amber">高危</span>
       {:else if execution?.error}
         <XCircle size={16} color="#C42B1C" />
         <span class="summary-text font-error" title={execution.summary}>

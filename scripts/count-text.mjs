@@ -105,7 +105,11 @@ console.log(
   `合计汇总 (${rows.length} 个组件)                       | ${String(totalStaticText).padStart(8)} | ${String(totalAttributes).padStart(8)} | ${String(grandTotal).padStart(8)}\n`
 );
 
-console.log('【口径验证结论】:');
-console.log(`- 验收基准（静态纯文本节点 + placeholder/title/label 属性）实测值: ${grandTotal} 汉字`);
+console.log('【口径说明与降幅核算】:');
+console.log(`- 本脚本实测总计（静态纯文本 + 交互属性）: ${grandTotal} 汉字`);
 console.log(`  (纯文本节点: ${totalStaticText} 字，属性节点: ${totalAttributes} 字)`);
-console.log('- 该结果与《UI施工验收报告v2》审查者实测 6287 完全一致、100% 可复现！\n');
+const narrowDiff = grandTotal - 6287;
+console.log(`- 与静态收窄口径（6287）相差 ${narrowDiff} 字，差异主要来自插值节点内字面量及特定属性的收敛范围。`);
+const baseline = 8586;
+const reduction = (((baseline - grandTotal) / baseline) * 100).toFixed(1);
+console.log(`- 基线（commit c1c18d1）为 ${baseline} 字，当前为 ${grandTotal} 字，降幅为 -${reduction}%（尚未达到 4500 字目标）。\n`);
