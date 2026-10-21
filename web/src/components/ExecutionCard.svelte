@@ -247,11 +247,20 @@
   let isExecutingL2 = false;
   async function handleConfirmL2() {
     if (!execution?.confirmToken) return;
+    if (!execution?.requestId) {
+      execution = {
+        ...execution,
+        needsConfirm: false,
+        error: '执行已阻止：缺少确认请求标识 (requestId)，无法安全执行高危操作',
+        summary: '缺少确认请求标识 (requestId)，无法验证确认权限'
+      };
+      return;
+    }
     isExecutingL2 = true;
     try {
       const res = await bridge.send<any>('execute_vba', {
         code: displayCode,
-        requestId: execution.requestId || messageId,
+        requestId: execution.requestId,
         confirmToken: execution.confirmToken,
         targetWorkbookName: execution.targetWorkbookName || '',
         targetWorkbookFullName: execution.targetWorkbookFullName || '',
@@ -260,7 +269,7 @@
         execution = {
           ...execution,
           ...res.data,
-          needsConfirm: false,
+          needsConfirm: res.data.needsConfirm === true,
         };
       } else {
         execution = {
@@ -312,12 +321,7 @@
         <span class="l2-risk-title">{execution.riskTargetDetail || '不可逆高危操作确认'}</span>
       </div>
       <div class="l2-risk-body">
-        <p class="l2-risk-desc">该操作包含不可逆或越界指令，执行后无法自动撤销：</p>
-        <ul class="l2-risk-list">
-          {#each (execution.riskReasons || []) as reason}
-            <li>• {reason}</li>
-          {/each}
-        </ul>
+        <p class="l2-risk-desc">该操作包含不可逆或越界指令，执行后无法自动撤销。</p>
       </div>
       <div class="l2-risk-footer">
         <button class="btn btn-sm btn-subtle" type="button" on:click|stopPropagation={handleCancelL2}>
@@ -328,7 +332,15 @@
             <Loader2 size={12} class="spinner" />
             <span>正在执行...</span>
           {:else}
-            <span>{execution.riskTargetDetail?.includes('删除') ? '仍要删除' : '仍要执行'}</span>
+            <span>
+              {execution?.riskCode === 'delete_sheet' || execution?.riskCode === 'delete_file'
+                ? '仍要删除'
+                : execution?.riskCode === 'overwrite_file'
+                ? '仍要覆盖'
+                : execution?.riskCode === 'modify_vbproject'
+                ? '仍要修改'
+                : '仍要执行'}
+            </span>
           {/if}
         </button>
       </div>
@@ -352,6 +364,12 @@
       {#if isExecuting}
         <Loader2 size={16} class="spinner" color="#0078D4" />
         <span class="summary-text font-running">正在生成并执行 Excel VBA...</span>
+      {:else if execution?.needsConfirm}
+        <AlertCircle size={16} color="#C42B1C" />
+        <span class="summary-text font-unconfirmed" title={execution.summary || '待确认高危操作，尚未执行'}>
+          待确认 · 尚未执行
+        </span>
+        <span class="badge badge-amber">待确认</span>
       {:else if execution?.error}
         <XCircle size={16} color="#C42B1C" />
         <span class="summary-text font-error" title={execution.summary}>
@@ -731,7 +749,7 @@
                     <strong> {rule.name}:</strong> {rule.description}
                     {#if rule.isHostCapabilityLimitation}
                       <div class="constraint-warning">
-                        ⚠️ {rule.limitationReason}
+                        {rule.limitationReason}
                       </div>
                     {/if}
                   </div>
@@ -846,7 +864,7 @@
           {#if execution?.isPartiallyModified}
             <div class="log-row flex-col partial-warning-box">
               <div class="partial-warning-header">
-                <span class="partial-warning-title">⚠️ 宏运行异常中断：工作簿已发生部分修改！</span>
+                <span class="partial-warning-title">宏运行异常中断：工作簿已发生部分修改！</span>
                 {#if selectedSnapshotId || execution?.snapshot?.id}
                   <button
                     class="btn btn-sm btn-danger"
@@ -912,7 +930,7 @@
             <span class="log-label">跨文件检查:</span>
             {#if execution?.readback?.otherWorkbooksAffected}
               <span class="log-val font-error">
-                ⚠️ 检测到其他打开的工作簿受到影响：{execution.readback.affectedWorkbooksWarning}
+                检测到其他打开的工作簿受到影响：{execution.readback.affectedWorkbooksWarning}
               </span>
             {:else}
               <span class="log-val status-green">未影响其他已打开工作簿</span>
@@ -1040,7 +1058,7 @@
           <p class="rcp-desc">
             确定将工作簿恢复到该宏执行前的快照吗？
             <br />
-            ⚠️ <strong>注意</strong>：宏执行后产生的所有新增手工修改、单元格编辑都将被覆盖！
+            <strong>注意</strong>：宏执行后产生的所有新增手工修改、单元格编辑都将被覆盖！
             <br />
             <span class="dim-text">（系统会在恢复前为当前状态保留一份紧急安全救援备份）</span>
           </p>
@@ -2418,14 +2436,7 @@
   }
 
   .l2-risk-desc {
-    margin: 0 0 4px 0;
-  }
-
-  .l2-risk-list {
     margin: 0;
-    padding-left: 0;
-    list-style: none;
-    color: var(--office-danger, #C42B1C);
   }
 
   .l2-risk-footer {

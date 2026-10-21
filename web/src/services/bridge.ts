@@ -363,8 +363,16 @@ export interface WorkbookReadback {
 }
 
 export interface VbaExecutionData {
+  requestId?: string;
   summary: string;
   error?: string;
+  canUndo?: boolean;
+  riskLevel?: string;
+  riskCode?: string;
+  needsConfirm?: boolean;
+  riskReasons?: string[];
+  riskTargetDetail?: string;
+  confirmToken?: string;
   metaSaveError?: string;
   elapsedMs: number;
   snapshot?: SnapshotItem;

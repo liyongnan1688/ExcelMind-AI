@@ -1,18 +1,18 @@
 <script lang="ts">
-  import { dialogStore, closeConfirm } from '../services/dialog';
+  import { dialogStore, closeConfirm, type DialogState } from '../services/dialog';
   import { AlertTriangle } from 'lucide-svelte';
 
-  let state = $state({
+  let state: DialogState = {
     isOpen: false,
     title: '',
     message: '',
     confirmText: '确定',
     cancelText: '取消',
     danger: false,
-  });
+  };
 
-  let dialogElement: HTMLDivElement | null = $state(null);
-  let confirmButtonElement: HTMLButtonElement | null = $state(null);
+  let dialogElement: HTMLDivElement | null = null;
+  let confirmButtonElement: HTMLButtonElement | null = null;
 
   dialogStore.subscribe((val) => {
     state = val;

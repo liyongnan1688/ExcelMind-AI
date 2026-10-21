@@ -4,14 +4,12 @@
     RefreshCw,
     Bot,
     FolderGit2,
-    Settings,
   } from 'lucide-svelte';
   import type { WorkbookInfo } from '../services/bridge';
 
   export let workbook: WorkbookInfo | null = null;
   export let activeWorkspace: 'assistant' | 'scripts' = 'assistant';
   export let onSelectWorkspace: (ws: 'assistant' | 'scripts') => void;
-  export let onOpenSettings: () => void;
   export let onRefresh: () => void;
 
   function handleSelect(ws: 'assistant' | 'scripts') {
@@ -53,15 +51,6 @@
         aria-label="刷新工作簿状态"
       >
         <RefreshCw size={13} />
-      </button>
-
-      <button
-        class="header-btn"
-        title="模型服务与参数设置"
-        on:click={onOpenSettings}
-        aria-label="设置"
-      >
-        <Settings size={14} />
       </button>
     </div>
   </div>

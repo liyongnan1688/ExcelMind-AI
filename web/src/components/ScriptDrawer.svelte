@@ -399,17 +399,17 @@
 
     // 格式合法性严格门禁
     if (ext === '.vbs') {
-      importErrorMessage = '❌ .vbs 文件为 Windows Script Host 脚本，不属于 Excel VBA 宏，不支持直接导入。';
+      importErrorMessage = '.vbs 文件为 Windows Script Host 脚本，不属于 Excel VBA 宏，不支持直接导入。';
       return;
     }
 
     if (ext === '.cls' || ext === '.frm' || ext === '.xlsm') {
-      importErrorMessage = `⚠️ 当前第一版仅支持标准 VBA 模块（.bas, .vba, .txt），暂不支持类模块(${ext})或整本工程导入。`;
+      importErrorMessage = `当前第一版仅支持标准 VBA 模块（.bas, .vba, .txt），暂不支持类模块(${ext})或整本工程导入。`;
       return;
     }
 
     if (ext !== '.bas' && ext !== '.vba' && ext !== '.txt') {
-      importErrorMessage = '⚠️ 仅支持导入 .bas、.vba、.txt 格式的 VBA 宏源码文件。';
+      importErrorMessage = '仅支持导入 .bas、.vba、.txt 格式的 VBA 宏源码文件。';
       return;
     }
 
@@ -1425,7 +1425,7 @@
                                 <div class="history-main">
                                   <div class="history-header">
                                     <span class="history-status-badge status-{rh.status}">
-                                      {rh.status === 'success' ? '✔ 成功' : (rh.status === 'blocked' ? '⊘ 阻断' : '✖ 失败')}
+                                      {rh.status === 'success' ? '成功' : (rh.status === 'blocked' ? '阻断' : '失败')}
                                     </span>
                                     <span class="history-phase">阶段: {rh.phase || '执行'}</span>
                                     {#if rh.status !== 'blocked' && rh.elapsedMs !== undefined && rh.elapsedMs >= 0}
@@ -1448,16 +1448,16 @@
                                     {#if rh.snapshotId}
                                       {#if rh.snapshotExists}
                                         <span class="snapshot-badge snapshot-valid" title="快照文件存在于备份目录">
-                                          🛡️ 快照可用 ({rh.snapshotId})
+                                          快照可用 ({rh.snapshotId})
                                         </span>
                                       {:else}
                                         <span class="snapshot-badge snapshot-missing" title="快照记录存在但文件已从备份目录物理移除">
-                                          ⚠️ 快照文件已丢失 ({rh.snapshotId})
+                                          快照文件已丢失 ({rh.snapshotId})
                                         </span>
                                       {/if}
                                     {:else}
                                       <span class="snapshot-badge snapshot-none" title={rh.snapshotReason || '未备份'}>
-                                        ⚪ 无快照: {rh.snapshotReason || '未创建备份'}
+                                        无快照: {rh.snapshotReason || '未创建备份'}
                                       </span>
                                     {/if}
                                   </div>
@@ -2414,7 +2414,7 @@
         {#if exportPackageSuccessResult}
           <div class="alert-box alert-success">
             <Check size={16} color="#107C41" />
-            <span>✔ 宏包导出成功！已将 {exportPackageSuccessResult.exportedCount} 个宏打包至 <code>{exportPackageSuccessResult.outputPath || exportPackageSuccessResult.packageFilePath}</code> ({exportPackageSuccessResult.packageSize || exportPackageSuccessResult.totalBytes} 字节)。</span>
+            <span>宏包导出成功！已将 {exportPackageSuccessResult.exportedCount} 个宏打包至 <code>{exportPackageSuccessResult.outputPath || exportPackageSuccessResult.packageFilePath}</code> ({exportPackageSuccessResult.packageSize || exportPackageSuccessResult.totalBytes} 字节)。</span>
           </div>
         {/if}
       </div>

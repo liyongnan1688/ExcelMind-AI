@@ -1096,7 +1096,7 @@
               <!-- 数据校验 -->
               <div class="text-[11px] text-gray-600 bg-white/80 p-2 rounded border border-gray-200/60 font-mono text-center">
                 数据校验：总计 {analysisResult.dataRowCount} = 唯一 {analysisResult.uniqueCount} + 重复 {analysisResult.duplicateCount} + 排除 {analysisResult.excludedCount}
-                <span class="text-emerald-600 font-bold ml-1">✓ 一致</span>
+                <span class="text-emerald-600 font-bold ml-1">一致</span>
               </div>
 
               {#if analysisResult.excludedCount > 0}
@@ -1401,11 +1401,11 @@
               <div class="space-y-1 text-[11px] text-gray-600 bg-white/90 p-2.5 rounded border border-indigo-100 font-mono">
                 <div>
                   左端: {reconcileAnalysis.leftDataRowCount} = {reconcileAnalysis.matchedBothSameCount} (一致) + {reconcileAnalysis.matchedBothDiffCount} (差异) + {reconcileAnalysis.leftOnlyCount} (仅左) + {reconcileAnalysis.leftDuplicateKeyCount} (重复) + {reconcileAnalysis.leftInvalidKeyCount} (异常)
-                  <span class="text-emerald-600 font-bold ml-1">✓ 严密自洽</span>
+                  <span class="text-emerald-600 font-bold ml-1">自洽</span>
                 </div>
                 <div>
                   右端: {reconcileAnalysis.rightDataRowCount} = {reconcileAnalysis.matchedBothSameCount} (一致) + {reconcileAnalysis.matchedBothDiffCount} (差异) + {reconcileAnalysis.rightOnlyCount} (仅右) + {reconcileAnalysis.rightDuplicateKeyCount} (重复) + {reconcileAnalysis.rightInvalidKeyCount} (异常)
-                  <span class="text-emerald-600 font-bold ml-1">✓ 严密自洽</span>
+                  <span class="text-emerald-600 font-bold ml-1">自洽</span>
                 </div>
               </div>
 

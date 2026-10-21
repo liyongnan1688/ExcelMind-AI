@@ -19,6 +19,7 @@ namespace LeeExcel
 
     public class ExecutionDataDto
     {
+        public string requestId { get; set; }
         public string summary { get; set; }
         public string error { get; set; }
         public double elapsedMs { get; set; }
@@ -59,6 +60,7 @@ namespace LeeExcel
         public string metaSaveError { get; set; }
         public bool canUndo { get; set; }
         public string riskLevel { get; set; }
+        public string riskCode { get; set; }
         public bool needsConfirm { get; set; }
         public List<string> riskReasons { get; set; }
         public string riskTargetDetail { get; set; }
@@ -633,7 +635,7 @@ namespace LeeExcel
             // P5: 宿主风险分级扫描 (L0 / L1 / L2)
             string targetFullNameForRisk = !string.IsNullOrEmpty(targetFullName) ? targetFullName : targetName;
             var riskAnalysis = VbaRiskScanner.Analyze(code, targetFullNameForRisk);
-            string reqRequestId = req.ContainsKey("requestId") ? req["requestId"] : Guid.NewGuid().ToString("N");
+            string reqRequestId = req.ContainsKey("requestId") && !string.IsNullOrEmpty(req["requestId"]) ? req["requestId"] : Guid.NewGuid().ToString("N");
             string providedToken = req.ContainsKey("confirmToken") ? req["confirmToken"] : null;
 
             // 若命中 L2 且未提供有效确认 Token，则绝对不执行、不改工作簿、不建快照，返回 L2 确认卡数据
@@ -652,14 +654,18 @@ namespace LeeExcel
                         message = "该操作具有不可逆风险，需用户确认",
                         data = new ExecutionDataDto
                         {
+                            requestId = reqRequestId,
                             needsConfirm = true,
                             riskLevel = "L2",
+                            riskCode = riskAnalysis.RiskCode,
                             riskReasons = riskAnalysis.Reasons,
                             riskTargetDetail = riskAnalysis.TargetDetail,
                             confirmToken = newToken,
                             canUndo = false,
                             targetWorkbookName = targetName,
-                            targetWorkbookFullName = targetFullName
+                            targetWorkbookFullName = targetFullName,
+                            summary = "该操作具有不可逆风险，需用户确认后方可执行",
+                            readback = null
                         }
                     };
                 }
@@ -760,7 +766,7 @@ namespace LeeExcel
             string finalMsg = result.summary;
             if (!string.IsNullOrEmpty(metaSaveWarning))
             {
-                finalMsg = (finalMsg != null ? finalMsg + "\n" : "") + "⚠️ 运行记录保存失败: " + metaSaveWarning;
+                finalMsg = (finalMsg != null ? finalMsg + "\n" : "") + "注意：运行记录保存失败: " + metaSaveWarning;
             }
 
             return new BridgeResponse
@@ -772,6 +778,7 @@ namespace LeeExcel
                 error = result.error,
                 data = new ExecutionDataDto
                 {
+                    requestId = reqRequestId,
                     summary = finalMsg,
                     error = result.error,
                     elapsedMs = result.elapsedMs,
@@ -779,6 +786,7 @@ namespace LeeExcel
                     snapshot = snap,
                     canUndo = (snap != null && !string.IsNullOrEmpty(snap.id)),
                     riskLevel = riskAnalysis.RiskLevel.ToString(),
+                    riskCode = riskAnalysis.RiskCode,
                     riskReasons = riskAnalysis.Reasons,
                     riskTargetDetail = riskAnalysis.TargetDetail,
                     needsConfirm = false,

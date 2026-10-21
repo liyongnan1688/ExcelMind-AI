@@ -110,8 +110,8 @@ for (const filePath of targetFiles) {
       }
     }
 
-    // 1. 裸颜色检查 (仅在样式区生效，排除 token 定义区与注释)
-    if (inStyleBlock && !inTokenDefSection) {
+    // 1. 裸颜色检查 (仅在样式区生效，排除 token 定义文件 office-fluent.css 与注释)
+    if (inStyleBlock && !inTokenDefSection && !isOfficeFluentCss) {
       // 简单忽略纯注释行
       const codeOnly = trimmed.startsWith('/*') && trimmed.endsWith('*/') ? '' : trimmed;
       if (codeOnly) {

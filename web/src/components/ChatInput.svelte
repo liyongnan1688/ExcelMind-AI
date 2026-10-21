@@ -294,7 +294,6 @@
   {#if isUnsavedWorkbook}
     <div class="unsaved-warning-bar" title="当前活动工作簿尚未保存到磁盘">
       <div class="unsaved-msg-wrapper">
-        <span class="unsaved-dot">💾</span>
         <span class="unsaved-text">工作簿【{workbook?.name || '未保存'}】未存盘，建议自动化操作前先按 Ctrl+S 存盘。</span>
       </div>
     </div>
@@ -304,10 +303,9 @@
   {#if selectionError}
     <div class="selection-error-bar">
       <div class="error-msg-wrapper">
-        <span class="error-dot">⚠️</span>
         <span class="error-text">{selectionError}</span>
       </div>
-      <button class="icon-close-btn" on:click={() => (selectionError = '')} title="关闭提示">✕</button>
+      <button class="icon-close-btn" on:click={() => (selectionError = '')} title="关闭提示">&times;</button>
     </div>
   {/if}
 
@@ -316,7 +314,7 @@
     <div class="macro-ref-card">
       <div class="card-header">
         <div class="card-title-group">
-          <span class="badge-tag macro-badge">🏷️ 已引用前序宏</span>
+          <span class="badge-tag macro-badge">已引用前序宏</span>
           <span class="macro-title" title="{referencedMacro.procedureName || '未命名宏'}">
             <strong>{referencedMacro.procedureName || 'Sub Main'}</strong>
           </span>
@@ -333,7 +331,7 @@
             {showMacroCodeModal ? '收起代码 ▲' : '查看代码 ▼'}
           </button>
           <button class="text-action-btn remove-btn" type="button" on:click={() => (referencedMacro = null)} title="取消引用此宏">
-            ✕
+            &times;
           </button>
         </div>
       </div>
@@ -350,7 +348,7 @@
     <div class="selection-card">
       <div class="card-header">
         <div class="card-title-group">
-          <span class="badge-tag">📎 选区快照</span>
+          <span class="badge-tag">选区快照</span>
           <span class="target-wb-sheet" title="{selectionContext.workbookName} - {selectionContext.sheetName}!{selectionContext.address}">
             <strong>{selectionContext.sheetName}</strong>!{selectionContext.address}
           </span>
@@ -372,7 +370,7 @@
               disabled={isAuditingFormula || disabled}
               title="向上追溯单元格公式输入源，向下分析从属影响与计算错误"
             >
-              <span>{isAuditingFormula ? '体检中...' : '🔍 公式血缘'}</span>
+              <span>{isAuditingFormula ? '体检中...' : '公式血缘'}</span>
             </button>
           {/if}
           <button class="text-action-btn" type="button" on:click={() => (showDetails = !showDetails)}>
@@ -386,20 +384,20 @@
             disabled={isRefreshingArea || disabled}
             title="读取并刷新原区域（{selectionContext.sheetName}!{selectionContext.address}）最新数据，不改变当前光标"
           >
-            <span class="refresh-icon {isRefreshingArea ? 'spin' : ''}">🔄</span>
+            <span class="refresh-icon {isRefreshingArea ? 'spin' : ''}"></span>
             <span>{isRefreshingArea ? '读取中...' : '刷新原区域'}</span>
           </button>
           <button class="text-action-btn remove-btn" type="button" on:click={removeSelection} disabled={isRefreshingArea} title="移除本次附加">
-            ✕
+            &times;
           </button>
         </div>
       </div>
 
       <!-- 快照提示条与错误状态 -->
       <div class="snapshot-status-bar">
-        <span class="snapshot-tip-text">ℹ️ 采集时快照；修改原区域后请点击【刷新原区域】</span>
+        <span class="snapshot-tip-text">采集时快照；修改原区域后请点击【刷新原区域】</span>
         {#if refreshError}
-          <span class="refresh-err-text" title={refreshError}>⚠️ {refreshError} (旧数据仍保留)</span>
+          <span class="refresh-err-text" title={refreshError}>{refreshError} (旧数据仍保留)</span>
         {/if}
       </div>
 
@@ -578,7 +576,7 @@
           disabled={isRefreshingArea}
           title="移除选区"
         >
-          ✕
+          &times;
         </button>
       {/if}
     </div>
@@ -601,11 +599,10 @@
       <div class="formula-audit-dialog" role="dialog" aria-modal="true" aria-labelledby="audit-dialog-title">
         <div class="dialog-header">
           <div class="dialog-title-group">
-            <span class="audit-icon">🔍</span>
             <h3 id="audit-dialog-title">公式血缘穿透审计</h3>
             <span class="cell-tag">{auditModalData.sheetName}!{auditModalData.cellAddress}</span>
           </div>
-          <button class="icon-close-btn" type="button" on:click={() => (showAuditModal = false)} title="关闭">✕</button>
+          <button class="icon-close-btn" type="button" on:click={() => (showAuditModal = false)} title="关闭">&times;</button>
         </div>
 
         <div class="dialog-body">
@@ -619,11 +616,11 @@
               <span class="label">计算值：</span>
               <span class="val-text">{auditModalData.formattedText || auditModalData.evaluatedValue}</span>
               {#if auditModalData.hasError}
-                <span class="badge-err">⚠️ 错误: {auditModalData.errorType}</span>
+                <span class="badge-err">错误: {auditModalData.errorType}</span>
               {:else if auditModalData.isCircular}
-                <span class="badge-warn">🔄 循环引用风险</span>
+                <span class="badge-warn">循环引用风险</span>
               {:else}
-                <span class="badge-ok">✓ 结果正常</span>
+                <span class="badge-ok">结果正常</span>
               {/if}
             </div>
           </div>
@@ -667,13 +664,13 @@
           </div>
 
           <div class="audit-summary-note">
-            ℹ️ {auditModalData.auditSummary}
+            {auditModalData.auditSummary}
           </div>
         </div>
 
         <div class="dialog-footer">
           <button class="action-btn-primary" type="button" on:click={handleInsertExplanationPrompt}>
-            <span>🤖 让 AI 白话解读此公式</span>
+            <span>让 AI 白话解读此公式</span>
           </button>
           <button class="action-btn-secondary" type="button" on:click={() => (showAuditModal = false)}>
             关闭
