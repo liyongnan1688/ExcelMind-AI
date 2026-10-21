@@ -1,7 +1,7 @@
 # ExcelMind AI 当前系统状态与基线入口 (CURRENT_STATE.md)
 
 > **文档定位**：后续开发者与 AI 识别项目真实状态的唯一当前入口  
-> **更新时间**：2026-10-19  
+> **更新时间**：2026-10-21  
 > **维护原则**：事实驱动、基线清晰、边界分明；旧报告只证明当时测试，不作为当前假设。
 
 ---
@@ -11,10 +11,10 @@
 | 属性 | 状态 / 事实 | 核对来源与说明 |
 | :--- | :--- | :--- |
 | **所属仓库** | `liyongnan1688/ExcelMind-AI` | GitHub 远端权威仓库 |
-| **当前发布版本** | `v1.3.0` (Official Production Release) | 正式稳定发行版本 |
-| **前序候选版本** | `v1.3.0-rc1` (Pre-release Candidate 1) | 历史候选发布（Tag `v1.3.0-rc1`，Commit `b4402a9`） |
-| **Git Tag** | `v1.3.0` | 正式发行 Tag |
-| **本地构建资产 (Local Release ZIP)** | **SHA-256**:<br>`2dd5be642a3b78ab67001e6f0206f2a80e579bc8de50cacd898206f915eeeb3e` | **物理位置**：`release/ExcelMindAI-v1.3.0.zip`<br>由审计整改后最新代码打包生成（1.57 MB） |
+| **当前发布版本** | `v1.3.4` (Official Production Release) | 正式稳定发行版本 |
+| **前序发布版本** | `v1.3.3` (Release v1.3.3) | 前序稳定版本（Tag `v1.3.3`，Commit `c1c18d1`） |
+| **Git Tag** | `v1.3.4` | 正式发行 Tag |
+| **本地构建资产 (Local Release ZIP)** | **SHA-256**:<br>`00335d8ec5971b420962fab8e02e2111352c9a5e0e589eb7717f0192cc438df3` | **物理位置**：`release/ExcelMindAI-v1.3.4.zip`<br>由UI施工与安全加固后最新代码打包生成（1.58 MB） |
 
 ### 独立隔离解压冒烟与五大真机验收确证
 

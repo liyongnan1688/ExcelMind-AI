@@ -79,6 +79,7 @@ async function loadRealTsService(relPath, forceZeroDepFallback = false) {
     if (reqPath === './toolRegistry') return tsModuleCache[path.resolve(__dirname, './web/src/services/toolRegistry.ts')];
     if (reqPath === './conventions') return tsModuleCache[path.resolve(__dirname, './web/src/services/conventions.ts')];
     if (reqPath === './macroSaveEligibility') return tsModuleCache[path.resolve(__dirname, './web/src/services/macroSaveEligibility.ts')];
+    if (reqPath === './vbaRiskScanner') return tsModuleCache[path.resolve(__dirname, './web/src/services/vbaRiskScanner.ts')];
     if (reqPath === './mcpClient') return { mcpGateway: {} };
     return require(reqPath);
   };
@@ -89,7 +90,7 @@ async function loadRealTsService(relPath, forceZeroDepFallback = false) {
 }
 
 
-let realConventions, realCompaction, realToolRegistry, realDecisionEngine, realLlm, realMacroSaveEligibility;
+let realConventions, realCompaction, realToolRegistry, realDecisionEngine, realLlm, realMacroSaveEligibility, realVbaRiskScanner;
 
 
 /**
@@ -6716,6 +6717,158 @@ console.log('\n=== 20. TASK-PHASE1 Cache-Safe Prompt & Compaction Pipeline Suite
     '[Phase 3 对话即宏智能命名] 精准滤除 Main 与 LeeTaskEntry 包装器命名，提取出具有高可读性的实际业务过程名',
     extractProcedureNameForSave(sampleCode1, '财务报表格式化') === 'FormatFinancialReport' &&
       extractProcedureNameForSave(sampleCode2, '财务报表格式化') === '财务报表格式化'
+  );
+
+  // === 23. TASK-PHASE5 VBA Execution Risk Classification Suite ===
+  console.log('\n=== 23. TASK-PHASE5 VBA Execution Risk Classification Suite ===');
+  realVbaRiskScanner = await loadRealTsService('./web/src/services/vbaRiskScanner.ts');
+  const { classifyVbaRisk } = realVbaRiskScanner;
+
+  // Test 23.1: L0 只读查询判定
+  const vbaL0 = 'Sub ReadOnlyQuery()\n    MsgBox "当前单元格：" & Range("A1").Value\n    Debug.Print Application.ActiveSheet.Name\nEnd Sub';
+  const analysisL0 = classifyVbaRisk(vbaL0);
+  assert(
+    '[Phase 5 风险分级 L0 只读查询] 无任何写操作的代码精准判定为 L0，免建快照直接执行',
+    analysisL0.riskLevel === 'L0' && analysisL0.reasons.length > 0
+  );
+
+  // Test 23.2: L1 原地普通写操作判定
+  const vbaL1 = 'Sub FormatSheet()\n    Range("A1:D1").Interior.Color = RGB(200, 220, 255)\n    Range("A2").Value = 100\n    Range("B2").Formula = "=SUM(A1:A10)"\nEnd Sub';
+  const analysisL1 = classifyVbaRisk(vbaL1);
+  assert(
+    '[Phase 5 风险分级 L1 原地写入] 普通单元格改写与样式设置精准判定为 L1，支持自动快照与撤销',
+    analysisL1.riskLevel === 'L1' && analysisL1.reasons.length > 0
+  );
+
+  // Test 23.3: L2 不可逆高危操作判定 (删除工作表 / 外部COM组件 / 外部工作簿)
+  const vbaL2_Delete = 'Sub CleanTabs()\n    Application.DisplayAlerts = False\n    Worksheets("旧看板").Delete\n    Application.DisplayAlerts = True\nEnd Sub';
+  const vbaL2_FSO = 'Sub WriteExternalFile()\n    Dim fso As Object\n    Set fso = CreateObject("Scripting.FileSystemObject")\n    fso.DeleteFile "C:\\temp\\data.txt"\nEnd Sub';
+  const analysisL2_Delete = classifyVbaRisk(vbaL2_Delete);
+  const analysisL2_FSO = classifyVbaRisk(vbaL2_FSO);
+  assert(
+    '[Phase 5 风险分级 L2 不可逆高危阻断] 删除工作表与外部系统对象调用精准判定为 L2，提取具体目标并阻断静默执行',
+    analysisL2_Delete.riskLevel === 'L2' &&
+    analysisL2_Delete.targetDetail && analysisL2_Delete.targetDetail.includes('旧看板') &&
+    analysisL2_FSO.riskLevel === 'L2' &&
+    analysisL2_FSO.reasons.some(r => r.includes('FileSystemObject'))
+  );
+
+  // Test 23.4: 6 类高频写操作防漏判与 Fail-Safe 兜底断言 (P0-2 验收标准：绝不允许漏判为 L0)
+  const pattern1_DeleteRow = classifyVbaRisk('Sub T1()\n    Selection.EntireRow.Delete\nEnd Sub');
+  const pattern2_Sort = classifyVbaRisk('Sub T2()\n    Range("A1:C99").Sort Key1:=Range("A1")\nEnd Sub');
+  const pattern3_Copy = classifyVbaRisk('Sub T3()\n    Range("A1").Copy Range("B1")\nEnd Sub');
+  const pattern4_Paste = classifyVbaRisk('Sub T4()\n    ActiveSheet.Paste\nEnd Sub');
+  const pattern5_Name = classifyVbaRisk('Sub T5()\n    ws.Name = "汇总"\nEnd Sub');
+  const pattern6_Group = classifyVbaRisk('Sub T6()\n    Range("A1:A9").Group\nEnd Sub');
+  const pattern_Unknown_FailSafe = classifyVbaRisk('Sub T7()\n    CustomUnrecognizedMacroCommand 42\nEnd Sub');
+
+  assert(
+    '[Phase 5 风险防漏判 1] Selection.EntireRow.Delete 必须判定为写入(L1或L2)，严禁判定为L0',
+    pattern1_DeleteRow.riskLevel !== 'L0' && (pattern1_DeleteRow.riskLevel === 'L1' || pattern1_DeleteRow.riskLevel === 'L2')
+  );
+  assert(
+    '[Phase 5 风险防漏判 2] Range.Sort 必须判定为写入(L1或L2)，严禁判定为L0',
+    pattern2_Sort.riskLevel !== 'L0' && (pattern2_Sort.riskLevel === 'L1' || pattern2_Sort.riskLevel === 'L2')
+  );
+  assert(
+    '[Phase 5 风险防漏判 3] Range.Copy 必须判定为写入(L1或L2)，严禁判定为L0',
+    pattern3_Copy.riskLevel !== 'L0' && (pattern3_Copy.riskLevel === 'L1' || pattern3_Copy.riskLevel === 'L2')
+  );
+  assert(
+    '[Phase 5 风险防漏判 4] ActiveSheet.Paste 必须判定为写入(L1或L2)，严禁判定为L0',
+    pattern4_Paste.riskLevel !== 'L0' && (pattern4_Paste.riskLevel === 'L1' || pattern4_Paste.riskLevel === 'L2')
+  );
+  assert(
+    '[Phase 5 风险防漏判 5] ws.Name = "..." 必须判定为写入(L1或L2)，严禁判定为L0',
+    pattern5_Name.riskLevel !== 'L0' && (pattern5_Name.riskLevel === 'L1' || pattern5_Name.riskLevel === 'L2')
+  );
+  assert(
+    '[Phase 5 风险防漏判 6] Range.Group 必须判定为写入(L1或L2)，严禁判定为L0',
+    pattern6_Group.riskLevel !== 'L0' && (pattern6_Group.riskLevel === 'L1' || pattern6_Group.riskLevel === 'L2')
+  );
+  assert(
+    '[Phase 5 兜底安全性 Fail-Safe] 无法证明为纯读的未知语句必须兜底判定为 L1 并触发快照，严禁静默免快照放行',
+    pattern_Unknown_FailSafe.riskLevel === 'L1' && pattern_Unknown_FailSafe.reasons.some(r => r.includes('按可回滚写入处理并创建快照'))
+  );
+
+  // Test 23.5: C# 宿主真实生产实现契约核验断言 (P0-3 验收标准：核验 C# 源码真实规则与链路)
+  const csharpScannerCode = fs.readFileSync(path.resolve(__dirname, 'src/VbaRiskScanner.cs'), 'utf8');
+  const csharpBridgeCode = fs.readFileSync(path.resolve(__dirname, 'src/NativeBridge.cs'), 'utf8');
+
+  // 核验 C# 风险扫描器中 L2 高危关键词
+  const hasL2KeywordsInCsharp =
+    csharpScannerCode.includes('Worksheets|Sheets') &&
+    csharpScannerCode.includes('Workbooks') &&
+    csharpScannerCode.includes('FileSystemObject') &&
+    csharpScannerCode.includes('VBProject') &&
+    csharpScannerCode.includes('Kill|FileCopy');
+
+  // 核验 C# 风险扫描器中全部 16 类写模式
+  const hasWritePatternsInCsharp =
+    csharpScannerCode.includes('EntireRow|EntireColumn') &&
+    csharpScannerCode.includes('Sort|SortSpecial') &&
+    csharpScannerCode.includes('Copy|Cut') &&
+    csharpScannerCode.includes('Paste|PasteSpecial') &&
+    csharpScannerCode.includes('Name') &&
+    csharpScannerCode.includes('Group|Ungroup') &&
+    csharpScannerCode.includes('AutoFill|Replace');
+
+  // 核验 C# 风险扫描器中严格只读验证与 L1 兜底
+  const hasFailSafeInCsharp =
+    csharpScannerCode.includes('IsStrictlyReadOnly') &&
+    csharpScannerCode.includes('VbaRiskLevel.L1') &&
+    csharpScannerCode.includes('未识别到明确写操作，按可回滚写入处理并创建快照');
+
+  // 核验 C# NativeBridge 中 ExecutionDataDto.requestId 与二次确认令牌链路
+  const hasRequestIdContractInCsharp =
+    csharpBridgeCode.includes('public string requestId { get; set; }') &&
+    csharpBridgeCode.includes('ConfirmTokenStore.Register') &&
+    csharpBridgeCode.includes('ConfirmTokenStore.ValidateAndConsume') &&
+    csharpBridgeCode.includes('readback = null');
+
+  assert(
+    '[Phase 5 C# 宿主生产契约] src/VbaRiskScanner.cs 真实源码包含全部 L2 关键词、16类写入模式及严格 L1 Fail-Safe 兜底',
+    hasL2KeywordsInCsharp && hasWritePatternsInCsharp && hasFailSafeInCsharp
+  );
+
+  assert(
+    '[Phase 5 C# 宿主生产契约] src/NativeBridge.cs 包含 ExecutionDataDto.requestId 字段、一次性消费令牌与 needsConfirm 时 readback=null 保障',
+    hasRequestIdContractInCsharp
+  );
+
+  // Test 23.6: 单行 If 语法防漏判断言 (验收标准：4 行写操作/集合/宏语料必须判定为 L1 或 L2，严禁漏判为 L0)
+  const corpus1 = classifyVbaRisk('If x Then ws.ListObjects.Add(xlSrcRange, ws.Range("A1:C9"))');
+  const corpus2 = classifyVbaRisk('If x Then ws.PivotTables.Add(ws.PivotCache, ws.Range("A1"))');
+  const corpus3 = classifyVbaRisk('If x Then ws.QueryTables.Add("url", ws.Range("A1"))');
+  const corpus4 = classifyVbaRisk('If x Then Application.Run "MyMacro"');
+
+  assert(
+    '[Phase 5 单行 If 防漏判 1] If x Then ws.ListObjects.Add(...) 必须判定为写入(L1或L2)，严禁判定为L0',
+    corpus1.riskLevel !== 'L0' && (corpus1.riskLevel === 'L1' || corpus1.riskLevel === 'L2')
+  );
+  assert(
+    '[Phase 5 单行 If 防漏判 2] If x Then ws.PivotTables.Add(...) 必须判定为写入(L1或L2)，严禁判定为L0',
+    corpus2.riskLevel !== 'L0' && (corpus2.riskLevel === 'L1' || corpus2.riskLevel === 'L2')
+  );
+  assert(
+    '[Phase 5 单行 If 防漏判 3] If x Then ws.QueryTables.Add(...) 必须判定为写入(L1或L2)，严禁判定为L0',
+    corpus3.riskLevel !== 'L0' && (corpus3.riskLevel === 'L1' || corpus3.riskLevel === 'L2')
+  );
+  assert(
+    '[Phase 5 单行 If 防漏判 4] If x Then Application.Run "MyMacro" 必须判定为写入(L1或L2)，严禁判定为L0',
+    corpus4.riskLevel !== 'L0' && (corpus4.riskLevel === 'L1' || corpus4.riskLevel === 'L2')
+  );
+
+  // Test 23.7: C# 结构化 riskCode 字段与集合/宏写操作规则契约核验
+  const hasRiskCodeContractInCsharp =
+    csharpScannerCode.includes('RiskCode') &&
+    csharpBridgeCode.includes('public string riskCode { get; set; }') &&
+    csharpScannerCode.includes('ListObjects|PivotTables|PivotCaches|QueryTables|Tables') &&
+    csharpScannerCode.includes('Application');
+
+  assert(
+    '[Phase 5 C# 宿主生产契约] C# 源码包含 riskCode 结构化字段契约与集合/宏执行拦截规则',
+    hasRiskCodeContractInCsharp
   );
 }
 

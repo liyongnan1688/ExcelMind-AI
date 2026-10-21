@@ -32,70 +32,30 @@ namespace LeeExcel
             return @"<customUI onLoad='OnRibbonLoad' xmlns='http://schemas.microsoft.com/office/2009/07/customui'>
   <ribbon>
     <tabs>
-      <tab id='LeeExcelTab' label='ExcelMind AI'>
-        <!-- 分组 1：ExcelMind AI -->
-        <group id='GroupAssistant' label='ExcelMind AI'>
-          <button id='btnAssistant'
-                  size='large'
-                  onAction='OnTogglePane'
-                  getImage='GetButtonImage'
-                  screentip='ExcelMind AI'
-                  supertip='打开或收起 ExcelMind AI 工作台。' />
+      <tab id='LeeExcelTab' label='AI 助手'>
+        <group id='GroupAssistant' label='助手'>
+          <button id='btnAssistant' size='large' getLabel='GetAssistantLabel' getImage='GetIcon'
+                  keytip='W' onAction='OnTogglePane'
+                  screentip='AI 助手' supertip='用中文描述，AI 直接改表' />
         </group>
-
-        <!-- 分组 2：宏与数据 -->
-        <group id='GroupMacroAndData' label='宏与数据'>
-          <button id='btnMacroLibrary'
-                  label='宏库'
-                  size='normal'
-                  onAction='OnOpenMacroLibrary'
-                  imageMso='VisualBasic'
-                  screentip='宏库'
-                  supertip='查看、搜索、运行、重命名、导出和管理所有已保存的 VBA 宏与自动化脚本。' />
-          <dynamicMenu id='menuFavoriteMacros'
-                       label='收藏宏'
-                       size='normal'
-                       imageMso='Favorites'
-                       getContent='GetFavoriteMacrosContent'
-                       screentip='收藏宏'
-                       supertip='快速从功能区选择并直接确认运行已收藏的常用自动化宏。' />
-          <button id='btnDataTools'
-                  label='数据工具'
-                  size='normal'
-                  onAction='OnOpenDataTools'
-                  imageMso='Consolidate'
-                  screentip='快捷数据工具箱'
-                  supertip='打开数据去重、跨表对账、多文件汇总与免公式快捷图表工作区。' />
+        <group id='GroupMacro' label='宏'>
+          <dynamicMenu id='menuFavoriteMacros' size='normal' label='收藏宏' getImage='GetIcon'
+                       getContent='GetFavoriteMacrosContent' keytip='F'
+                       screentip='收藏宏' supertip='一键再跑收藏的宏' />
+          <button id='btnMacroLibrary' size='normal' label='宏库' getImage='GetIcon' keytip='L'
+                  onAction='OnOpenMacroLibrary' screentip='宏库' supertip='查看、编辑、导入导出宏' />
         </group>
-
-        <!-- 分组 3：任务与设置 -->
-        <group id='GroupTasksAndSettings' label='任务与设置'>
-          <menu id='menuTasks'
-                label='任务'
-                size='normal'
-                imageMso='DiagramProcessClassic'
-                screentip='任务'
-                supertip='管理跨工作簿批量宏处理与双步骤自动化流水线任务。'>
-            <button id='btnBatchModal'
-                    label='批量处理'
-                    imageMso='AppointmentColorDialog'
-                    onAction='OnOpenBatch'
-                    screentip='批量处理'
-                    supertip='跨多个 Excel 工作簿文件批量执行宏或自动化处理任务。' />
-            <button id='btnWorkflowModal'
-                    label='工作流'
-                    imageMso='DiagramProcessClassic'
-                    onAction='OnOpenWorkflow'
-                    screentip='双步骤工作流'
-                    supertip='将数据清洗与处理串联为两步流水线任务，全流程快照保护。' />
-          </menu>
-          <button id='btnApiSettings'
-                  label='设置'
-                  size='normal'
-                  onAction='OnOpenSettings'
-                  imageMso='ServerConnection'
-                  screentip='设置与环境诊断'
-                  supertip='配置大模型 API 密钥、接口地址及导出脱敏诊断包。' />
+        <group id='GroupTasks' label='工具与任务'>
+          <button id='btnDataTools' size='normal' label='工具' getImage='GetIcon' keytip='T'
+                  onAction='OnOpenDataTools' screentip='数据工具' supertip='去重、对账、汇总、图表、导入' />
+          <button id='btnBatchModal' size='normal' label='批量处理' getImage='GetIcon' keytip='B'
+                  onAction='OnOpenBatch' screentip='批量处理' supertip='多个工作簿跑同一个宏' />
+          <button id='btnWorkflowModal' size='normal' label='流水线' getImage='GetIcon' keytip='P'
+                  onAction='OnOpenWorkflow' screentip='流水线' supertip='两步串起来自动跑' />
+        </group>
+        <group id='GroupSettings' label='设置'>
+          <button id='btnApiSettings' size='normal' label='设置' getImage='GetIcon' keytip='S'
+                  onAction='OnOpenSettings' screentip='设置' supertip='模型服务与参数' />
         </group>
       </tab>
     </tabs>
@@ -103,16 +63,35 @@ namespace LeeExcel
 </customUI>";
         }
 
-        public System.Drawing.Bitmap GetButtonImage(IRibbonControl control)
+        public string GetAssistantLabel(IRibbonControl control)
+        {
+            return LeeExcelAddIn.IsTaskPaneVisible ? "收起工作台" : "打开工作台";
+        }
+
+        public System.Drawing.Bitmap GetIcon(IRibbonControl control)
         {
             try
             {
-                return BrandIconHelper.GetExcelMindIcon(32);
+                if (control == null || string.IsNullOrEmpty(control.Id)) return null;
+                if (control.Id == "btnAssistant")
+                {
+                    return BrandIconHelper.GetExcelMindIcon(32);
+                }
+                if (control.Id.StartsWith("fav_btn_"))
+                {
+                    return BrandIconHelper.GetSmallIcon("fav_run");
+                }
+                return BrandIconHelper.GetSmallIcon(control.Id);
             }
             catch
             {
                 return null;
             }
+        }
+
+        public System.Drawing.Bitmap GetButtonImage(IRibbonControl control)
+        {
+            return GetIcon(control);
         }
 
         public string GetFavoriteMacrosContent(IRibbonControl control)
@@ -134,7 +113,7 @@ namespace LeeExcel
 
                 if (favs.Count == 0)
                 {
-                    sb.Append("<button id='fav_empty' label='（暂无收藏宏 - 请在宏库中点击⭐收藏）' enabled='false' imageMso='Info' />");
+                    sb.Append("<button id='fav_empty' label='（暂无收藏宏 - 请在宏库中点击⭐收藏）' enabled='false' getImage='GetIcon' />");
                 }
                 else
                 {
@@ -147,13 +126,13 @@ namespace LeeExcel
                         string tip = EscapeXml(string.Format("入口: {0} | 分类: {1}", s.entryPoint ?? "默认", s.category ?? "未分类"));
 
                         sb.Append(string.Format(
-                            "<button id='{0}' tag='{1}' label='{2}' screentip='{2}' supertip='{3}' imageMso='MacroPlay' onAction='OnExecuteFavoriteMacro' />",
+                            "<button id='{0}' tag='{1}' label='{2}' screentip='{2}' supertip='{3}' getImage='GetIcon' onAction='OnExecuteFavoriteMacro' />",
                             cleanBtnId, safeId, safeLabel, tip));
                     }
                 }
 
                 sb.Append("<menuSeparator id='fav_sep_manage' />");
-                sb.Append("<button id='fav_open_lib' label='打开宏库管理...' imageMso='VisualBasic' onAction='OnOpenMacroLibrary' />");
+                sb.Append("<button id='fav_open_lib' label='打开宏库管理...' getImage='GetIcon' onAction='OnOpenMacroLibrary' />");
                 sb.Append("</menu>");
 
                 return sb.ToString();
@@ -186,6 +165,7 @@ namespace LeeExcel
         public void OnTogglePane(IRibbonControl control)
         {
             LeeExcelAddIn.ToggleTaskPane();
+            InvalidateRibbon();
         }
 
         public void OnOpenMacroLibrary(IRibbonControl control)
@@ -290,6 +270,21 @@ namespace LeeExcel
             }
         }
 
+        public static bool IsTaskPaneVisible
+        {
+            get
+            {
+                try
+                {
+                    return _customTaskPane != null && _customTaskPane.Visible;
+                }
+                catch
+                {
+                    return false;
+                }
+            }
+        }
+
         public static void EnsureTaskPaneVisible()
         {
             if (_customTaskPane != null)
@@ -297,6 +292,7 @@ namespace LeeExcel
                 if (!_customTaskPane.Visible)
                 {
                     _customTaskPane.Visible = true;
+                    LeeExcelRibbon.InvalidateRibbon();
                 }
                 _customTaskPane.Width = 440;
                 if (_taskPaneControl != null) _taskPaneControl.NotifyWorkbookChanged();
@@ -308,6 +304,7 @@ namespace LeeExcel
             if (_customTaskPane != null)
             {
                 _customTaskPane.Visible = !_customTaskPane.Visible;
+                LeeExcelRibbon.InvalidateRibbon();
                 if (_customTaskPane.Visible)
                 {
                     _customTaskPane.Width = 440;

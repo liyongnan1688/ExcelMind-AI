@@ -40,8 +40,11 @@
     type MacroPackagePreviewResult,
     type MacroPackageImportResult,
   } from '../services/bridge';
+  import { toast } from '../services/toast';
+  import { showConfirm } from '../services/dialog';
 
   export let isOpen = false;
+  export let inline = false;
   export let workbook: WorkbookInfo | null = null;
   export let onClose: () => void;
   export let onRunScript: (script: ScriptItem, entryPoint?: string, parameters?: Record<string, any>) => void;
@@ -121,6 +124,27 @@
   let showOverwriteConfirm = false;
   let pendingOverwritePayload: any = null;
 
+  function formatRelativeTime(dateStr: string | undefined | null): string {
+    if (!dateStr) return '';
+    try {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return dateStr;
+      const now = new Date();
+      const diffMs = now.getTime() - d.getTime();
+      if (diffMs < 0) return '刚刚';
+      const diffMinutes = Math.floor(diffMs / 60000);
+      if (diffMinutes < 1) return '刚刚';
+      if (diffMinutes < 60) return `${diffMinutes} 分钟前`;
+      const diffHours = Math.floor(diffMinutes / 60);
+      if (diffHours < 24) return `${diffHours} 小时前`;
+      const diffDays = Math.floor(diffHours / 24);
+      if (diffDays <= 30) return `${diffDays} 天前`;
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    } catch {
+      return dateStr;
+    }
+  }
+
   export function openTab(tab: 'list' | 'import') {
     activeTab = tab;
   }
@@ -151,7 +175,7 @@
     if (found) {
       handleOpenRunModal(found);
     } else {
-      alert(`未在本地宏库中找到标识为【${scriptId}】的宏，该宏可能已被重命名或物理移除。`);
+      toast.error(`未在宏库中找到【${scriptId}】。`);
     }
   }
 
@@ -236,7 +260,7 @@
       script.isFavorite = nextVal;
       scripts = [...scripts];
     } else {
-      alert('更新收藏状态失败: ' + (res.error || '未知错误'));
+      toast.error('更新收藏状态失败: ' + (res.error || '未知错误'));
     }
   }
 
@@ -375,17 +399,17 @@
 
     // 格式合法性严格门禁
     if (ext === '.vbs') {
-      importErrorMessage = '❌ .vbs 文件为 Windows Script Host 脚本，不属于 Excel VBA 宏，不支持直接导入。';
+      importErrorMessage = '.vbs 文件为 Windows Script Host 脚本，不属于 Excel VBA 宏，不支持直接导入。';
       return;
     }
 
     if (ext === '.cls' || ext === '.frm' || ext === '.xlsm') {
-      importErrorMessage = `⚠️ 当前第一版仅支持标准 VBA 模块（.bas, .vba, .txt），暂不支持类模块(${ext})或整本工程导入。`;
+      importErrorMessage = `当前第一版仅支持标准 VBA 模块（.bas, .vba, .txt），暂不支持类模块(${ext})或整本工程导入。`;
       return;
     }
 
     if (ext !== '.bas' && ext !== '.vba' && ext !== '.txt') {
-      importErrorMessage = '⚠️ 仅支持导入 .bas、.vba、.txt 格式的 VBA 宏源码文件。';
+      importErrorMessage = '仅支持导入 .bas、.vba、.txt 格式的 VBA 宏源码文件。';
       return;
     }
 
@@ -894,12 +918,18 @@
   // 删除宏
   async function handleDelete(script: ScriptItem) {
     const disp = script.displayName || script.name;
-    if (!confirm(`确认删除宏【${disp}】吗？此操作不可撤销。`)) return;
+    const ok = await showConfirm({
+      title: '删除宏',
+      message: `确认删除宏【${disp}】吗？此操作不可撤销。`,
+      confirmText: '删除',
+      danger: true,
+    });
+    if (!ok) return;
     const res = await bridge.send('delete_script', { id: script.id || script.fileName });
     if (res.ok) {
       await refreshScripts();
     } else {
-      alert('删除失败: ' + (res.error || res.message));
+      toast.error('删除失败: ' + (res.error || res.message));
     }
   }
 
@@ -912,7 +942,7 @@
         copiedScriptId = null;
       }, 1500);
     } catch {
-      alert('复制到剪贴板失败，请手动选取复制代码');
+      toast.error('复制到剪贴板失败，请手动选取复制代码');
     }
   }
 
@@ -930,7 +960,7 @@
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch (err: any) {
-      alert('导出失败: ' + err.message);
+      toast.error('导出失败: ' + err.message);
     }
   }
 
@@ -1058,35 +1088,62 @@
   }
 </script>
 
-{#if isOpen}
-  <div class="drawer-backdrop" on:click|self={onClose} on:keydown={(e) => e.key === 'Escape' && onClose()} role="presentation">
-    <div class="drawer-content" role="dialog" aria-modal="true" aria-label="宏管理与脚本库">
-      <!-- 抽屉顶部标题栏与 Tab 切换 -->
-      <div class="drawer-header">
-        <div class="header-left">
-          <div class="header-title">
-            <Code2 size={18} color="#107C41" />
-            <span>宏工具</span>
+{#if inline || isOpen}
+  {#if !inline}
+    <div class="drawer-backdrop" on:click|self={onClose} on:keydown={(e) => e.key === 'Escape' && onClose()} role="presentation">
+      <div class="drawer-content" role="dialog" aria-modal="true" aria-label="宏管理与脚本库">
+        <div class="drawer-header">
+          <div class="header-left">
+            <div class="header-title">
+              <Code2 size={18} color="#107C41" />
+              <span>宏工具</span>
+            </div>
+            <div class="header-tabs">
+              <button
+                class="tab-btn {activeTab === 'list' ? 'active' : ''}"
+                on:click={() => (activeTab = 'list')}
+              >
+                宏库 <span class="badge-count">{scripts.length}</span>
+              </button>
+              <button
+                class="tab-btn {activeTab === 'import' ? 'active' : ''}"
+                on:click={() => (activeTab = 'import')}
+              >
+                <PlusCircle size={13} />
+                导入
+              </button>
+            </div>
           </div>
-          <div class="header-tabs">
-            <button
-              class="tab-btn {activeTab === 'list' ? 'active' : ''}"
-              on:click={() => (activeTab = 'list')}
-            >
-              宏库 <span class="badge-count">{scripts.length}</span>
-            </button>
-            <button
-              class="tab-btn {activeTab === 'import' ? 'active' : ''}"
-              on:click={() => (activeTab = 'import')}
-            >
-              <PlusCircle size={13} />
-              导入
-            </button>
-          </div>
+          <button class="btn-icon" on:click={onClose} aria-label="关闭"><X size={16} /></button>
         </div>
-        <button class="btn-icon" on:click={onClose} aria-label="关闭"><X size={16} /></button>
+        {@render drawerBody()}
       </div>
+    </div>
+  {:else}
+    <div class="drawer-content inline-mode" role="region" aria-label="宏管理与脚本库">
+      <div class="drawer-header inline-header">
+        <div class="header-tabs">
+          <button
+            class="tab-btn {activeTab === 'list' ? 'active' : ''}"
+            on:click={() => (activeTab = 'list')}
+          >
+            宏库 <span class="badge-count">{scripts.length}</span>
+          </button>
+          <button
+            class="tab-btn {activeTab === 'import' ? 'active' : ''}"
+            on:click={() => (activeTab = 'import')}
+          >
+            <PlusCircle size={13} />
+            导入
+          </button>
+        </div>
+      </div>
+      {@render drawerBody()}
+    </div>
+  {/if}
+{/if}
 
+{#snippet drawerBody()}
       <!-- 抽屉主体内容 -->
       <div class="drawer-body">
         {#if activeTab === 'list'}
@@ -1171,7 +1228,7 @@
               <FileCode size={36} color="#c8c6c4" />
               <p class="empty-title">{searchTerm || selectedTag !== '全部' || showFavoritesOnly ? '未找到匹配的宏' : '暂无已保存的宏'}</p>
               <span class="empty-hint">
-                {searchTerm || selectedTag !== '全部' || showFavoritesOnly ? '尝试更换搜索词或清空筛选条件' : '点击上方【导入宏】按钮，可从本地 .bas/.vba 文件或直接粘贴源码导入。'}
+                {searchTerm || selectedTag !== '全部' || showFavoritesOnly ? '尝试更换搜索词或清空筛选条件' : '点击上方【导入宏】按钮，可从本地 .bas/.vba 文件或直接粘贴代码导入。'}
               </span>
               {#if !searchTerm && selectedTag === '全部' && !showFavoritesOnly}
                 <button class="btn btn-sm btn-primary" on:click={() => (activeTab = 'import')}>
@@ -1192,7 +1249,7 @@
                       <button
                         class="btn-icon-inline"
                         on:click={() => openRenameModal(s)}
-                        title="重命名显示名称（不改变源码）"
+                        title="重命名显示名称"
                       >
                         <Edit3 size={12} />
                       </button>
@@ -1241,14 +1298,14 @@
                     {/if}
 
                     <div class="card-meta">
-                      <span>保存于 {s.createdAt || s.updatedAt}</span>
+                      <span>{formatRelativeTime(s.createdAt || s.updatedAt)}保存</span>
                       {#if s.originalFileName}
                         <span class="meta-dot">·</span>
-                        <span class="meta-file" title="原文件名: {s.originalFileName}">原文件: {s.originalFileName}</span>
+                        <span class="meta-file" title="原文件名: {s.originalFileName}">文件: {s.originalFileName}</span>
                       {/if}
                       {#if s.entryPoint}
                         <span class="meta-dot">·</span>
-                        <span class="meta-entry">入口: {s.entryPoint}</span>
+                        <span class="meta-entry">过程: {s.entryPoint}</span>
                       {/if}
                     </div>
 
@@ -1265,7 +1322,7 @@
                       <button
                         class="btn btn-sm btn-primary"
                         on:click={() => handleOpenRunModal(s)}
-                        title="选择入口并对目标工作簿运行"
+                        title="选择过程并运行"
                       >
                         <Play size={12} />
                         <span>运行</span>
@@ -1274,7 +1331,7 @@
                       <button
                         class="btn btn-sm btn-subtle"
                         on:click={() => (expandedIndex = expandedIndex === idx ? null : idx)}
-                        title={expandedIndex === idx ? '收起详情与源码' : '查看标签、运行历史与源码'}
+                        title={expandedIndex === idx ? '收起详情与代码' : '查看标签、运行历史与代码'}
                       >
                         <FileText size={12} />
                         <span>{expandedIndex === idx ? '收起' : '详情'}</span>
@@ -1312,7 +1369,7 @@
                         <div class="section-title">
                           <Tag size={12} color="#0078D4" />
                           <span>标签管理</span>
-                          <span class="sub-hint">（增删标签仅更新元数据，不修改 .bas 源码）</span>
+                          <span class="sub-hint">（增删标签仅更新属性，不修改宏代码）</span>
                         </div>
                         <div class="tags-editor">
                           {#if s.tags && s.tags.length > 0}
@@ -1368,7 +1425,7 @@
                                 <div class="history-main">
                                   <div class="history-header">
                                     <span class="history-status-badge status-{rh.status}">
-                                      {rh.status === 'success' ? '✔ 成功' : (rh.status === 'blocked' ? '⊘ 阻断' : '✖ 失败')}
+                                      {rh.status === 'success' ? '成功' : (rh.status === 'blocked' ? '阻断' : '失败')}
                                     </span>
                                     <span class="history-phase">阶段: {rh.phase || '执行'}</span>
                                     {#if rh.status !== 'blocked' && rh.elapsedMs !== undefined && rh.elapsedMs >= 0}
@@ -1379,10 +1436,10 @@
                                   <div class="history-details">
                                     <span class="history-wb" title="目标工作簿">目标: {rh.targetWorkbookName || '活动工作簿'}</span>
                                     {#if rh.entryPoint}
-                                      <span class="history-entry">入口: {rh.entryPoint}</span>
+                                      <span class="history-entry">过程: {rh.entryPoint}</span>
                                     {/if}
                                     {#if rh.codeHash}
-                                      <span class="history-hash" title="源码SHA256哈希: {rh.codeHash}">
+                                      <span class="history-hash" title="代码SHA256哈希: {rh.codeHash}">
                                         哈希: {rh.codeHash.substring(0, 8)}...
                                       </span>
                                     {/if}
@@ -1391,16 +1448,16 @@
                                     {#if rh.snapshotId}
                                       {#if rh.snapshotExists}
                                         <span class="snapshot-badge snapshot-valid" title="快照文件存在于备份目录">
-                                          🛡️ 快照可用 ({rh.snapshotId})
+                                          快照可用 ({rh.snapshotId})
                                         </span>
                                       {:else}
                                         <span class="snapshot-badge snapshot-missing" title="快照记录存在但文件已从备份目录物理移除">
-                                          ⚠️ 快照文件已丢失 ({rh.snapshotId})
+                                          快照文件已丢失 ({rh.snapshotId})
                                         </span>
                                       {/if}
                                     {:else}
                                       <span class="snapshot-badge snapshot-none" title={rh.snapshotReason || '未备份'}>
-                                        ⚪ 无快照: {rh.snapshotReason || '未创建备份'}
+                                        无快照: {rh.snapshotReason || '未创建备份'}
                                       </span>
                                     {/if}
                                   </div>
@@ -1431,7 +1488,7 @@
                             <button
                               class="btn-text-sm"
                               on:click={() => handleCopyCode(s)}
-                              title="复制全部 VBA 源码"
+                              title="复制全部 VBA 代码"
                             >
                               {#if copiedScriptId === (s.id || s.fileName)}
                                 <Check size={12} color="#107C41" />
@@ -1444,7 +1501,7 @@
                             <button
                               class="btn-text-sm"
                               on:click={() => handleExportFile(s)}
-                              title="导出为 .bas 源码文件"
+                              title="导出为 .bas 文件"
                             >
                               <Download size={12} />
                               <span>导出.bas</span>
@@ -1485,7 +1542,7 @@
                 on:click={() => (importSourceType = 'paste')}
               >
                 <FileText size={14} />
-                <span>粘贴 VBA 源码</span>
+                <span>粘贴 VBA 代码</span>
               </button>
               <button
                 class="mode-btn {importSourceType === 'package' ? 'active' : ''}"
@@ -1538,13 +1595,13 @@
             {#if importSourceType === 'paste'}
               <div class="form-group">
                 <label for="pasteCodeInput">
-                  <span>VBA 完整源码</span>
-                  <span class="field-hint">可包含 Option Explicit、注释及辅助 Sub/Function 过程，无需强制重命名为 Main</span>
+                  <span>VBA 代码</span>
+                  <span class="field-hint">可包含注释及辅助 Sub/Function 过程，无需强制重命名为 Main</span>
                 </label>
                 <textarea
                   id="pasteCodeInput"
                   rows={8}
-                  placeholder="' 在此粘贴完整 VBA 源码&#10;Sub CustomMacro()&#10;    Range(&quot;A1&quot;).Value = &quot;Hello&quot;&#10;End Sub"
+                  placeholder="' 在此粘贴完整 VBA 代码&#10;Sub CustomMacro()&#10;    Range(&quot;A1&quot;).Value = &quot;Hello&quot;&#10;End Sub"
                   bind:value={importCode}
                 ></textarea>
               </div>
@@ -1579,7 +1636,7 @@
                         <span class="proc-name">{proc.name}({proc.params})</span>
                       </div>
                       <span class="proc-status">
-                        {proc.isRunnable ? '可作为入口' : proc.reason}
+                        {proc.isRunnable ? '可直接运行' : proc.reason}
                       </span>
                     </div>
                   {/each}
@@ -1614,7 +1671,7 @@
                 </div>
 
                 <div class="form-group flex-1">
-                  <label for="importEntrySelect">默认执行入口</label>
+                  <label for="importEntrySelect">默认执行过程</label>
                   {#if runnableEntryPoints.length > 0}
                     <select id="importEntrySelect" bind:value={importEntryPoint}>
                       {#each runnableEntryPoints as p}
@@ -1626,7 +1683,7 @@
                       id="importEntrySelect"
                       type="text"
                       disabled
-                      value="未检测到公开无参入口 (允许保存为未验证源码)"
+                      value="未检测到公开无参过程 (允许保存为未验证代码)"
                     />
                   {/if}
                 </div>
@@ -1652,7 +1709,7 @@
               <!-- 保存安全提示 -->
               <div class="save-security-note">
                 <AlertCircle size={13} color="#0078D4" />
-                <span>保存仅在本地宏库持久化，<strong>不向工作簿注入代码、不执行宏、不创建快照</strong>。有错误的代码亦可作为未验证源码保存。</span>
+                <span>保存仅在本地宏库持久化，<strong>不向工作簿写入代码、不执行宏、不修改文件</strong>。</span>
               </div>
 
               <!-- 操作按钮 -->
@@ -1679,7 +1736,7 @@
             {#if importSourceType === 'file' && importCode}
               <div class="code-preview-section">
                 <div class="preview-header">
-                  <span>源码原文预览 ({importCode.length} 字符)</span>
+                  <span>代码预览 ({importCode.length} 字符)</span>
                 </div>
                 <pre class="preview-code"><code>{importCode}</code></pre>
               </div>
@@ -1692,16 +1749,16 @@
                   <button class="file-dropzone w-full" on:click={handleBrowsePackageFile} type="button">
                     <Package size={28} color="#107C41" />
                     <span class="dropzone-text">点击选择本地 .exmpack 宏包文件</span>
-                    <span class="dropzone-hint">标准 ZIP 容器，包含 manifest.json 与 scripts/*.bas 源码，纯离线无凭据导入</span>
+                    <span class="dropzone-hint">标准 ZIP 宏包，包含 manifest.json 与 scripts/*.bas 脚本，纯离线安全导入</span>
                   </button>
                 </div>
 
                 <div class="info-callout">
-                  <div class="info-title">🛡️ 隔离解析与容量保护保证</div>
+                  <div class="info-title">宏包安全检查</div>
                   <div class="info-text">
-                    宏包将在隔离临时解包目录中进行预检与哈希验证，自动拦截绝对路径、盘符/UNC路径、路径穿越、重复条目、压缩炸弹与意外文件类型。<br/>
-                    导入时为每个宏生成全新本地稳定 ID，同名宏自动重命名共存，绝不静默覆盖已有宏与运行历史。<br/>
-                    <strong>导入全程零宏执行</strong>，不自动添加任何运行任务。
+                    宏包在临时目录进行安全性与文件校验，自动防范路径穿越与异常文件。<br/>
+                    同名宏自动重命名保存，不覆盖已有宏与历史。<br/>
+                    <strong>导入全程不执行宏</strong>。
                   </div>
                 </div>
               {/if}
@@ -1709,7 +1766,7 @@
               {#if packagePreviewLoading}
                 <div class="empty-state">
                   <Clock size={24} color="#8a8886" class="spin" />
-                  <p>正在隔离解析宏包并校验文件哈希...</p>
+                  <p>正在解析宏包并校验文件...</p>
                 </div>
               {/if}
 
@@ -1749,7 +1806,7 @@
                       <AlertTriangle size={15} color="#B25900" />
                       <strong>疑似敏感凭据风险提示</strong>
                     </div>
-                    <p class="alert-sub">在宏包源码、描述或参数中检出疑似凭据/密钥信息。此检查为本地静态规则，未检出不等于绝对无敏感内容。本功能不担保宏正文绝对安全性，导入后绝不会自动运行宏。请人工核对：</p>
+                    <p class="alert-sub">在宏包代码、描述或参数中检出疑似凭据信息，导入后不会自动运行宏。请人工核对：</p>
                     <ul class="warning-detail-list">
                       {#each packagePreviewResult.warnings as w}
                         <li>• 【{w.macroDisplayName || w.macroName}】{w.fieldName || w.location}: <code>{w.snippet}</code></li>
@@ -1794,7 +1851,7 @@
                             <span class="entry-size">{entry.sourceByteLength} 字节</span>
                           </div>
                           <div class="entry-detail-row">
-                            <span>入口: <code>{entry.entryPoint || '无指定入口'}</code></span>
+                            <span>过程: <code>{entry.entryPoint || '无指定过程'}</code></span>
                             <span>参数: {entry.parameterDefs ? entry.parameterDefs.length : 0} 个</span>
                             <span title="SHA-256 哈希: {entry.sha256}">SHA: {entry.sha256 ? entry.sha256.substring(0, 12) + '...' : '无'}</span>
                           </div>
@@ -1859,9 +1916,7 @@
           </div>
         {/if}
       </div>
-    </div>
-  </div>
-{/if}
+{/snippet}
 
 <!-- 运行前目标工作簿与入口确认弹窗 -->
 {#if runModalScript}
@@ -1888,20 +1943,20 @@
         {:else if workbook && !workbook.isSaved}
           <div class="info-row">
             <span class="info-label">保存状态:</span>
-            <span class="info-val subtext" style="color: #b25900; font-weight: 500;">⚠️ 尚未保存至磁盘（内存新建工作簿）</span>
+            <span class="info-val subtext" style="color: #b25900; font-weight: 500;">尚未保存至磁盘</span>
           </div>
         {/if}
 
-        <!-- 未保存工作簿快照门禁警示 -->
+        <!-- 未保存工作簿备份警示 -->
         {#if workbook && !workbook.isSaved}
           <div class="alert-box alert-warning" style="margin-top: 4px;">
             <AlertTriangle size={14} color="#b25900" />
-            <span><strong>快照前置门禁：</strong>当前目标工作簿尚未保存到磁盘文件，无法生成整本物理快照副本。系统严格执行快照安全门禁，禁止跳过快照直接执行。请在 Excel 中先保存工作簿再运行。</span>
+            <span><strong>未保存：</strong>当前目标工作簿尚未保存到磁盘文件，无法自动备份与撤销。请先在 Excel 中保存工作簿再运行。</span>
           </div>
         {/if}
 
         <div class="info-row">
-          <span class="info-label">执行入口过程:</span>
+          <span class="info-label">执行过程:</span>
           {#if runModalEntryPoints.length > 1}
             <select
               value={runModalSelectedEntryPoint}
@@ -1932,15 +1987,15 @@
               {#if !isProcRunnable(runModalEntryPoints[0])}
                 (不可独立调用: {getProcUnsupportedReason(runModalEntryPoints[0])})
               {:else if runModalEntryPoints[0].parameters.length === 0}
-                (无参入口)
+                (无参过程)
               {:else if runModalEntryPoints[0].parameters.length === 1 && (runModalEntryPoints[0].parameters[0].typeName || runModalEntryPoints[0].parameters[0].type) === 'Workbook'}
-                (工作簿参数入口)
+                (工作簿参数过程)
               {:else}
                 (带显式参数: {runModalEntryPoints[0].parameters.map((x) => (x.typeName || x.type) + ' ' + x.name).join(', ')})
               {/if}
             </span>
           {:else}
-            <span class="info-val error-text">未检测到有效过程入口</span>
+            <span class="info-val error-text">未检测到有效过程</span>
           {/if}
         </div>
 
@@ -1948,7 +2003,7 @@
         {#if runModalMetaConflictError}
           <div class="alert-box alert-warning" style="margin-top: 4px;">
             <AlertTriangle size={14} color="#b25900" />
-            <span><strong>契约冲突阻断：</strong>{runModalMetaConflictError}</span>
+            <span><strong>契约冲突：</strong>{runModalMetaConflictError}</span>
           </div>
         {/if}
 
@@ -1956,7 +2011,7 @@
         {#if currentSelectedProc && !currentSelectedProcRunnable}
           <div class="alert-box alert-error" style="margin-top: 4px;">
             <AlertCircle size={14} />
-            <span>当前所选入口暂不支持直接运行：{cannotRunReason}。系统不会猜测入口、不自动改写源码。请使用文字提问咨询。</span>
+            <span>当前所选过程暂不支持直接运行：{cannotRunReason}。请使用文字提问咨询。</span>
           </div>
         {/if}
 
@@ -2114,7 +2169,7 @@
         <div class="source-view-toggle">
           <button class="btn-text-sm" on:click={() => (runModalShowCode = !runModalShowCode)}>
             <Code2 size={13} />
-            <span>{runModalShowCode ? '收起完整源码' : '查看完整源码'}</span>
+            <span>{runModalShowCode ? '收起代码' : '查看代码'}</span>
             {#if runModalShowCode}
               <ChevronUp size={12} />
             {:else}
@@ -2142,10 +2197,9 @@
         <div class="security-banner">
           <AlertCircle size={14} color="#0078D4" />
           <div class="banner-text">
-            <strong>安全须知与执行声明：</strong>
-            <p>1. 确认后将<strong>自动创建整本物理副本快照</strong>（需目标具备磁盘路径）并关联本次调用记录；</p>
-            <p>2. <strong>包装器独立适配，正文零改写</strong>：参数经独立宿主包装器安全传递，原源码逐字节不变，杜绝代码逃逸；</p>
-            <p>3. 宿主绝不猜测入口、绝不修改源码、不请求大模型。</p>
+            <strong>安全提示：</strong>
+            <p>1. 执行前会自动备份当前工作簿，支持撤销改动；</p>
+            <p>2. 原脚本逐字节保持不变，直接在 Excel 宿主运行。</p>
           </div>
         </div>
       </div>
@@ -2192,7 +2246,7 @@
         <div class="form-group">
           <label for="renameInput">
             <span>新显示名称</span>
-            <span class="field-hint">仅修改管理界面名称，源码中的过程名和代码哈希 100% 保持不变</span>
+            <span class="field-hint">仅修改管理名称，宏代码保持不变</span>
           </label>
           <input
             id="renameInput"
@@ -2235,7 +2289,7 @@
 
       <div class="modal-body">
         <p>宏库中已存在名为<strong>【{importDisplayName}】</strong>的宏条目。</p>
-        <p class="subtext">是否确认覆盖并更新该已有条目？覆盖后历史条目的源码将被替换。</p>
+        <p class="subtext">是否确认覆盖并更新该已有条目？覆盖后历史条目的代码将被替换。</p>
       </div>
 
       <div class="modal-footer">
@@ -2264,11 +2318,10 @@
 
       <div class="modal-body modal-body-scroll">
         <div class="info-callout">
-          <div class="info-title">🛡️ 元数据字段白名单与无凭据承诺</div>
+          <div class="info-title">安全导出声明</div>
           <div class="info-text">
-            系统严格采用元数据白名单导出（仅包含显示名称、分类、描述、入口过程及参数契约）。<br/>
-            <strong>绝不导出：</strong>API 配置、DPAPI 凭据、聊天记录、运行历史溯源、工作流运行记录、目标工作簿路径、业务数据、快照备份或本机环境信息。<br/>
-            源码按原始二进制字节写入，manifest SHA-256 仅供完整性核验。未检出敏感内容不等于绝对安全。
+            仅导出宏名称、分类、描述与脚本内容。<br/>
+            <strong>绝不导出：</strong>密钥配置、聊天记录、运行历史、工作簿路径或任何业务数据。
           </div>
         </div>
 
@@ -2326,7 +2379,7 @@
                     <span class="entry-badge">{s.category || '通用'}</span>
                   </div>
                   <div class="entry-detail-row">
-                    <span>入口: <code>{s.entryPoint || '无指定'}</code></span>
+                    <span>过程: <code>{s.entryPoint || '无指定'}</code></span>
                     <span>哈希: {s.originalCodeHash ? s.originalCodeHash.substring(0, 10) + '...' : '未生成'}</span>
                   </div>
                 </div>
@@ -2342,7 +2395,7 @@
               <AlertTriangle size={15} color="#B25900" />
               <strong>检出疑似敏感内容提醒</strong>
             </div>
-            <p class="alert-sub">在待导出的宏中检测到以下疑似 API Key、密码或凭据信息。系统<strong>绝不自动篡改或打码源码正文</strong>，请用户核实是否包含私密凭据：</p>
+            <p class="alert-sub">在待导出的宏中检测到以下疑似 API Key、密码或凭据信息。系统绝不自动修改代码正文，请核实是否包含私密凭据：</p>
             <ul class="warning-detail-list">
               {#each exportPackageWarnings as w}
                 <li>• 【{w.macroDisplayName}】{w.fieldName}: <code>{w.snippet}</code></li>
@@ -2361,7 +2414,7 @@
         {#if exportPackageSuccessResult}
           <div class="alert-box alert-success">
             <Check size={16} color="#107C41" />
-            <span>✔ 宏包导出成功！已将 {exportPackageSuccessResult.exportedCount} 个宏打包至 <code>{exportPackageSuccessResult.outputPath || exportPackageSuccessResult.packageFilePath}</code> ({exportPackageSuccessResult.packageSize || exportPackageSuccessResult.totalBytes} 字节)。</span>
+            <span>宏包导出成功！已将 {exportPackageSuccessResult.exportedCount} 个宏打包至 <code>{exportPackageSuccessResult.outputPath || exportPackageSuccessResult.packageFilePath}</code> ({exportPackageSuccessResult.packageSize || exportPackageSuccessResult.totalBytes} 字节)。</span>
           </div>
         {/if}
       </div>
@@ -2415,6 +2468,23 @@
     display: flex;
     flex-direction: column;
     animation: slideIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .drawer-content.inline-mode {
+    height: 100%;
+    max-height: 100%;
+    box-shadow: none;
+    animation: none;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .drawer-header.inline-header {
+    height: auto;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--office-border-subtle);
+    background: var(--office-card-subtle);
+    justify-content: flex-start;
   }
 
   @keyframes slideIn {

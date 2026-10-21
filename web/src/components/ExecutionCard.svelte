@@ -23,6 +23,7 @@
   import { bridge, type SnapshotItem, type VbaExecutionData } from '../services/bridge';
   import { getPromptConstraintsCatalog } from '../services/llm';
   import { checkMacroSaveEligibility } from '../services/macroSaveEligibility';
+  import { toast } from '../services/toast';
   import { createEventDispatcher, tick } from 'svelte';
 
   const dispatch = createEventDispatcher();
@@ -186,7 +187,7 @@
         scriptName = '';
       }, 1000);
     } else {
-      alert('保存失败: ' + res.error);
+      toast.error('保存失败: ' + (res.error || '未知错误'));
     }
   }
 
@@ -242,6 +243,64 @@
       restoreErrorMsg = res.error || '恢复操作遇到错误';
     }
   }
+
+  let isExecutingL2 = false;
+  async function handleConfirmL2() {
+    if (!execution?.confirmToken) return;
+    if (!execution?.requestId) {
+      execution = {
+        ...execution,
+        needsConfirm: false,
+        error: '执行已阻止：缺少确认请求标识 (requestId)，无法安全执行高危操作',
+        summary: '缺少确认请求标识 (requestId)，无法验证确认权限'
+      };
+      return;
+    }
+    isExecutingL2 = true;
+    try {
+      const res = await bridge.send<any>('execute_vba', {
+        code: displayCode,
+        requestId: execution.requestId,
+        confirmToken: execution.confirmToken,
+        targetWorkbookName: execution.targetWorkbookName || '',
+        targetWorkbookFullName: execution.targetWorkbookFullName || '',
+      });
+      if (res.ok && res.data) {
+        execution = {
+          ...execution,
+          ...res.data,
+          needsConfirm: res.data.needsConfirm === true,
+        };
+      } else {
+        execution = {
+          ...execution,
+          needsConfirm: false,
+          error: res.error || '执行遇到错误',
+          summary: res.message || res.error || '执行遇到错误'
+        };
+      }
+    } catch (e: any) {
+      execution = {
+        ...execution,
+        needsConfirm: false,
+        error: e.message || '执行异常',
+        summary: '执行异常: ' + (e.message || '')
+      };
+    } finally {
+      isExecutingL2 = false;
+    }
+  }
+
+  function handleCancelL2() {
+    if (execution) {
+      execution = {
+        ...execution,
+        needsConfirm: false,
+        error: '用户已取消操作',
+        summary: '已取消不可逆操作'
+      };
+    }
+  }
 </script>
 
 <div
@@ -254,6 +313,40 @@
     ? 'card-success'
     : 'card-unconfirmed'}"
 >
+  <!-- L2 不可逆高危操作确认卡 (P5 规范) -->
+  {#if execution?.needsConfirm && execution?.riskLevel === 'L2'}
+    <div class="l2-risk-confirm-card">
+      <div class="l2-risk-header">
+        <ShieldAlert size={16} color="var(--office-danger, #C42B1C)" />
+        <span class="l2-risk-title">{execution.riskTargetDetail || '不可逆高危操作确认'}</span>
+      </div>
+      <div class="l2-risk-body">
+        <p class="l2-risk-desc">该操作包含不可逆或越界指令，执行后无法自动撤销。</p>
+      </div>
+      <div class="l2-risk-footer">
+        <button class="btn btn-sm btn-subtle" type="button" on:click|stopPropagation={handleCancelL2}>
+          取消
+        </button>
+        <button class="btn btn-sm btn-danger" type="button" on:click|stopPropagation={handleConfirmL2} disabled={isExecutingL2}>
+          {#if isExecutingL2}
+            <Loader2 size={12} class="spinner" />
+            <span>正在执行...</span>
+          {:else}
+            <span>
+              {execution?.riskCode === 'delete_sheet' || execution?.riskCode === 'delete_file'
+                ? '仍要删除'
+                : execution?.riskCode === 'overwrite_file'
+                ? '仍要覆盖'
+                : execution?.riskCode === 'modify_vbproject'
+                ? '仍要修改'
+                : '仍要执行'}
+            </span>
+          {/if}
+        </button>
+      </div>
+    </div>
+  {/if}
+
   <!-- 默认折叠状态栏 (简洁呈现，客观如实呈现，不伪称满分完成) -->
   <div
     class="summary-bar"
@@ -271,22 +364,28 @@
       {#if isExecuting}
         <Loader2 size={16} class="spinner" color="#0078D4" />
         <span class="summary-text font-running">正在生成并执行 Excel VBA...</span>
+      {:else if execution?.needsConfirm}
+        <AlertCircle size={16} color="#C42B1C" />
+        <span class="summary-text font-unconfirmed" title={execution.summary || '待确认高危操作，尚未执行'}>
+          待确认 · 尚未执行
+        </span>
+        <span class="badge badge-amber">高危</span>
       {:else if execution?.error}
         <XCircle size={16} color="#C42B1C" />
         <span class="summary-text font-error" title={execution.summary}>
           {execution.summary || '执行遇到错误'}
         </span>
         {#if execution.elapsedMs}
-          <span class="badge badge-gray">{(execution.elapsedMs / 1000).toFixed(2)}s</span>
+          <span class="badge badge-gray">{execution.elapsedMs < 1000 ? `${execution.elapsedMs}ms` : `${(execution.elapsedMs / 1000).toFixed(2)}s`}</span>
         {/if}
       {:else if execution?.verificationStatus === 'matched'}
         <CheckCircle2 size={16} color="#107C41" />
         <span class="summary-text font-success" title={execution.summary}>
-          {execution.summary || '宏已运行，抽样字面核验一致'}
+          {execution.summary || '已执行，核对结果一致'}
         </span>
-        <span class="badge badge-green">抽样匹配</span>
+        <span class="badge badge-green">结果一致</span>
         {#if execution?.elapsedMs}
-          <span class="badge badge-green">{(execution.elapsedMs / 1000).toFixed(2)}s</span>
+          <span class="badge badge-green">{execution.elapsedMs < 1000 ? `${execution.elapsedMs}ms` : `${(execution.elapsedMs / 1000).toFixed(2)}s`}</span>
         {/if}
       {:else}
         <!-- 待确认或有差异状态 (显示中性/提示色，不伪装绿色的“任务完成”) -->
@@ -302,19 +401,33 @@
     </div>
 
     <div class="summary-right-actions">
-      <!-- 双模态查看：未展开时也可直接全屏放大查看源码与核验 -->
+      <!-- L1 结果卡首行撤销按钮 (P5 规范) -->
+      {#if !isExecuting && !execution?.needsConfirm && (execution?.canUndo || execution?.snapshot?.id)}
+        <button
+          class="btn-rollback-top"
+          type="button"
+          title="一键撤销对目标工作簿的这次改动"
+          disabled={isRestoring}
+          on:click|stopPropagation={() => openRestoreConfirm(selectedSnapshotId || execution?.snapshot?.id || '')}
+        >
+          <RotateCcw size={12} class={isRestoring ? 'animate-spin' : ''} />
+          <span>{restoreSuccess ? '已撤销' : (isRestoring ? '正在撤销...' : '撤销改动')}</span>
+        </button>
+      {/if}
+
+      <!-- 双模态查看：未展开时也可直接全屏放大查看代码与记录 -->
       {#if execution || displayCode}
         <button
           class="btn-icon-subtle"
           type="button"
-          title="全屏放大查看源码与核验报告"
+          title="全屏查看代码与核对结果"
           on:click|stopPropagation={() => (isFullscreen = true)}
         >
           <Maximize2 size={13} />
         </button>
       {/if}
       <button class="expand-btn" type="button" aria-expanded={isExpanded}>
-        <span>{isExpanded ? '收起详情' : '展开核验与记录'}</span>
+        <span>{isExpanded ? '收起详情' : '展开详情与记录'}</span>
         {#if isExpanded}
           <ChevronUp size={14} />
         {:else}
@@ -330,9 +443,9 @@
       <div class="partial-mod-left">
         <AlertCircle size={16} color="#B25900" />
         <div class="partial-mod-text">
-          <span class="partial-mod-title">宏运行失败，工作簿可能已部分修改</span>
+          <span class="partial-mod-title">宏运行失败，表格可能已部分修改</span>
           <span class="partial-mod-desc">
-            执行后读回区域: <strong>{execution?.readback?.usedRangeAddress || '见读回'}</strong>；宏可能已部分修改工作簿。执行前快照已就绪，可随时整本恢复。
+            执行后读回区域: <strong>{execution?.readback?.usedRangeAddress || '见读回'}</strong>；可随时撤销改动。
           </span>
         </div>
       </div>
@@ -342,7 +455,7 @@
           on:click|stopPropagation={() => openRestoreConfirm(selectedSnapshotId || execution?.snapshot?.id || '')}
         >
           <RotateCcw size={12} />
-          <span>整本恢复快照</span>
+          <span>撤销改动</span>
         </button>
       </div>
     </div>
@@ -359,15 +472,15 @@
             on:click={() => (activeTab = 'readback')}
           >
             <SearchCheck size={13} />
-            <span>写后核验</span>
+            <span>核对结果</span>
           </button>
           <button class="tab-btn {activeTab === 'code' ? 'active' : ''}" on:click={() => (activeTab = 'code')}>
             <Code size={13} />
-            <span>VBA 源码</span>
+            <span>VBA 代码</span>
           </button>
           <button class="tab-btn {activeTab === 'audit' ? 'active' : ''}" on:click={() => (activeTab = 'audit')}>
             <FileText size={13} />
-            <span>审计日志</span>
+            <span>运行日志</span>
           </button>
         </div>
 
@@ -415,9 +528,9 @@
               <span class="rb-val">
                 {execution.readback.targetWorkbookName}
                 {#if execution.readback.targetVerified}
-                  <span class="pill pill-green">身份核验一致</span>
+                  <span class="pill pill-green">已确认写入目标文件</span>
                 {:else}
-                  <span class="pill pill-red">身份不一致</span>
+                  <span class="pill pill-red">文件不匹配</span>
                 {/if}
               </span>
             </div>
@@ -470,7 +583,7 @@
 
             {#if execution.verificationNote}
               <div class="verification-box">
-                <span class="ver-label">核验摘要:</span>
+                <span class="ver-label">核对结果:</span>
                 <span class="ver-text">{execution.verificationNote}</span>
               </div>
             {/if}
@@ -488,9 +601,9 @@
               <button
                 class="sub-tab-btn {codeViewMode === 'executed' ? 'active' : ''}"
                 on:click={() => (codeViewMode = 'executed')}
-                title="查看校验并实际执行的 VBA 源码"
+                title="查看校验并实际执行的 VBA 代码"
               >
-                实际执行源码
+                实际执行代码
                 {#if execution?.executedCodeHash}
                   <span class="hash-tag">SHA:{execution.executedCodeHash.slice(0, 8)}</span>
                 {/if}
@@ -509,9 +622,9 @@
                 <button
                   class="sub-tab-btn {codeViewMode === 'wrapper' ? 'active' : ''}"
                   on:click={() => (codeViewMode = 'wrapper')}
-                  title="查看自动注入的受控入口包装器"
+                  title="查看自动生成的包装代码"
                 >
-                  入口包装器
+                  包装代码
                 </button>
               {/if}
             </div>
@@ -537,7 +650,7 @@
               <button
                 class="sub-action-btn {copyActiveType === 'executed' ? 'copied' : ''}"
                 on:click={handleCopyExecuted}
-                title="一键复制校验后实际执行的完整源码"
+                title="一键复制实际执行的完整代码"
               >
                 {#if copyActiveType === 'executed'}
                   <Check size={11} color="#4ec9b0" />
@@ -630,13 +743,13 @@
               <div class="audit-constraints-list">
                 {#each promptConstraints as rule}
                   <div class="constraint-item">
-                    <span class="pill {rule.category === '模型能力限制' ? 'pill-red' : (rule.category === '运行入口协议' ? 'pill-blue' : 'pill-gray')}">
-                      {rule.category}
+                    <span class="pill {rule.category === '模型能力限制' ? 'pill-red' : (rule.category?.includes('协议') ? 'pill-blue' : 'pill-gray')}">
+                      {rule.category?.includes('协议') ? '运行协议' : rule.category}
                     </span>
                     <strong> {rule.name}:</strong> {rule.description}
                     {#if rule.isHostCapabilityLimitation}
                       <div class="constraint-warning">
-                        ⚠️ {rule.limitationReason}
+                        {rule.limitationReason}
                       </div>
                     {/if}
                   </div>
@@ -647,7 +760,7 @@
 
           <!-- 哈希与源码一致性审计 -->
           <div class="log-row">
-            <span class="log-label">源码哈希:</span>
+            <span class="log-label">代码哈希:</span>
             <div class="hash-table">
               <div class="hash-item">
                 <span class="hash-name">模型提取:</span>
@@ -661,7 +774,7 @@
                 {#if execution?.isSourceIdentical}
                   <span class="pill pill-green">哈希一致 (模型原貌直调)</span>
                 {:else if wrapperCode}
-                  <span class="pill pill-blue">正文零暗改 (追加受控入口包装器)</span>
+                  <span class="pill pill-blue">正文零修改 (追加受控包装代码)</span>
                 {/if}
               </div>
             </div>
@@ -678,22 +791,22 @@
             </div>
           {/if}
 
-          <!-- 预编译与运行阶段状态精确区分 -->
+          <!-- 运行阶段状态 -->
           <div class="log-row">
-            <span class="log-label">预检与阶段:</span>
+            <span class="log-label">状态与阶段:</span>
             <div class="rb-badges">
               {#if execution?.precheckStatus === 'passed'}
-                <span class="pill pill-green">静态预检通过 (VBE 578)</span>
+                <span class="pill pill-green">检查通过</span>
               {:else if execution?.precheckStatus === 'warning'}
-                <span class="pill pill-amber">预检未确认 (整本快照保护下运行)</span>
+                <span class="pill pill-amber">有风险提醒 (可撤销)</span>
               {:else if execution?.precheckStatus === 'unavailable'}
-                <span class="pill pill-amber">预编译不可用 (整本快照保护下运行)</span>
+                <span class="pill pill-amber">未完全编译 (可撤销)</span>
               {:else if execution?.precheckStatus === 'failed'}
-                <span class="pill pill-red">预编译拦截 (编译错误)</span>
+                <span class="pill pill-red">编译未通过</span>
               {:else if execution?.precheckStatus === 'scope_risk_intercepted'}
-                <span class="pill pill-red">范围失控拦截 (阻止运行)</span>
+                <span class="pill pill-red">超出操作范围已停止</span>
               {:else if execution?.precheckStatus === 'workbook_locked'}
-                <span class="pill pill-red">工作簿已锁定保护</span>
+                <span class="pill pill-red">工作簿已锁定</span>
               {/if}
 
               {#if execution?.executionPhase === 'macro_completed'}
@@ -705,7 +818,7 @@
               {:else if execution?.executionPhase === 'compile_failed' || execution?.executionPhase === 'syntax_failed'}
                 <span class="pill pill-amber">静态编译未通过</span>
               {:else if execution?.executionPhase === 'invocation_failed'}
-                <span class="pill pill-red">入口调度失败</span>
+                <span class="pill pill-red">过程调用失败</span>
               {:else if execution?.executionPhase === 'runtime_error'}
                 {#if execution?.isPartiallyModified}
                   <span class="pill pill-amber">运行异常 (工作簿已部分修改)</span>
@@ -751,18 +864,18 @@
           {#if execution?.isPartiallyModified}
             <div class="log-row flex-col partial-warning-box">
               <div class="partial-warning-header">
-                <span class="partial-warning-title">⚠️ 宏运行异常中断：工作簿已发生部分修改！</span>
+                <span class="partial-warning-title">宏运行异常中断：工作簿已发生部分修改！</span>
                 {#if selectedSnapshotId || execution?.snapshot?.id}
                   <button
                     class="btn btn-sm btn-danger"
                     on:click={() => openRestoreConfirm(selectedSnapshotId || execution?.snapshot?.id || '')}
                   >
-                    一键整本回滚
+                    撤销改动
                   </button>
                 {/if}
               </div>
               <div class="partial-warning-desc">
-                执行后读回区域: <strong>{execution?.readback?.usedRangeAddress || '见读回'}</strong>；宏可能已部分修改工作簿。可点击上方按钮一键恢复至初始快照。
+                执行后读回区域: <strong>{execution?.readback?.usedRangeAddress || '见读回'}</strong>；可点击上方按钮一键撤销。
               </div>
             </div>
           {/if}
@@ -817,7 +930,7 @@
             <span class="log-label">跨文件检查:</span>
             {#if execution?.readback?.otherWorkbooksAffected}
               <span class="log-val font-error">
-                ⚠️ 检测到其他打开的工作簿受到影响：{execution.readback.affectedWorkbooksWarning}
+                检测到其他打开的工作簿受到影响：{execution.readback.affectedWorkbooksWarning}
               </span>
             {:else}
               <span class="log-val status-green">未影响其他已打开工作簿</span>
@@ -840,10 +953,10 @@
           <div class="boundary-warning-card">
             <div class="bw-header">
               <ShieldAlert size={14} color="#B25900" />
-              <span class="bw-title">开放式 VBA 安全与回滚边界声明</span>
+              <span class="bw-title">安全与回滚说明</span>
             </div>
             <p class="bw-body">
-              工作簿快照仅保障目标工作簿本身的数据与格式原位回滚。若模型生成的开放式 VBA 包含外部文件读写、修改了其他工作簿、调用系统 API 或执行外部进程等副作用，快照无法自动撤回。宏的系统级行为仍需人工把关。
+              支持一键撤销对目标工作簿的改动。若宏涉及外部文件读写或系统命令，无法自动撤销。
             </p>
           </div>
         </div>
@@ -945,9 +1058,9 @@
           <p class="rcp-desc">
             确定将工作簿恢复到该宏执行前的快照吗？
             <br />
-            ⚠️ <strong>注意</strong>：宏执行后产生的所有新增手工修改、单元格编辑都将被覆盖！
+            <strong>注意</strong>：宏执行后产生的所有新增手工修改、单元格编辑都将被覆盖！
             <br />
-            <span class="dim-text">（系统会在恢复前为当前状态保留一份紧急安全救援副本）</span>
+            <span class="dim-text">（系统会在恢复前为当前状态保留一份紧急安全救援备份）</span>
           </p>
           <div class="rcp-actions">
             <button class="btn btn-sm" on:click={() => (showRestoreConfirm = false)}>取消</button>
@@ -965,7 +1078,7 @@
 
       <!-- 快照保护边界明确声明 -->
       <div class="snapshot-boundary-note">
-        <span>ℹ️ 快照保护边界：快照完整备份和回滚目标工作簿本身的数据与结构；VBA 宏若涉及外部磁盘或网络操作，快照无法自动回滚。</span>
+        <span>可一键撤销这次改动。涉及外部文件的操作除外（点开看）</span>
       </div>
     </div>
   {/if}
@@ -979,10 +1092,10 @@
     on:keydown={(e) => e.key === 'Escape' && (isFullscreen = false)}
     role="presentation"
   >
-    <div class="fullscreen-dialog" role="dialog" aria-modal="true" aria-label="执行详情与源码全屏查看">
+    <div class="fullscreen-dialog" role="dialog" aria-modal="true" aria-label="执行详情与代码全屏查看">
       <div class="fs-header">
         <div class="fs-title-area">
-          <span class="fs-title">执行详情与源码放大查看</span>
+          <span class="fs-title">执行详情与代码放大查看</span>
           <span class="badge {execution?.verificationStatus === 'matched' ? 'badge-green' : (execution?.error || execution?.verificationStatus === 'failed' ? 'badge-red' : 'badge-amber')}">
             {execution?.verificationStatus === 'matched' ? '抽样匹配' : (execution?.error || execution?.verificationStatus === 'failed' ? '执行异常' : '待确认')}
           </span>
@@ -996,21 +1109,21 @@
               on:click={() => (activeTab = 'code')}
             >
               <Code size={13} />
-              <span>VBA 源码</span>
+              <span>VBA 代码</span>
             </button>
             <button
               class="fs-tab-btn {activeTab === 'readback' ? 'active' : ''}"
               on:click={() => (activeTab = 'readback')}
             >
               <SearchCheck size={13} />
-              <span>写后核验</span>
+              <span>核对结果</span>
             </button>
             <button
               class="fs-tab-btn {activeTab === 'audit' ? 'active' : ''}"
               on:click={() => (activeTab = 'audit')}
             >
               <FileText size={13} />
-              <span>审计日志</span>
+              <span>运行日志</span>
             </button>
           </div>
 
@@ -1037,7 +1150,7 @@
                   class="sub-tab-btn {codeViewMode === 'executed' ? 'active' : ''}"
                   on:click={() => (codeViewMode = 'executed')}
                 >
-                  实际执行源码
+                  实际执行代码
                   {#if execution?.executedCodeHash}
                     <span class="hash-tag">SHA:{execution.executedCodeHash.slice(0, 8)}</span>
                   {/if}
@@ -1056,7 +1169,7 @@
                     class="sub-tab-btn {codeViewMode === 'wrapper' ? 'active' : ''}"
                     on:click={() => (codeViewMode = 'wrapper')}
                   >
-                    入口包装器
+                    包装代码
                   </button>
                 {/if}
               </div>
@@ -1065,7 +1178,7 @@
                 <button class="sub-action-btn" on:click={handleCopyExecuted}>复制执行</button>
               </div>
             </div>
-            <pre class="fs-vba-pre"><code>{displayCode || '暂无可展示源码'}</code></pre>
+            <pre class="fs-vba-pre"><code>{displayCode || '暂无可展示代码'}</code></pre>
           </div>
         {:else if activeTab === 'readback'}
           <div class="fs-readback-panel">
@@ -1075,7 +1188,7 @@
                   <div class="fs-card-title">基本信息</div>
                   <div class="fs-card-row"><span>目标文件:</span> <strong>{execution.readback.targetWorkbookName}</strong></div>
                   <div class="fs-card-row"><span>目标表格:</span> <strong>{execution.readback.targetSheetName || '活动表'}</strong></div>
-                  <div class="fs-card-row"><span>一致性:</span> <span class="pill {execution.readback.targetVerified ? 'pill-green' : 'pill-red'}">{execution.readback.targetVerified ? '核验通过' : '身份异常'}</span></div>
+                  <div class="fs-card-row"><span>一致性:</span> <span class="pill {execution.readback.targetVerified ? 'pill-green' : 'pill-red'}">{execution.readback.targetVerified ? '核对通过' : '目标异常'}</span></div>
                 </div>
                 <div class="fs-card">
                   <div class="fs-card-title">写入区域读回</div>
@@ -1102,7 +1215,7 @@
               {/if}
               {#if execution.verificationNote}
                 <div class="verification-box" style="margin-top: 14px;">
-                  <span class="ver-label">核验综合结论:</span>
+                  <span class="ver-label">核对结论:</span>
                   <span class="ver-text">{execution.verificationNote}</span>
                 </div>
               {/if}
@@ -2275,5 +2388,61 @@
     flex-direction: column;
     gap: 12px;
     font-size: var(--font-size-sm);
+  }
+
+  .btn-rollback-top {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    font-size: var(--office-font-size-meta, 11px);
+    font-weight: 500;
+    color: var(--office-danger, #C42B1C);
+    background: #fff;
+    border: 1px solid rgba(196, 43, 28, 0.3);
+    border-radius: var(--office-radius-sm, 4px);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+  }
+
+  .btn-rollback-top:hover {
+    background: #fdf2f2;
+    border-color: var(--office-danger, #C42B1C);
+  }
+
+  .l2-risk-confirm-card {
+    padding: 10px 12px;
+    background: #fff5f5;
+    border: 1px solid rgba(196, 43, 28, 0.4);
+    border-radius: var(--office-radius-md, 6px);
+    margin: 6px;
+  }
+
+  .l2-risk-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+    font-size: var(--office-font-size-body, 13px);
+    color: var(--office-danger, #C42B1C);
+  }
+
+  .l2-risk-body {
+    margin: 6px 0 8px 0;
+    font-size: var(--office-font-size-meta, 11px);
+    color: var(--office-text-secondary, #605e5c);
+    line-height: 1.4;
+  }
+
+  .l2-risk-desc {
+    margin: 0;
+  }
+
+  .l2-risk-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
   }
 </style>

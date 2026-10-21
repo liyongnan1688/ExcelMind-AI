@@ -19,6 +19,7 @@ namespace LeeExcel
 
     public class ExecutionDataDto
     {
+        public string requestId { get; set; }
         public string summary { get; set; }
         public string error { get; set; }
         public double elapsedMs { get; set; }
@@ -57,6 +58,46 @@ namespace LeeExcel
         public bool? restoredEnableEvents { get; set; }
         public int? restoredCalculation { get; set; }
         public string metaSaveError { get; set; }
+        public bool canUndo { get; set; }
+        public string riskLevel { get; set; }
+        public string riskCode { get; set; }
+        public bool needsConfirm { get; set; }
+        public List<string> riskReasons { get; set; }
+        public string riskTargetDetail { get; set; }
+        public string confirmToken { get; set; }
+    }
+
+    internal static class ConfirmTokenStore
+    {
+        private static readonly Dictionary<string, string> _tokens = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private static readonly object _lock = new object();
+
+        public static void Register(string requestId, string token)
+        {
+            if (string.IsNullOrEmpty(requestId) || string.IsNullOrEmpty(token)) return;
+            lock (_lock)
+            {
+                _tokens[requestId] = token;
+            }
+        }
+
+        public static bool ValidateAndConsume(string requestId, string token)
+        {
+            if (string.IsNullOrEmpty(requestId) || string.IsNullOrEmpty(token)) return false;
+            lock (_lock)
+            {
+                string expected;
+                if (_tokens.TryGetValue(requestId, out expected))
+                {
+                    if (string.Equals(expected, token, StringComparison.Ordinal))
+                    {
+                        _tokens.Remove(requestId);
+                        return true;
+                    }
+                }
+                return false;
+            }
+        }
     }
 
     public class BridgeResponse
@@ -591,47 +632,59 @@ namespace LeeExcel
                 };
             }
 
-            // 1. 运行前自动执行整本物理副本快照 (针对目标工作簿 targetWb)
+            // P5: 宿主风险分级扫描 (L0 / L1 / L2)
+            string targetFullNameForRisk = !string.IsNullOrEmpty(targetFullName) ? targetFullName : targetName;
+            var riskAnalysis = VbaRiskScanner.Analyze(code, targetFullNameForRisk);
+            string reqRequestId = req.ContainsKey("requestId") && !string.IsNullOrEmpty(req["requestId"]) ? req["requestId"] : Guid.NewGuid().ToString("N");
+            string providedToken = req.ContainsKey("confirmToken") ? req["confirmToken"] : null;
+
+            // 若命中 L2 且未提供有效确认 Token，则绝对不执行、不改工作簿、不建快照，返回 L2 确认卡数据
+            if (riskAnalysis.RiskLevel == VbaRiskLevel.L2)
+            {
+                bool isConfirmed = !string.IsNullOrEmpty(providedToken) && ConfirmTokenStore.ValidateAndConsume(reqRequestId, providedToken);
+                if (!isConfirmed)
+                {
+                    string newToken = Guid.NewGuid().ToString("N");
+                    ConfirmTokenStore.Register(reqRequestId, newToken);
+                    return new BridgeResponse
+                    {
+                        ok = true,
+                        action = "execute_vba",
+                        requestId = reqRequestId,
+                        message = "该操作具有不可逆风险，需用户确认",
+                        data = new ExecutionDataDto
+                        {
+                            requestId = reqRequestId,
+                            needsConfirm = true,
+                            riskLevel = "L2",
+                            riskCode = riskAnalysis.RiskCode,
+                            riskReasons = riskAnalysis.Reasons,
+                            riskTargetDetail = riskAnalysis.TargetDetail,
+                            confirmToken = newToken,
+                            canUndo = false,
+                            targetWorkbookName = targetName,
+                            targetWorkbookFullName = targetFullName,
+                            summary = "该操作具有不可逆风险，需用户确认后方可执行",
+                            readback = null
+                        }
+                    };
+                }
+            }
+
+            // 1. 快照策略：
+            // - L0 (只读): 零修改，不创建物理快照，直接执行
+            // - L1 / 已确认的 L2: 自动执行整本物理副本快照
             SnapshotItem snap = null;
-            try
+            if (riskAnalysis.RiskLevel != VbaRiskLevel.L0)
             {
-                snap = SnapshotManager.CreateSnapshot(targetWb, prompt, code);
-            }
-            catch (Exception snapEx)
-            {
-                System.Diagnostics.Debug.WriteLine("快照创建失败: " + snapEx.Message);
-                string blockErr = "执行已安全中止：执行前目标工作簿快照备份失败 (" + snapEx.Message + ")。为保障数据可回滚安全，拒绝执行代码。";
-                string dummyMetaErr;
-                RecordScriptExecutionHistory(req, code, targetName, null, "blocked", "before_run", 0, blockErr, entryPoint, precheck.paramTypes, precheck.sanitizedSummary, out dummyMetaErr);
-                return new BridgeResponse
+                try
                 {
-                    ok = false,
-                    action = "execute_vba",
-                    error = blockErr
-                };
-            }
-
-            if (snap == null || string.IsNullOrEmpty(snap.id) || string.IsNullOrEmpty(snap.fileName))
-            {
-                string blockErr = "执行已安全中止：目标工作簿物理快照备份未能成功生成有效副本。请确认工作簿已保存并具有有效磁盘路径。为保障数据可回滚安全，拒绝执行代码。";
-                string dummyMetaErr;
-                RecordScriptExecutionHistory(req, code, targetName, null, "blocked", "before_run", 0, blockErr, entryPoint, precheck.paramTypes, precheck.sanitizedSummary, out dummyMetaErr);
-                return new BridgeResponse
+                    snap = SnapshotManager.CreateSnapshot(targetWb, prompt, code);
+                }
+                catch (Exception snapEx)
                 {
-                    ok = false,
-                    action = "execute_vba",
-                    error = blockErr
-                };
-            }
-
-            try
-            {
-                string wbPathForFolder = !string.IsNullOrEmpty(snap.originalPath) ? snap.originalPath : (!string.IsNullOrEmpty(targetFullName) ? targetFullName : targetName);
-                string snapFolder = SnapshotManager.GetBackupFolderForWorkbook(wbPathForFolder);
-                string snapFile = Path.Combine(snapFolder, snap.fileName);
-                if (!File.Exists(snapFile) || new FileInfo(snapFile).Length == 0)
-                {
-                    string blockErr = "执行已安全中止：快照物理文件未能有效写入磁盘（文件不存在或为0字节）。拒绝执行代码以防数据丢失。";
+                    System.Diagnostics.Debug.WriteLine("快照创建失败: " + snapEx.Message);
+                    string blockErr = "执行已安全中止：执行前目标工作簿快照备份失败 (" + snapEx.Message + ")。为保障数据可回滚安全，拒绝执行代码。";
                     string dummyMetaErr;
                     RecordScriptExecutionHistory(req, code, targetName, null, "blocked", "before_run", 0, blockErr, entryPoint, precheck.paramTypes, precheck.sanitizedSummary, out dummyMetaErr);
                     return new BridgeResponse
@@ -641,18 +694,50 @@ namespace LeeExcel
                         error = blockErr
                     };
                 }
-            }
-            catch (Exception checkEx)
-            {
-                string blockErr = "执行已安全中止：快照文件物理校验异常 (" + checkEx.Message + ")。拒绝执行代码以防数据丢失。";
-                string dummyMetaErr;
-                RecordScriptExecutionHistory(req, code, targetName, null, "blocked", "before_run", 0, blockErr, entryPoint, precheck.paramTypes, precheck.sanitizedSummary, out dummyMetaErr);
-                return new BridgeResponse
+
+                if (snap == null || string.IsNullOrEmpty(snap.id) || string.IsNullOrEmpty(snap.fileName))
                 {
-                    ok = false,
-                    action = "execute_vba",
-                    error = blockErr
-                };
+                    string blockErr = "执行已安全中止：目标工作簿物理快照备份未能成功生成有效副本。请确认工作簿已保存并具有有效磁盘路径。为保障数据可回滚安全，拒绝执行代码。";
+                    string dummyMetaErr;
+                    RecordScriptExecutionHistory(req, code, targetName, null, "blocked", "before_run", 0, blockErr, entryPoint, precheck.paramTypes, precheck.sanitizedSummary, out dummyMetaErr);
+                    return new BridgeResponse
+                    {
+                        ok = false,
+                        action = "execute_vba",
+                        error = blockErr
+                    };
+                }
+
+                try
+                {
+                    string wbPathForFolder = !string.IsNullOrEmpty(snap.originalPath) ? snap.originalPath : (!string.IsNullOrEmpty(targetFullName) ? targetFullName : targetName);
+                    string snapFolder = SnapshotManager.GetBackupFolderForWorkbook(wbPathForFolder);
+                    string snapFile = Path.Combine(snapFolder, snap.fileName);
+                    if (!File.Exists(snapFile) || new FileInfo(snapFile).Length == 0)
+                    {
+                        string blockErr = "执行已安全中止：快照物理文件未能有效写入磁盘（文件不存在或为0字节）。拒绝执行代码以防数据丢失。";
+                        string dummyMetaErr;
+                        RecordScriptExecutionHistory(req, code, targetName, null, "blocked", "before_run", 0, blockErr, entryPoint, precheck.paramTypes, precheck.sanitizedSummary, out dummyMetaErr);
+                        return new BridgeResponse
+                        {
+                            ok = false,
+                            action = "execute_vba",
+                            error = blockErr
+                        };
+                    }
+                }
+                catch (Exception checkEx)
+                {
+                    string blockErr = "执行已安全中止：快照文件物理校验异常 (" + checkEx.Message + ")。拒绝执行代码以防数据丢失。";
+                    string dummyMetaErr;
+                    RecordScriptExecutionHistory(req, code, targetName, null, "blocked", "before_run", 0, blockErr, entryPoint, precheck.paramTypes, precheck.sanitizedSummary, out dummyMetaErr);
+                    return new BridgeResponse
+                    {
+                        ok = false,
+                        action = "execute_vba",
+                        error = blockErr
+                    };
+                }
             }
 
             // 2. 在目标工作簿中执行动态 VBA 并读回实际状态
@@ -681,7 +766,7 @@ namespace LeeExcel
             string finalMsg = result.summary;
             if (!string.IsNullOrEmpty(metaSaveWarning))
             {
-                finalMsg = (finalMsg != null ? finalMsg + "\n" : "") + "⚠️ 运行记录保存失败: " + metaSaveWarning;
+                finalMsg = (finalMsg != null ? finalMsg + "\n" : "") + "注意：运行记录保存失败: " + metaSaveWarning;
             }
 
             return new BridgeResponse
@@ -693,11 +778,18 @@ namespace LeeExcel
                 error = result.error,
                 data = new ExecutionDataDto
                 {
+                    requestId = reqRequestId,
                     summary = finalMsg,
                     error = result.error,
                     elapsedMs = result.elapsedMs,
                     metaSaveError = metaSaveWarning,
                     snapshot = snap,
+                    canUndo = (snap != null && !string.IsNullOrEmpty(snap.id)),
+                    riskLevel = riskAnalysis.RiskLevel.ToString(),
+                    riskCode = riskAnalysis.RiskCode,
+                    riskReasons = riskAnalysis.Reasons,
+                    riskTargetDetail = riskAnalysis.TargetDetail,
+                    needsConfirm = false,
                     rawModelResponse = result.rawModelResponse,
                     originalVbaCode = result.originalVbaCode,
                     executedVbaCode = result.executedVbaCode,

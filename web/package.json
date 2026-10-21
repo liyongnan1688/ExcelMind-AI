@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "check": "svelte-check --tsconfig ./tsconfig.json --output human",
+    "check:ui": "node ../scripts/check-tokens.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

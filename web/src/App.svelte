@@ -10,6 +10,10 @@
   import ExecutionCard from './components/ExecutionCard.svelte';
   import ChatInput from './components/ChatInput.svelte';
   import MacroConfirmCard from './components/MacroConfirmCard.svelte';
+  import Toast from './components/Toast.svelte';
+  import ConfirmDialog from './components/ConfirmDialog.svelte';
+  import { toast } from './services/toast';
+  import { showConfirm } from './services/dialog';
   import { bridge, type WorkbookInfo, type ScriptItem, type VbaExecutionData, type SelectionSnapshot } from './services/bridge';
   import {
     callLlmStream,
@@ -28,8 +32,8 @@
   let inspectingSnapshot: SelectionSnapshot | null = null;
   let activeMacroReference: MacroReferenceData | null = null;
 
-  // 企业级工作区状态：高频主入口 / 次级工作区 (支持通过 URL 参数精准切入预览，生产默认纯净 assistant)
-  let activeWorkspace: 'assistant' | 'scripts' | 'datatools' = (typeof window !== 'undefined' && window.location.search.includes('ws=datatools')) ? 'datatools' : 'assistant';
+  // 企业级工作区状态：高频主入口 / 次级工作区
+  let activeWorkspace: 'assistant' | 'scripts' = 'assistant';
   // 严格隔离：默认生产界面不展示 mock 原型，仅当带有 ?preview=true 时展示
   let showConfirmCardPrototype = typeof window !== 'undefined' && window.location.search.includes('preview=true');
 
@@ -46,7 +50,6 @@
   }
 
   let showSettings = false;
-  let showScripts = false;
   let showDataTools = false;
   let showBatchModal = false;
   let showWorkflowModal = false;
@@ -73,7 +76,7 @@
 
     // 监听 Ribbon 动态菜单触发“收藏宏”运行前确认
     unbindPromptRunMacro = bridge.onAction('prompt_run_macro', async (payload: any) => {
-      showScripts = true;
+      activeWorkspace = 'scripts';
       showSettings = false;
       await tick();
       const scriptId = typeof payload === 'string' ? payload : (payload?.scriptId || '');
@@ -81,36 +84,39 @@
     });
 
     // 监听 Ribbon 菜单打开“宏库”/“我的脚本”抽屉
-    unbindOpenMacroLibrary = bridge.onAction('open_macro_library', () => {
-      showScripts = true;
+    unbindOpenMacroLibrary = bridge.onAction('open_macro_library', async () => {
+      activeWorkspace = 'scripts';
       showSettings = false;
+      await tick();
       scriptDrawerRef?.openTab('list');
     });
 
-    unbindOpenScripts = bridge.onAction('open_scripts', () => {
-      showScripts = true;
+    unbindOpenScripts = bridge.onAction('open_scripts', async () => {
+      activeWorkspace = 'scripts';
       showSettings = false;
+      await tick();
       scriptDrawerRef?.openTab('list');
     });
 
     // 监听 Ribbon 菜单打开“我的宏”列表
-    unbindOpenMyMacros = bridge.onAction('open_my_macros', () => {
-      showScripts = true;
+    unbindOpenMyMacros = bridge.onAction('open_my_macros', async () => {
+      activeWorkspace = 'scripts';
       showSettings = false;
+      await tick();
       scriptDrawerRef?.openTab('list');
     });
 
     // 监听 Ribbon 菜单打开“导入宏”窗口
-    unbindOpenImportMacro = bridge.onAction('open_import_macro', () => {
-      showScripts = true;
+    unbindOpenImportMacro = bridge.onAction('open_import_macro', async () => {
+      activeWorkspace = 'scripts';
       showSettings = false;
+      await tick();
       scriptDrawerRef?.openTab('import');
     });
 
-    // 监听 Ribbon 菜单直达“数据工具”工作区
+    // 监听 Ribbon 菜单直达“数据工具”面板
     unbindOpenDataTools = bridge.onAction('open_data_tools', () => {
-      activeWorkspace = 'datatools';
-      showScripts = false;
+      showDataTools = true;
       showSettings = false;
     });
 
@@ -127,7 +133,6 @@
     // 监听 Ribbon 菜单打开“API配置与设置”弹窗
     unbindOpenSettings = bridge.onAction('open_settings', () => {
       showSettings = true;
-      showScripts = false;
     });
 
     // 初次获取工作簿信息
@@ -149,29 +154,36 @@
 
 
     if (typeof window !== 'undefined') {
-      (window as any).__openScripts = () => {
-        showScripts = true;
+      (window as any).__openScripts = async () => {
+        activeWorkspace = 'scripts';
         showSettings = false;
+        await tick();
         scriptDrawerRef?.openTab('list');
       };
-      (window as any).__openMyMacros = () => {
-        showScripts = true;
+      (window as any).__openMyMacros = async () => {
+        activeWorkspace = 'scripts';
         showSettings = false;
+        await tick();
         scriptDrawerRef?.openTab('list');
       };
-      (window as any).__openImportMacro = () => {
-        showScripts = true;
+      (window as any).__openMacroLibrary = async () => {
+        activeWorkspace = 'scripts';
         showSettings = false;
+        await tick();
+        scriptDrawerRef?.openTab('list');
+      };
+      (window as any).__openImportMacro = async () => {
+        activeWorkspace = 'scripts';
+        showSettings = false;
+        await tick();
         scriptDrawerRef?.openTab('import');
       };
       (window as any).__openSettings = () => {
         showSettings = true;
-        showScripts = false;
         showDataTools = false;
       };
       (window as any).__openDataTools = () => {
         showDataTools = true;
-        showScripts = false;
         showSettings = false;
       };
       (window as any).__openBatch = () => {
@@ -194,7 +206,7 @@
       };
 
       (window as any).__promptRunMacro = (scriptId: string) => {
-        showScripts = true;
+        activeWorkspace = 'scripts';
         showSettings = false;
         setTimeout(() => {
           scriptDrawerRef?.promptRunMacro(scriptId);
@@ -249,16 +261,18 @@
       const currentWbName = (workbook?.name || '').trim();
       const attachedWbName = (selectionSnapshot.context.workbookName || '').trim();
       if (currentWbName && attachedWbName && currentWbName.toLowerCase() !== attachedWbName.toLowerCase()) {
-        alert(`⚠️ 附加选区来自工作簿【${attachedWbName}】，但当前活动工作簿为【${currentWbName}】。\n\n为避免跨工作簿误操作，请重新附加当前工作簿选区或移除附件后再发送。`);
+        toast.error(`附加选区来自工作簿【${attachedWbName}】，当前活动为【${currentWbName}】。请重新附加当前工作簿选区。`);
         return false;
       }
     }
 
     // 未存盘工作簿前置拦截：操作模式下写入未存盘文件无法安全通过重开回退，提示用户确认
     if (requestMode === 'AUTOMATION' && workbook && (!workbook.isSaved || !workbook.fullName || !workbook.fullName.includes('\\'))) {
-      const confirmed = window.confirm(
-        `⚠️ 提示：当前工作簿【${workbook.name || '未保存工作簿'}】尚未保存到本地磁盘。\n\n自动化脚本执行后将直接修改当前表格数据。若未保存，出错时可能无法通过重新打开文件撤销。\n\n建议先按 Ctrl+S 存盘。是否仍要继续？`
-      );
+      const confirmed = await showConfirm({
+        title: '工作簿尚未保存',
+        message: '将直接修改当前表格数据。\n建议先按 Ctrl+S 存盘。',
+        confirmText: '仍要继续',
+      });
       if (!confirmed) {
         return false;
       }
@@ -468,6 +482,7 @@
 
       let execRes = await bridge.send<VbaExecutionData>('execute_vba', {
         code: extracted.code,
+        requestId: currentRequest.requestId,
         prompt: text,
         targetWorkbookName: currentRequest.targetWbName,
         targetWorkbookFullName: currentRequest.targetWbFullName,
@@ -519,6 +534,7 @@
 
             const secondExecRes = await bridge.send<VbaExecutionData>('execute_vba', {
               code: repairedExtracted.code,
+              requestId: currentRequest.requestId,
               prompt: text,
               targetWorkbookName: currentRequest.targetWbName,
               targetWorkbookFullName: currentRequest.targetWbFullName,
@@ -538,39 +554,45 @@
       }
 
       if (execRes.ok && execRes.data) {
-        // 执行后核验：比对写后读回与用户实际诉求
-        const verification = verifyExecutionResult(text, execRes.data.readback);
-        execRes.data.verificationStatus = verification.status;
-        execRes.data.verificationNote = verification.note;
-        execRes.data.apiAudit = currentApiAudit;
-        assistantMsg.execution = execRes.data;
-
-        const repairBadge = wasRepaired ? '（初次代码存在预编译瑕疵，已自动完成自我修复并成功执行）' : '';
-
-        // 对话气泡最终回复保持简短（1句话），不污染聊天界面
-        if (verification.status === 'matched') {
-          assistantMsg.content = parsed.explanation
-            ? `${parsed.explanation}（区域 ${execRes.data.readback?.usedRangeAddress || ''} 抽样核验一致）${repairBadge}`
-            : `已在【${targetWbName}】执行完成，区域 ${execRes.data.readback?.usedRangeAddress || ''} 抽样核验一致。${repairBadge}`;
+        if (execRes.data.needsConfirm) {
+          assistantMsg.execution = execRes.data;
+          assistantMsg.content = `该操作具有不可逆高危风险，请在下方确认卡中核实并确认是否执行。`;
+          assistantMsg.rawContent = rawResponse;
         } else {
-          assistantMsg.content = parsed.explanation
-            ? `${parsed.explanation}（${verification.note}）${repairBadge}`
-            : `已在【${targetWbName}】执行宏，${verification.note}${repairBadge}`;
-        }
+          // 执行后核验：比对写后读回与用户实际诉求
+          const verification = verifyExecutionResult(text, execRes.data.readback);
+          execRes.data.verificationStatus = verification.status;
+          execRes.data.verificationNote = verification.note;
+          execRes.data.apiAudit = currentApiAudit;
+          assistantMsg.execution = execRes.data;
 
-        // 历史回复始终保留模型完整原始输出，绝对不含宿主包装器
-        assistantMsg.rawContent = rawResponse;
+          const repairBadge = wasRepaired ? '（初次代码存在预编译瑕疵，已自动完成自我修复并成功执行）' : '';
 
-        // 若检测到用户引用超窗宏，界面展示明确警示
-        if (currentApiAudit?.macroContextWarning) {
-          assistantMsg.content += `\n\n⚠️ ${currentApiAudit.macroContextWarning}`;
+          // 对话气泡最终回复保持简短（1句话），不污染聊天界面
+          if (verification.status === 'matched') {
+            assistantMsg.content = parsed.explanation
+              ? `${parsed.explanation}（区域 ${execRes.data.readback?.usedRangeAddress || ''} 抽样核验一致）${repairBadge}`
+              : `已在【${targetWbName}】执行完成，区域 ${execRes.data.readback?.usedRangeAddress || ''} 抽样核验一致。${repairBadge}`;
+          } else {
+            assistantMsg.content = parsed.explanation
+              ? `${parsed.explanation}（${verification.note}）${repairBadge}`
+              : `已在【${targetWbName}】执行宏，${verification.note}${repairBadge}`;
+          }
+
+          // 历史回复始终保留模型完整原始输出，绝对不含宿主包装器
+          assistantMsg.rawContent = rawResponse;
+
+          // 若检测到用户引用超窗宏，界面展示明确警示
+          if (currentApiAudit?.macroContextWarning) {
+            assistantMsg.content += `\n\n注意：${currentApiAudit.macroContextWarning}`;
+          }
         }
       } else {
         const errMsg = execRes.error || '执行遇到阻断';
         assistantMsg.content = `执行中断：${errMsg}`;
         assistantMsg.rawContent = rawResponse;
         if (currentApiAudit?.macroContextWarning) {
-          assistantMsg.content += `\n\n⚠️ ${currentApiAudit.macroContextWarning}`;
+          assistantMsg.content += `\n\n注意：${currentApiAudit.macroContextWarning}`;
         }
         assistantMsg.execution = execRes.data
           ? {
@@ -649,9 +671,11 @@
     messages = [...messages, assistantMsg];
     await scrollToBottom();
 
+    const scriptRequestId = (script.id || script.fileName || 'macro') + '_' + Date.now();
     try {
       const execRes = await bridge.send<VbaExecutionData>('execute_vba', {
         code: script.code,
+        requestId: scriptRequestId,
         prompt: `运行宏: ${macroDisplayName}`,
         targetWorkbookName: targetWbName,
         targetWorkbookFullName: targetWbFullName,
@@ -661,16 +685,21 @@
       });
 
       if (execRes.ok && execRes.data) {
-        const verification = verifyExecutionResult(`运行宏: ${macroDisplayName}`, execRes.data.readback);
-        execRes.data.verificationStatus = verification.status;
-        execRes.data.verificationNote = verification.note;
-        assistantMsg.execution = execRes.data;
-        let contentMsg = `宏【${macroDisplayName}】已运行完成。${verification.note}`;
-        const metaErr = execRes.data.metaSaveError || execRes.metaSaveError;
-        if (metaErr) {
-          contentMsg += `\n⚠️ 运行记录保存失败: ${metaErr}`;
+        if (execRes.data.needsConfirm) {
+          assistantMsg.execution = execRes.data;
+          assistantMsg.content = `宏【${macroDisplayName}】包含不可逆高危操作，请在下方确认卡中核验并确认是否执行。`;
+        } else {
+          const verification = verifyExecutionResult(`运行宏: ${macroDisplayName}`, execRes.data.readback);
+          execRes.data.verificationStatus = verification.status;
+          execRes.data.verificationNote = verification.note;
+          assistantMsg.execution = execRes.data;
+          let contentMsg = `宏【${macroDisplayName}】已运行完成。${verification.note}`;
+          const metaErr = execRes.data.metaSaveError || execRes.metaSaveError;
+          if (metaErr) {
+            contentMsg += `\n注意：运行记录保存失败: ${metaErr}`;
+          }
+          assistantMsg.content = contentMsg;
         }
-        assistantMsg.content = contentMsg;
       } else {
         assistantMsg.content = `宏执行失败：${execRes.error}`;
         assistantMsg.execution = {
@@ -699,7 +728,7 @@
   }
 
   function handleCancelWithQuestion(data: { script: ScriptItem; entryPoint: string; questionText: string }) {
-    showScripts = false;
+    activeWorkspace = 'assistant';
     if (chatInputRef && chatInputRef.setDraftText) {
       chatInputRef.setDraftText(data.questionText, 'CHAT');
     }
@@ -712,18 +741,23 @@
     {workbook}
     {activeWorkspace}
     onSelectWorkspace={(ws) => {
+      showDataTools = false;
       activeWorkspace = ws;
-      if (ws === 'scripts') {
-        showScripts = true;
-      }
     }}
-    onOpenSettings={() => (showSettings = true)}
-    onOpenBatch={() => (showBatchModal = true)}
-    onOpenWorkflow={() => (showWorkflowModal = true)}
     onRefresh={refreshWorkbookInfo}
   />
 
-  {#if activeWorkspace === 'assistant' || activeWorkspace === 'scripts'}
+  {#if showDataTools}
+    <div class="workspace-view datatool-view">
+      <DataToolModal
+        isOpen={true}
+        isWorkspaceView={true}
+        {workbook}
+        onClose={() => (showDataTools = false)}
+        onExecuted={refreshWorkbookInfo}
+      />
+    </div>
+  {:else if activeWorkspace === 'assistant'}
     <div class="workspace-view assistant-view">
       <!-- 消息流区域 -->
       <main class="chat-area {isScrollBottom ? 'scroll-to-bottom' : ''}" bind:this={messagesContainer}>
@@ -747,7 +781,6 @@
             <!-- 若随请求附加了选区，在用户气泡下方显示紧凑标识与查看发送按钮 -->
             {#if msg.selectionSnapshot}
               <div class="user-selection-badge">
-                <span class="badge-icon">📎</span>
                 <span class="badge-text">
                   已附加选区: {msg.selectionSnapshot.context.sheetName}!{msg.selectionSnapshot.context.address}
                   ({msg.selectionSnapshot.options.includeSamples ? `含${msg.selectionSnapshot.context.sampleRowCount}行样本` : '仅结构'})
@@ -766,7 +799,6 @@
             <!-- 若随请求显式引用了前序宏，在用户气泡下方显示紧凑标识 -->
             {#if msg.macroReference}
               <div class="user-selection-badge macro-ref-badge">
-                <span class="badge-icon">🏷️</span>
                 <span class="badge-text">
                   显式引用前序宏: {msg.macroReference.procedureName || 'Sub Main'} ({msg.macroReference.charCount} 字符, {msg.macroReference.lineCount} 行)
                 </span>
@@ -822,16 +854,16 @@
       <!-- 底部紧凑输入栏 -->
       <ChatInput bind:this={chatInputRef} {workbook} disabled={isProcessing} bind:referencedMacro={activeMacroReference} onSend={handleSend} />
     </div>
-
-  <!-- 工作区 2: 数据工具工作区 (代表性原型 2，独立视图，彻底解决弹窗遮罩与裸按钮) -->
-  {:else if activeWorkspace === 'datatools'}
-    <div class="workspace-view datatools-view">
-      <DataToolModal
+  {:else if activeWorkspace === 'scripts'}
+    <div class="workspace-view scripts-view">
+      <ScriptDrawer
+        bind:this={scriptDrawerRef}
         isOpen={true}
-        isWorkspaceView={true}
+        inline={true}
         {workbook}
-        onClose={() => (activeWorkspace = 'assistant')}
-        onExecuted={refreshWorkbookInfo}
+        onClose={() => {}}
+        onRunScript={handleRunScript}
+        onCancelWithQuestion={handleCancelWithQuestion}
       />
     </div>
   {/if}
@@ -841,8 +873,8 @@
     <div class="modal-backdrop" role="presentation" on:click|self={() => (inspectingSnapshot = null)}>
       <div class="modal-card">
         <div class="modal-header">
-          <h3>📎 本次随请求发送的只读选区数据</h3>
-          <button class="close-x-btn" on:click={() => (inspectingSnapshot = null)}>✕</button>
+          <h3>本次随请求发送的只读选区数据</h3>
+          <button class="close-x-btn" on:click={() => (inspectingSnapshot = null)} aria-label="关闭">&times;</button>
         </div>
         <div class="modal-body">
           <div class="audit-summary-bar">
@@ -865,30 +897,6 @@
     <SettingsModal onClose={() => (showSettings = false)} />
   {/if}
 
-  <!-- “宏管理与我的脚本”抽屉 -->
-  <ScriptDrawer
-    bind:this={scriptDrawerRef}
-    isOpen={showScripts}
-    {workbook}
-    onClose={() => {
-      showScripts = false;
-      if (activeWorkspace === 'scripts') activeWorkspace = 'assistant';
-    }}
-    onRunScript={handleRunScript}
-    onCancelWithQuestion={handleCancelWithQuestion}
-  />
-
-  <!-- 快捷数据工具弹窗（旧接口兼容：如果在 assistant 模式下被外部命令强行触发，转入 datatools 工作区） -->
-  {#if showDataTools}
-    <DataToolModal
-      isOpen={true}
-      isWorkspaceView={false}
-      {workbook}
-      onClose={() => (showDataTools = false)}
-      onExecuted={refreshWorkbookInfo}
-    />
-  {/if}
-
   <!-- 批量宏处理面板 (TASK-R4b) -->
   <BatchModal
     isOpen={showBatchModal}
@@ -902,6 +910,10 @@
     onClose={() => (showWorkflowModal = false)}
     onExecuted={refreshWorkbookInfo}
   />
+
+  <!-- 全局反馈层：应用内 Toast 与确认弹窗 -->
+  <Toast />
+  <ConfirmDialog />
 </div>
 
 <style>
@@ -930,7 +942,7 @@
     overflow: hidden;
   }
 
-  .datatools-view {
+  .scripts-view {
     display: flex;
     flex-direction: column;
     flex: 1;

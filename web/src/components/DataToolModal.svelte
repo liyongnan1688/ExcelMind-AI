@@ -29,6 +29,7 @@
     RefreshCw,
     Info,
     Search,
+    ArrowLeft,
   } from 'lucide-svelte';
   import {
     bridge,
@@ -57,6 +58,9 @@
   export let workbook: WorkbookInfo | null = null;
   export let onClose: () => void;
   export let onExecuted: (() => void) | undefined = undefined;
+
+  // 视图状态：网格选择 vs 表单详情
+  let view: 'grid' | 'detail' = 'grid';
 
   // 顶层 Tab
   let activeTab: 'dedup' | 'reconcile' | 'consolidate' | 'chart' | 'external_data' = 'dedup';
@@ -831,132 +835,134 @@
   <div class={isWorkspaceView ? "datatool-workspace-root" : "datatool-modal-overlay"}>
     <div class={isWorkspaceView ? "datatool-workspace-card" : "datatool-modal-card"}>
       
-      <!-- 头部：标题与状态说明 -->
-      <div class="datatool-header">
-        <div class="header-info">
-          <div class="header-icon-box">
-            {#if activeTab === 'dedup'}
-              <Filter size={18} />
-            {:else if activeTab === 'reconcile'}
-              <ArrowRightLeft size={18} />
-            {:else if activeTab === 'consolidate'}
-              <Layers size={18} />
-            {:else if activeTab === 'chart'}
-              <BarChart2 size={18} />
-            {:else}
-              <Download size={18} />
-            {/if}
+      {#if view === 'grid'}
+        <!-- 头部：标题与状态说明 -->
+        <div class="datatool-header">
+          <div class="header-info">
+            <div class="header-title-group">
+              <h2 class="tool-title">数据工具</h2>
+              <p class="tool-desc">选一个工具，按当前选区处理</p>
+            </div>
           </div>
-          <div class="header-title-group">
-            <h2 class="tool-title">
-              {activeTab === 'dedup' ? '按键去重' : activeTab === 'reconcile' ? '两表对账' : activeTab === 'consolidate' ? '多文件汇总' : activeTab === 'chart' ? '快捷图表' : '外部数据导入'}
-            </h2>
-            <p class="tool-desc">
-              {activeTab === 'dedup'
-                ? '比对单列或复合键，高亮或导出唯一记录。'
-                : activeTab === 'reconcile'
-                ? '全量跨表差异比对，输出四分类核对结果。'
-                : activeTab === 'consolidate'
-                ? '多文件同名列自动对齐合并为新工作簿。'
-                : activeTab === 'chart'
-                ? '选定数据区域免公式快速生成业务图表。'
-                : '只读预览并导入 CSV/JSON 外部数据。'}
-            </p>
+
+          <button
+            type="button"
+            on:click={onClose}
+            class="datatool-close-btn"
+            title={isWorkspaceView ? "返回 AI 助手" : "关闭"}
+            aria-label={isWorkspaceView ? "返回 AI 助手" : "关闭"}
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <!-- 网格选择视图：2 列网格，5 个工具全部可见 -->
+        <div class="datatool-grid-body">
+          <div class="datatool-grid">
+            <button
+              type="button"
+              class="datatool-grid-card"
+              on:click={() => { activeTab = 'dedup'; errorMessage = ''; view = 'detail'; }}
+            >
+              <div class="grid-card-icon-box">
+                <Filter size={20} />
+              </div>
+              <div class="grid-card-info">
+                <span class="grid-card-title">去重</span>
+                <span class="grid-card-sub">标记或导出唯一行</span>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              class="datatool-grid-card"
+              on:click={() => { activeTab = 'reconcile'; reconcileError = ''; view = 'detail'; }}
+            >
+              <div class="grid-card-icon-box">
+                <ArrowRightLeft size={20} />
+              </div>
+              <div class="grid-card-info">
+                <span class="grid-card-title">对账</span>
+                <span class="grid-card-sub">跨表全量差异比对</span>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              class="datatool-grid-card"
+              on:click={() => { activeTab = 'consolidate'; consolidationError = ''; view = 'detail'; }}
+            >
+              <div class="grid-card-icon-box">
+                <Layers size={20} />
+              </div>
+              <div class="grid-card-info">
+                <span class="grid-card-title">汇总</span>
+                <span class="grid-card-sub">多文件同名列合并</span>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              class="datatool-grid-card"
+              on:click={() => { activeTab = 'chart'; chartError = ''; view = 'detail'; }}
+            >
+              <div class="grid-card-icon-box">
+                <BarChart2 size={20} />
+              </div>
+              <div class="grid-card-info">
+                <span class="grid-card-title">图表</span>
+                <span class="grid-card-sub">选区免公式绘图</span>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              class="datatool-grid-card"
+              on:click={() => { activeTab = 'external_data'; externalDataError = ''; view = 'detail'; }}
+            >
+              <div class="grid-card-icon-box">
+                <Download size={20} />
+              </div>
+              <div class="grid-card-info">
+                <span class="grid-card-title">导入数据</span>
+                <span class="grid-card-sub">导入CSV或JSON</span>
+              </div>
+            </button>
           </div>
         </div>
 
-        <button
-          type="button"
-          on:click={onClose}
-          class="datatool-close-btn"
-          title={isWorkspaceView ? "返回 AI 助手" : "关闭"}
-          aria-label={isWorkspaceView ? "返回 AI 助手" : "关闭"}
-        >
-          <X size={16} />
-        </button>
-      </div>
+      {:else}
+        <!-- 详情视图：头部返回行 + 当前工具名 -->
+        <div class="datatool-header datatool-detail-header">
+          <div class="header-info detail-nav-row">
+            <button
+              type="button"
+              class="datatool-back-btn"
+              on:click={() => (view = 'grid')}
+              title="返回数据工具列表"
+            >
+              <ArrowLeft size={14} />
+              <span>数据工具</span>
+            </button>
+            <span class="detail-nav-sep">/</span>
+            <span class="detail-nav-current">
+              {activeTab === 'dedup' ? '去重' : activeTab === 'reconcile' ? '对账' : activeTab === 'consolidate' ? '汇总' : activeTab === 'chart' ? '图表' : '导入数据'}
+            </span>
+          </div>
 
-      <!-- 窄屏：工具下拉选择器 (<=380px 优先展示，不强塞横向 Tab) -->
-      <div class="datatool-selector-mobile">
-        <label for="datatool-mobile-select" class="selector-label">选择工具：</label>
-        <select
-          id="datatool-mobile-select"
-          bind:value={activeTab}
-          class="selector-select"
-          on:change={() => {
-            errorMessage = '';
-            reconcileError = '';
-            consolidationError = '';
-            chartError = '';
-            externalDataError = '';
-          }}
-        >
-          <option value="dedup">按键去重 · 标记或导出唯一行</option>
-          <option value="reconcile">两表对账 · 全量跨表差异比对</option>
-          <option value="consolidate">多文件汇总 · 结构对齐合并</option>
-          <option value="chart">快捷图表 · 免公式可视化绘图</option>
-          <option value="external_data">外部数据 · 安全导入预览</option>
-        </select>
-      </div>
-
-      <!-- 宽屏：分段 Tab 栏 (>380px 展示) -->
-      <div class="datatool-tabs-wrapper">
-        <div class="datatool-tabs-bar" role="tablist" aria-label="数据工具导航">
           <button
             type="button"
-            role="tab"
-            aria-selected={activeTab === 'dedup'}
-            on:click={() => { activeTab = 'dedup'; errorMessage = ''; }}
-            class={`datatool-tab-btn ${activeTab === 'dedup' ? 'active' : ''}`}
+            on:click={onClose}
+            class="datatool-close-btn"
+            title={isWorkspaceView ? "返回 AI 助手" : "关闭"}
+            aria-label={isWorkspaceView ? "返回 AI 助手" : "关闭"}
           >
-            <Filter size={13} />
-            <span>按键去重</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'reconcile'}
-            on:click={() => { activeTab = 'reconcile'; reconcileError = ''; }}
-            class={`datatool-tab-btn ${activeTab === 'reconcile' ? 'active' : ''}`}
-          >
-            <GitCompare size={13} />
-            <span>两表对账</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'consolidate'}
-            on:click={() => { activeTab = 'consolidate'; consolidationError = ''; }}
-            class={`datatool-tab-btn ${activeTab === 'consolidate' ? 'active' : ''}`}
-          >
-            <Layers size={13} />
-            <span>多文件汇总</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'chart'}
-            on:click={() => { activeTab = 'chart'; chartError = ''; }}
-            class={`datatool-tab-btn ${activeTab === 'chart' ? 'active' : ''}`}
-          >
-            <BarChart2 size={13} />
-            <span>快捷图表</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'external_data'}
-            on:click={() => { activeTab = 'external_data'; externalDataError = ''; }}
-            class={`datatool-tab-btn ${activeTab === 'external_data' ? 'active' : ''}`}
-          >
-            <Download size={13} />
-            <span>外部数据</span>
+            <X size={16} />
           </button>
         </div>
-      </div>
 
-      <!-- 内容区 -->
-      <div class="datatool-content-body">
+        <!-- 内容区 -->
+        <div class="datatool-content-body">
         
         <!-- ====================== TAB 1: 按键去重 ====================== -->
         {#if activeTab === 'dedup'}
@@ -1010,8 +1016,8 @@
             <!-- 主键列选择 -->
             <div class="space-y-1.5 pt-1">
               <div class="flex items-center justify-between">
-                <span class="text-xs font-semibold text-gray-700">判断主键列 (单列或复合键)</span>
-                <span class="text-[11px] text-gray-400">已选 {selectedColIndices.length} 列复合比较</span>
+                <span class="text-xs font-semibold text-gray-700">按哪几列判断重复</span>
+                <span class="text-[11px] text-gray-400">已选 {selectedColIndices.length} 列</span>
               </div>
               <div class="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto p-1 bg-white border border-gray-200 rounded-md">
                 {#each Array.from({ length: Math.max(availableColsCount, 5) }, (_, i) => i + 1) as colIdx}
@@ -1031,19 +1037,19 @@
             </div>
 
             <!-- 操作按钮 -->
-            <div class="pt-2 flex justify-end">
+            <div class="pt-2">
               <button
                 type="button"
                 on:click={handleRunAnalysis}
                 disabled={isAnalyzing}
-                class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-md text-xs font-semibold transition-colors flex items-center gap-1.5 shadow-sm"
+                class="w-full h-[34px] bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-md text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 shadow-sm"
               >
                 {#if isAnalyzing}
                   <Clock size={14} class="animate-spin" />
                   <span>正在批量分析...</span>
                 {:else}
                   <Filter size={14} />
-                  <span>开始只读去重分析</span>
+                  <span>查找重复项</span>
                 {/if}
               </button>
             </div>
@@ -1082,20 +1088,20 @@
                   </div>
                 </div>
                 <div class="bg-white p-2.5 rounded border border-gray-100 shadow-2xs">
-                  <div class="text-[11px] text-gray-400">排除隔离行</div>
+                  <div class="text-[11px] text-gray-400">排除行</div>
                   <div class="text-base font-bold text-gray-500">{analysisResult.excludedCount}</div>
                 </div>
               </div>
 
-              <!-- 统计恒等式 -->
+              <!-- 数据校验 -->
               <div class="text-[11px] text-gray-600 bg-white/80 p-2 rounded border border-gray-200/60 font-mono text-center">
-                恒等式核验：{analysisResult.dataRowCount} = {analysisResult.uniqueCount} (唯一) + {analysisResult.duplicateCount} (重复) + {analysisResult.excludedCount} (排除)
-                <span class="text-emerald-600 font-bold ml-1">✓ 100% 严密自洽</span>
+                数据校验：总计 {analysisResult.dataRowCount} = 唯一 {analysisResult.uniqueCount} + 重复 {analysisResult.duplicateCount} + 排除 {analysisResult.excludedCount}
+                <span class="text-emerald-600 font-bold ml-1">一致</span>
               </div>
 
               {#if analysisResult.excludedCount > 0}
                 <div class="p-2.5 bg-amber-50/80 rounded border border-amber-200 text-[11px] text-amber-800 space-y-1">
-                  <p class="font-semibold">⚠️ 排除说明：{analysisResult.excludedReason}</p>
+                  <p class="font-semibold">排除说明：{analysisResult.excludedReason}</p>
                   <p class="text-gray-600">说明：排除行（空键/错误值）原封不动保留在源表中，导出唯一表时绝不写入，绝非无提示丢弃。</p>
                 </div>
               {/if}
@@ -1198,7 +1204,7 @@
 
               <div class="space-y-1">
                 <div class="flex items-center justify-between text-[11px] text-gray-500">
-                  <span>主键列索引 (1-based，复合键用逗号隔开)</span>
+                  <span>对账依据列 (如 1 或 1, 2)</span>
                 </div>
                 <input
                   type="text"
@@ -1252,7 +1258,7 @@
 
               <div class="space-y-1">
                 <div class="flex items-center justify-between text-[11px] text-gray-500">
-                  <span>主键列索引 (1-based，复合键用逗号隔开)</span>
+                  <span>对账依据列 (如 1 或 1, 2)</span>
                 </div>
                 <input
                   type="text"
@@ -1316,19 +1322,19 @@
               </div>
             {/if}
 
-            <div class="pt-2 flex justify-end">
+            <div class="pt-2">
               <button
                 type="button"
                 on:click={handleRunReconcileAnalysis}
                 disabled={isAnalyzingReconcile}
-                class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-md text-xs font-semibold transition-colors flex items-center gap-1.5 shadow-sm"
+                class="w-full h-[34px] bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-md text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 shadow-sm"
               >
                 {#if isAnalyzingReconcile}
                   <Clock size={14} class="animate-spin" />
                   <span>正在执行对账分析...</span>
                 {:else}
                   <GitCompare size={14} />
-                  <span>执行只读对账分析</span>
+                  <span>开始对账分析</span>
                 {/if}
               </button>
             </div>
@@ -1395,11 +1401,11 @@
               <div class="space-y-1 text-[11px] text-gray-600 bg-white/90 p-2.5 rounded border border-indigo-100 font-mono">
                 <div>
                   左端: {reconcileAnalysis.leftDataRowCount} = {reconcileAnalysis.matchedBothSameCount} (一致) + {reconcileAnalysis.matchedBothDiffCount} (差异) + {reconcileAnalysis.leftOnlyCount} (仅左) + {reconcileAnalysis.leftDuplicateKeyCount} (重复) + {reconcileAnalysis.leftInvalidKeyCount} (异常)
-                  <span class="text-emerald-600 font-bold ml-1">✓ 严密自洽</span>
+                  <span class="text-emerald-600 font-bold ml-1">自洽</span>
                 </div>
                 <div>
                   右端: {reconcileAnalysis.rightDataRowCount} = {reconcileAnalysis.matchedBothSameCount} (一致) + {reconcileAnalysis.matchedBothDiffCount} (差异) + {reconcileAnalysis.rightOnlyCount} (仅右) + {reconcileAnalysis.rightDuplicateKeyCount} (重复) + {reconcileAnalysis.rightInvalidKeyCount} (异常)
-                  <span class="text-emerald-600 font-bold ml-1">✓ 严密自洽</span>
+                  <span class="text-emerald-600 font-bold ml-1">自洽</span>
                 </div>
               </div>
 
@@ -1615,11 +1621,11 @@
                   type="button"
                   on:click={handleRunConsolidationAnalysis}
                   disabled={isAnalyzingConsolidation}
-                  class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white rounded-md text-xs font-semibold transition-colors flex items-center gap-1.5 shadow-sm"
+                  class="w-full h-[34px] bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white rounded-md text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 shadow-sm"
                 >
                   {#if isAnalyzingConsolidation}
                     <Clock size={14} class="animate-spin" />
-                    <span>正在进行只读分析...</span>
+                    <span>正在分析数据...</span>
                   {:else}
                     <SlidersHorizontal size={14} />
                     <span>开始分析与列名对齐预览</span>
@@ -1635,7 +1641,7 @@
               <div class="flex items-center justify-between pb-2 border-b border-indigo-100">
                 <span class="text-xs font-bold text-gray-900 flex items-center gap-1.5">
                   <CheckCircle2 size={15} class="text-indigo-600" />
-                  <span>列名对齐只读分析完成 (耗时: {consolidationAnalysis.analysisElapsedMs} ms)</span>
+                  <span>列名对齐完成 ({consolidationAnalysis.analysisElapsedMs} ms)</span>
                 </span>
                 <span class="text-[11px] text-indigo-700 font-mono">
                   来源文件: {consolidationAnalysis.sources.length} 个 | 输出列数: {consolidationAnalysis.alignedColumns.length} 列
@@ -1665,8 +1671,8 @@
               <!-- 各来源读取明细小表 -->
               <div class="bg-white rounded border border-gray-200 overflow-hidden text-xs">
                 <div class="px-3 py-1.5 bg-gray-50 border-b border-gray-200 font-semibold text-gray-700 flex items-center justify-between text-[11px]">
-                  <span>各来源选区与数据行统计 (只读安全加载，宏已阻断)</span>
-                  <span class="text-emerald-600 font-mono">恒等式核对: 最终数据行 = 各来源纳入行之和</span>
+                  <span>各来源选区与数据行统计</span>
+                  <span class="text-emerald-600 font-mono">校验: 最终行数 = 各来源行数之和</span>
                 </div>
                 <div class="max-h-32 overflow-y-auto divide-y divide-gray-100">
                   {#each consolidationAnalysis.sources as prof}
@@ -1723,7 +1729,7 @@
                 >
                   {#if isExecutingConsolidation}
                     <Clock size={14} class="animate-spin" />
-                    <span>正在安全写入并读回核验...</span>
+                    <span>正在写入并核对...</span>
                   {:else}
                     <FileCheck size={14} />
                     <span>导出独立新工作簿</span>
@@ -1739,7 +1745,7 @@
               <div class="flex items-center justify-between">
                 <div class="flex items-center gap-2 text-xs font-bold text-emerald-900">
                   <CheckCircle2 size={16} class="text-emerald-600" />
-                  <span>多文件汇总结果导出成功并真机读回核验！</span>
+                  <span>多文件汇总导出完成！</span>
                 </div>
                 <button
                   type="button"
@@ -1755,7 +1761,7 @@
               </p>
               <div class="pt-1 flex items-center justify-between text-[11px] text-emerald-700/80 font-mono">
                 <span>汇总行数: {consolidationExecution.finalDataRows} 行 (含表头) | 列数: {consolidationExecution.finalDataCols} 列</span>
-                <span>读回核验: {consolidationExecution.verifiedReadback ? '已通过' : '未通过'} ({consolidationExecution.finalDataRows} 行) | 耗时: {consolidationExecution.elapsedMs} ms</span>
+                <span>结果核对: {consolidationExecution.verifiedReadback ? '一致' : '有差异'} ({consolidationExecution.finalDataRows} 行) | 耗时: {consolidationExecution.elapsedMs} ms</span>
               </div>
             </div>
           {/if}
@@ -1767,11 +1773,10 @@
           <div class="p-3 bg-indigo-50/80 border border-indigo-200 rounded-lg text-xs text-indigo-900 leading-relaxed flex items-start gap-2.5">
             <BarChart2 size={16} class="mt-0.5 shrink-0 text-indigo-600" />
             <div>
-              <div class="font-bold text-indigo-950">快捷图表工具定位与安全规范 (TASK-R5b-01)</div>
+              <div class="font-bold text-indigo-950">图表工具说明</div>
               <div class="text-[11px] text-indigo-800 mt-0.5">
-                • <strong>定位说明</strong>：本工具为本地确定性原生 COM 辅助工具，首切片支持柱状图、折线图、饼图，绝不作为大模型自然语言操作请求的隐式替代；零第三方图表库。<br>
-                • <strong>防旧结果叠加</strong>：图表采用稳定标识 (<code>__EM_CHART_xxxx</code>)，新建与替换行为明确隔离，绝不误删用户已有手工图表。<br>
-                • <strong>快照与恢复承诺</strong>：执行前强制整本物理快照；如遇异常，用户可按已验证范围安全恢复。
+                • 支持柱状图、折线图、饼图，基于当前选区直接生成。<br>
+                • 图表带独立标识，更新时不影响已有手工图表。
               </div>
             </div>
           </div>
@@ -2036,16 +2041,16 @@
             </div>
 
             <!-- 执行按钮 -->
-            <div class="pt-2 flex items-center justify-end">
+            <div class="pt-2">
               <button
                 type="button"
                 on:click={handleExecuteQuickChart}
                 disabled={isExecutingChart}
-                class="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white rounded-md text-xs font-semibold transition-colors flex items-center gap-1.5 shadow-sm"
+                class="w-full h-[34px] bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white rounded-md text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 shadow-sm"
               >
                 {#if isExecutingChart}
                   <Clock size={14} class="animate-spin" />
-                  <span>正在执行图表生成与 COM 核验...</span>
+                  <span>正在生成图表...</span>
                 {:else}
                   <BarChart2 size={14} />
                   <span>{chartAction === 'replace_existing' ? '确认替换指定图表' : '确认生成快捷图表'}</span>
@@ -2060,7 +2065,7 @@
               <div class="flex items-center justify-between">
                 <div class="flex items-center gap-2 text-xs font-bold text-emerald-900">
                   <CheckCircle2 size={16} class="text-emerald-600" />
-                  <span>快捷图表已成功生成并经 COM 读回客观核验！</span>
+                  <span>图表生成成功！</span>
                 </div>
                 {#if chartResult.snapshotId}
                   <span class="text-[10px] px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-300 font-mono">
@@ -2109,7 +2114,7 @@
           <div class="bg-gray-50/80 rounded-lg p-4 border border-gray-200/80 space-y-3.5">
             <div class="flex items-center justify-between text-xs text-gray-600">
               <span class="font-medium">目标工作簿: <strong class="text-gray-900">{workbook?.name || '当前工作簿'}</strong></span>
-              <span>写入模式: <strong class="text-emerald-700">强制新建唯一工作表（绝不覆盖现有表）</strong></span>
+              <span>写入模式: <strong class="text-emerald-700">新建工作表</strong></span>
             </div>
 
             <!-- 数据源类型选择 -->
@@ -2255,8 +2260,8 @@
 
                 <div class="space-y-1">
                   <label for="http-whitelist-input" class="text-[11px] text-gray-600 flex items-center justify-between">
-                    <span>安全白名单规则（分号/逗号隔开，精确匹配协议、主机、端口及路径前缀）</span>
-                    <span class="text-indigo-600 text-[10px]">严格防 SSRF</span>
+                    <span>允许访问的网址前缀（多个用逗号隔开）</span>
+                    <span class="text-indigo-600 text-[10px]">地址限制</span>
                   </label>
                   <input
                     id="http-whitelist-input"
@@ -2284,7 +2289,7 @@
                       id="http-header-val"
                       type="password"
                       bind:value={extHttpHeaderVal}
-                      placeholder="敏感信息日志自动脱敏"
+                      placeholder="不记录敏感信息"
                       class="w-full px-2.5 py-1 text-xs border border-gray-300 rounded-md font-mono"
                     />
                   </div>
@@ -2292,7 +2297,7 @@
 
                 <div class="flex items-center gap-1.5 text-[11px] text-gray-500 bg-gray-50 p-2 rounded border border-gray-100">
                   <Lock size={13} class="text-indigo-600 shrink-0" />
-                  <span>凭据安全隔离：由 Windows DPAPI 加密隔离，绝不以明文 JSON 存储，绝不流入工作簿或模型上下文。</span>
+                  <span>密码凭据加密保存在本机，不随工作簿保存或上传。</span>
                 </div>
               </div>
             {/if}
@@ -2310,19 +2315,19 @@
             </div>
 
             <!-- 只读拉取并预览按钮 -->
-            <div class="pt-2 flex justify-end">
+            <div class="pt-2">
               <button
                 type="button"
                 on:click={handlePreviewExternalData}
                 disabled={isPreviewingExt}
-                class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-md text-xs font-semibold transition-colors flex items-center gap-1.5 shadow-sm"
+                class="w-full h-[34px] bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-md text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 shadow-sm"
               >
                 {#if isPreviewingExt}
                   <Clock size={14} class="animate-spin" />
                   <span>正在安全拉取与解析...</span>
                 {:else}
                   <Download size={14} />
-                  <span>只读拉取并预览数据</span>
+                  <span>预览数据</span>
                 {/if}
               </button>
             </div>
@@ -2334,7 +2339,7 @@
               <div class="flex items-center justify-between pb-2 border-b border-indigo-100">
                 <span class="text-xs font-bold text-gray-900 flex items-center gap-1.5">
                   <CheckCircle2 size={15} class="text-indigo-600" />
-                  <span>只读数据源解析就绪</span>
+                  <span>数据源解析就绪</span>
                 </span>
                 <span class="text-[11px] text-indigo-700 font-mono">
                   共计约 {extPreviewResult.totalRowsEstimate} 行 · {extPreviewResult.totalCols} 列
@@ -2422,7 +2427,7 @@
               <!-- 数据样本预览表格 -->
               <div class="space-y-1 bg-white p-3 rounded-lg border border-gray-200">
                 <div class="flex items-center justify-between text-xs text-gray-700">
-                  <span class="font-medium">样本数据只读预览 (前 {extPreviewResult.sampleRows.length} 行)</span>
+                  <span class="font-medium">数据预览 (前 {extPreviewResult.sampleRows.length} 行)</span>
                   <span class="text-[11px] text-gray-400">仅展示，未写入工作簿</span>
                 </div>
                 <div class="max-h-48 overflow-auto border border-gray-200 rounded text-[11px]">
@@ -2503,7 +2508,8 @@
           {/if}
         {/if}
 
-      </div>
+        </div>
+      {/if}
     </div>
   </div>
 {/if}
@@ -2615,10 +2621,10 @@
         <div><strong>输出列数清单：</strong>共 {(consolidationAnalysis.alignedColumns || []).length} 列 [{(consolidationAnalysis.alignedColumns || []).slice(0, 5).join(', ')}{(consolidationAnalysis.alignedColumns || []).length > 5 ? '...' : ''}]</div>
         
         <div class="pt-1 text-[11px] text-emerald-700 space-y-1 bg-emerald-50/60 p-2.5 rounded border border-emerald-200">
-          <div class="font-semibold">数据保真与安全承诺：</div>
-          <div>• 来源文件只读打开，强制阻断 VBA 自动宏与外部链接，零修改来源文件；</div>
-          <div>• 19位长编号、前导零、'='公式文本逐字符保真输出（防截断与科学计数法）；</div>
-          <div>• 保存后强制重新打开真机核验行列数一致性，核验无误才标记成功。</div>
+          <div class="font-semibold">安全保证：</div>
+          <div>• 不修改来源文件；</div>
+          <div>• 保留长编号、前导零与公式原文；</div>
+          <div>• 保存后自动核对行列数。</div>
         </div>
       </div>
 
@@ -2665,17 +2671,16 @@
           {:else if extSourceType === 'json'}
             <span>本地 JSON [{extFilePath}] {extJsonArrayPath ? `(数组路径: ${extJsonArrayPath})` : '(根数组)'}</span>
           {:else}
-            <span class="break-all">受控 HTTP GET [{extHttpUrl}] (白名单校验通过)</span>
+            <span class="break-all">GET [{extHttpUrl}] (已验证)</span>
           {/if}
         </div>
         <div><strong>导入字段规模：</strong>选择导入 {extSelectedColumns.length} 列 / 总计 {extPreviewResult.columns.length} 列 (预估行数: {extPreviewResult.totalRowsEstimate} 行)</div>
 
         <div class="pt-1 text-[11px] text-emerald-700 space-y-1 bg-emerald-50/60 p-2.5 rounded border border-emerald-200">
-          <div class="font-semibold">安全保障与保真策略：</div>
-          <div>• 写入前自动创建目标工作簿全量物理快照（快照失败承诺零业务写入）；</div>
-          <div>• 19位长编号、前导零、'='公式样文本强制按纯数据防注入写入（绝不被 Excel 执行为恶意公式）；</div>
-          <div>• 目标工作簿锁定，若写入前目标文件被关闭或重命名，立即安全阻断；</div>
-          <div>• 凭据经 Windows DPAPI 隔离加密，敏感 Token 绝不进入工作簿、日志或提示词。</div>
+          <div class="font-semibold">安全保证：</div>
+          <div>• 写入前自动备份工作簿，支持撤销；</div>
+          <div>• 保持长编号、前导零与文本格式完整；</div>
+          <div>• 凭据加密保存在本机，不随工作簿保存。</div>
         </div>
       </div>
 
@@ -2843,118 +2848,118 @@
     color: var(--office-text);
   }
 
-  /* 窄屏工具下拉选择器 */
-  .datatool-selector-mobile {
-    display: none;
-    padding: 6px 10px;
+  /* 网格工具卡片选择视图 */
+  .datatool-grid-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+    background: var(--office-bg);
+  }
+
+  .datatool-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+
+  .datatool-grid-card {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 12px;
     background: #ffffff;
-    border-bottom: 1px solid var(--office-border);
-    align-items: center;
+    border: 1px solid var(--office-border);
+    border-radius: var(--office-radius-sm);
+    cursor: pointer;
+    text-align: left;
+    transition: all 0.15s ease;
     gap: 8px;
+    width: 100%;
     box-sizing: border-box;
+  }
+
+  .datatool-grid-card:hover {
+    border-color: var(--excel-green);
+    background: var(--office-hover);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+  }
+
+  .grid-card-icon-box {
+    width: 32px;
+    height: 32px;
+    border-radius: var(--office-radius-xs);
+    background: var(--excel-light);
+    color: var(--excel-green);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .grid-card-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
     width: 100%;
   }
 
-  .selector-label {
-    font-size: var(--font-size-xs);
+  .grid-card-title {
+    font-size: var(--font-size-base, 13px);
     font-weight: 600;
+    color: var(--office-text);
+  }
+
+  .grid-card-sub {
+    font-size: 11px;
     color: var(--office-text-secondary);
     white-space: nowrap;
-    flex-shrink: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
-  .selector-select {
-    flex: 1 1 0%;
-    min-width: 0;
-    height: 28px;
-    font-size: var(--font-size-xs);
-    border: 1px solid var(--office-border);
-    border-radius: var(--office-radius-xs);
-    background: #ffffff;
-    color: var(--office-text);
-    padding: 0 6px;
-    outline: none;
-    cursor: pointer;
-  }
-
-  .selector-select:focus {
-    border-color: var(--excel-green);
-  }
-
-  @container (max-width: 380px) {
-    .datatool-selector-mobile {
-      display: flex !important;
-    }
-    .datatool-tabs-wrapper {
-      display: none !important;
-    }
-  }
-
-  @media (max-width: 380px) {
-    .datatool-selector-mobile {
-      display: flex;
-    }
-    .datatool-tabs-wrapper {
-      display: none;
-    }
-  }
-
-  /* Tab 栏 */
-  .datatool-tabs-wrapper {
-    position: relative;
-    background: #ffffff;
-    border-bottom: 1px solid var(--office-border);
-  }
-
-  .datatool-tabs-bar {
+  /* 返回导航行 */
+  .detail-nav-row {
     display: flex;
     align-items: center;
-    background: #ffffff;
-    padding: 0 6px;
-    overflow-x: auto;
-    flex-shrink: 0;
-    gap: 2px;
+    gap: 6px;
+    min-width: 0;
   }
 
-  /* 显式保留纤细滚动条，保证在 320px 窄宽下有清晰滑动感知 */
-  .datatool-tabs-bar::-webkit-scrollbar {
-    height: 3px;
-  }
-
-  .datatool-tabs-bar::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .datatool-tabs-bar::-webkit-scrollbar-thumb {
-    background: rgba(0, 0, 0, 0.18);
-    border-radius: 2px;
-  }
-
-  .datatool-tab-btn {
+  .datatool-back-btn {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    padding: 8px 12px;
-    font-size: var(--font-size-sm);
-    color: var(--office-muted);
-    border: none;
-    border-bottom: 2px solid transparent;
-    background: transparent;
-    cursor: pointer;
+    gap: 4px;
+    padding: 3px 6px;
+    border: 1px solid var(--office-border-subtle);
+    border-radius: var(--office-radius-xs);
+    background: #ffffff;
+    color: var(--office-text-secondary);
+    font-size: var(--font-size-xs);
     font-weight: 500;
-    white-space: nowrap;
+    cursor: pointer;
     transition: all 0.15s ease;
+    flex-shrink: 0;
   }
 
-  .datatool-tab-btn:hover:not(.active) {
-    color: var(--office-text);
+  .datatool-back-btn:hover {
     background: var(--office-hover);
+    color: var(--office-text);
+    border-color: var(--office-border);
   }
 
-  .datatool-tab-btn.active {
-    color: var(--excel-green);
-    border-bottom-color: var(--excel-green);
+  .detail-nav-sep {
+    color: var(--office-dim);
+    font-size: var(--font-size-xs);
+  }
+
+  .detail-nav-current {
+    font-size: var(--font-size-base);
     font-weight: 600;
+    color: var(--office-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   /* 内容主体 */
@@ -3011,13 +3016,6 @@
   .datatool-content-body input[type="text"],
   .datatool-content-body input[type="number"] {
     min-width: 0;
-  }
-
-  @media (max-width: 360px) {
-    .datatool-content-body {
-      padding: 8px;
-      gap: 8px;
-    }
   }
 </style>
 
