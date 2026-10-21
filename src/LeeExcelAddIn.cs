@@ -212,6 +212,7 @@ namespace LeeExcel
 
     public class LeeExcelAddIn : IExcelAddIn
     {
+        public const int DefaultTaskPaneWidth = 520;
         private static CustomTaskPane _customTaskPane;
         private static TaskPaneControl _taskPaneControl;
 
@@ -224,7 +225,7 @@ namespace LeeExcel
 
                 _customTaskPane = CustomTaskPaneFactory.CreateCustomTaskPane(_taskPaneControl, "ExcelMind AI");
                 _customTaskPane.DockPosition = MsoCTPDockPosition.msoCTPDockPositionRight;
-                _customTaskPane.Width = 440;
+                _customTaskPane.Width = DefaultTaskPaneWidth;
                 _customTaskPane.Visible = true;
 
                 // 监听工作簿切换、新建、打开
@@ -294,7 +295,10 @@ namespace LeeExcel
                     _customTaskPane.Visible = true;
                     LeeExcelRibbon.InvalidateRibbon();
                 }
-                _customTaskPane.Width = 440;
+                if (_customTaskPane.Width < DefaultTaskPaneWidth)
+                {
+                    _customTaskPane.Width = DefaultTaskPaneWidth;
+                }
                 if (_taskPaneControl != null) _taskPaneControl.NotifyWorkbookChanged();
             }
         }
@@ -307,7 +311,10 @@ namespace LeeExcel
                 LeeExcelRibbon.InvalidateRibbon();
                 if (_customTaskPane.Visible)
                 {
-                    _customTaskPane.Width = 440;
+                    if (_customTaskPane.Width < DefaultTaskPaneWidth)
+                    {
+                        _customTaskPane.Width = DefaultTaskPaneWidth;
+                    }
                     if (_taskPaneControl != null) _taskPaneControl.NotifyWorkbookChanged();
                 }
             }

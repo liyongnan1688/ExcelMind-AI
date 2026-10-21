@@ -26,7 +26,7 @@ if ([string]::IsNullOrEmpty($ZipPath)) {
     if ($candidates -and $candidates.Count -gt 0) {
         $ZipPath = $candidates[0].FullName
     } else {
-        $ZipPath = Join-Path $ProjectRoot "release\ExcelMindAI-v1.3.4.zip"
+        $ZipPath = Join-Path $ProjectRoot "release\ExcelMindAI-v1.3.5.zip"
     }
 }
 if (-not (Test-Path $ZipPath)) {

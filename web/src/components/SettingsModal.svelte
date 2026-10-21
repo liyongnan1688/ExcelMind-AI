@@ -329,7 +329,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 100;
+    z-index: 1000;
     padding: 14px;
     box-sizing: border-box;
   }
@@ -341,7 +341,7 @@
   }
 
   .modal-content {
-    width: min(440px, 100%);
+    width: min(480px, 100%);
     max-height: calc(100vh - 24px);
     background: #ffffff;
     border-radius: var(--office-radius-lg);

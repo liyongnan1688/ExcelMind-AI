@@ -6872,6 +6872,62 @@ console.log('\n=== 20. TASK-PHASE1 Cache-Safe Prompt & Compaction Pipeline Suite
   );
 }
 
+// === 24. Modal Overlay Exclusivity & TaskPane Width Suite ===
+console.log('\n=== 24. Modal Overlay Exclusivity & TaskPane Width Suite ===');
+{
+  const appSvelteCode = fs.readFileSync(path.join(__dirname, 'web/src/App.svelte'), 'utf8');
+  const addinCsCode = fs.readFileSync(path.join(__dirname, 'src/LeeExcelAddIn.cs'), 'utf8');
+  const batchModalCode = fs.readFileSync(path.join(__dirname, 'web/src/components/BatchModal.svelte'), 'utf8');
+  const workflowModalCode = fs.readFileSync(path.join(__dirname, 'web/src/components/WorkflowModal.svelte'), 'utf8');
+  const settingsModalCode = fs.readFileSync(path.join(__dirname, 'web/src/components/SettingsModal.svelte'), 'utf8');
+
+  // Test 24.1: App.svelte 必须具备全局 closeAllModals 互斥函数
+  const hasCloseAllModals =
+    appSvelteCode.includes('function closeAllModals()') &&
+    appSvelteCode.includes('showBatchModal = false') &&
+    appSvelteCode.includes('showWorkflowModal = false') &&
+    appSvelteCode.includes('showSettings = false');
+
+  assert(
+    '[Modal 互斥管理] App.svelte 包含统一 closeAllModals 函数，彻底杜绝弹窗相互遮盖与鬼影残留',
+    hasCloseAllModals
+  );
+
+  // Test 24.2: Ribbon 菜单触发批量、流水线、设置、数据工具均调用 closeAllModals
+  const hasRibbonExclusivity =
+    appSvelteCode.includes("open_batch_modal', () => {\n      closeAllModals();\n      showBatchModal = true;") ||
+    appSvelteCode.includes("open_batch_modal', () => {\r\n      closeAllModals();\r\n      showBatchModal = true;");
+
+  const hasWorkflowExclusivity =
+    appSvelteCode.includes("open_workflow_modal', () => {\n      closeAllModals();\n      showWorkflowModal = true;") ||
+    appSvelteCode.includes("open_workflow_modal', () => {\r\n      closeAllModals();\r\n      showWorkflowModal = true;");
+
+  assert(
+    '[Modal 互斥管理] 批量处理与流水线顶栏菜单触发时先关闭旧弹窗再打开新弹窗，保证即点即现',
+    hasRibbonExclusivity && hasWorkflowExclusivity
+  );
+
+  // Test 24.3: 任务窗格宽度契约为 520px，且支持记忆用户拖拽更宽尺寸
+  const hasTaskPane520 =
+    addinCsCode.includes('DefaultTaskPaneWidth = 520') &&
+    addinCsCode.includes('_customTaskPane.Width < DefaultTaskPaneWidth');
+
+  assert(
+    '[TaskPane 宽度契约] C# 宿主默认窗格宽度提升至 520px，消灭文字与标签堆叠且保护用户自定义拖拽宽度',
+    hasTaskPane520
+  );
+
+  // Test 24.4: 顶层弹窗 Backdrop z-index 对齐到 1000
+  const batchZIndex1000 = batchModalCode.includes('z-index: 1000');
+  const workflowZIndex1000 = workflowModalCode.includes('z-index: 1000');
+  const settingsZIndex1000 = settingsModalCode.includes('z-index: 1000');
+
+  assert(
+    '[Modal 视觉层叠] 批量处理、工作流流水线与设置弹窗背景遮罩统一对齐为 z-index: 1000 标准层',
+    batchZIndex1000 && workflowZIndex1000 && settingsZIndex1000
+  );
+}
+
   console.log(`\nUnit Tests Summary: Pass = ${passCount}, Fail = ${failCount}`);
   if (failCount > 0) {
     process.exit(1);

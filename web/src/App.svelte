@@ -68,6 +68,13 @@
   let unbindOpenDataTools: (() => void) | null = null;
   let unbindOpenWorkflow: (() => void) | null = null;
 
+  function closeAllModals() {
+    showBatchModal = false;
+    showWorkflowModal = false;
+    showSettings = false;
+    inspectingSnapshot = null;
+  }
+
   onMount(() => {
     // 监听 C# 宿主推送的工作簿激活变更
     unbindWorkbookChange = bridge.onWorkbookChange((info) => {
@@ -76,8 +83,9 @@
 
     // 监听 Ribbon 动态菜单触发“收藏宏”运行前确认
     unbindPromptRunMacro = bridge.onAction('prompt_run_macro', async (payload: any) => {
+      closeAllModals();
+      showDataTools = false;
       activeWorkspace = 'scripts';
-      showSettings = false;
       await tick();
       const scriptId = typeof payload === 'string' ? payload : (payload?.scriptId || '');
       scriptDrawerRef?.promptRunMacro(scriptId);
@@ -85,53 +93,60 @@
 
     // 监听 Ribbon 菜单打开“宏库”/“我的脚本”抽屉
     unbindOpenMacroLibrary = bridge.onAction('open_macro_library', async () => {
+      closeAllModals();
+      showDataTools = false;
       activeWorkspace = 'scripts';
-      showSettings = false;
       await tick();
       scriptDrawerRef?.openTab('list');
     });
 
     unbindOpenScripts = bridge.onAction('open_scripts', async () => {
+      closeAllModals();
+      showDataTools = false;
       activeWorkspace = 'scripts';
-      showSettings = false;
       await tick();
       scriptDrawerRef?.openTab('list');
     });
 
     // 监听 Ribbon 菜单打开“我的宏”列表
     unbindOpenMyMacros = bridge.onAction('open_my_macros', async () => {
+      closeAllModals();
+      showDataTools = false;
       activeWorkspace = 'scripts';
-      showSettings = false;
       await tick();
       scriptDrawerRef?.openTab('list');
     });
 
     // 监听 Ribbon 菜单打开“导入宏”窗口
     unbindOpenImportMacro = bridge.onAction('open_import_macro', async () => {
+      closeAllModals();
+      showDataTools = false;
       activeWorkspace = 'scripts';
-      showSettings = false;
       await tick();
       scriptDrawerRef?.openTab('import');
     });
 
     // 监听 Ribbon 菜单直达“数据工具”面板
     unbindOpenDataTools = bridge.onAction('open_data_tools', () => {
+      closeAllModals();
       showDataTools = true;
-      showSettings = false;
     });
 
     // 监听 Ribbon 菜单打开“批量宏处理”面板
     unbindOpenBatch = bridge.onAction('open_batch_modal', () => {
+      closeAllModals();
       showBatchModal = true;
     });
 
     // 监听 Ribbon 菜单打开“双步骤流水线”面板
     unbindOpenWorkflow = bridge.onAction('open_workflow_modal', () => {
+      closeAllModals();
       showWorkflowModal = true;
     });
 
     // 监听 Ribbon 菜单打开“API配置与设置”弹窗
     unbindOpenSettings = bridge.onAction('open_settings', () => {
+      closeAllModals();
       showSettings = true;
     });
 
@@ -155,39 +170,48 @@
 
     if (typeof window !== 'undefined') {
       (window as any).__openScripts = async () => {
+        closeAllModals();
+        showDataTools = false;
         activeWorkspace = 'scripts';
-        showSettings = false;
         await tick();
         scriptDrawerRef?.openTab('list');
       };
       (window as any).__openMyMacros = async () => {
+        closeAllModals();
+        showDataTools = false;
         activeWorkspace = 'scripts';
-        showSettings = false;
         await tick();
         scriptDrawerRef?.openTab('list');
       };
       (window as any).__openMacroLibrary = async () => {
+        closeAllModals();
+        showDataTools = false;
         activeWorkspace = 'scripts';
-        showSettings = false;
         await tick();
         scriptDrawerRef?.openTab('list');
       };
       (window as any).__openImportMacro = async () => {
+        closeAllModals();
+        showDataTools = false;
         activeWorkspace = 'scripts';
-        showSettings = false;
         await tick();
         scriptDrawerRef?.openTab('import');
       };
       (window as any).__openSettings = () => {
+        closeAllModals();
         showSettings = true;
-        showDataTools = false;
       };
       (window as any).__openDataTools = () => {
+        closeAllModals();
         showDataTools = true;
-        showSettings = false;
       };
       (window as any).__openBatch = () => {
+        closeAllModals();
         showBatchModal = true;
+      };
+      (window as any).__openWorkflow = () => {
+        closeAllModals();
+        showWorkflowModal = true;
       };
 
       (window as any).__addTestExecutionMessage = (promptText: string, executionData: any) => {
@@ -206,8 +230,9 @@
       };
 
       (window as any).__promptRunMacro = (scriptId: string) => {
+        closeAllModals();
+        showDataTools = false;
         activeWorkspace = 'scripts';
-        showSettings = false;
         setTimeout(() => {
           scriptDrawerRef?.promptRunMacro(scriptId);
         }, 50);
@@ -741,6 +766,7 @@
     {workbook}
     {activeWorkspace}
     onSelectWorkspace={(ws) => {
+      closeAllModals();
       showDataTools = false;
       activeWorkspace = ws;
     }}

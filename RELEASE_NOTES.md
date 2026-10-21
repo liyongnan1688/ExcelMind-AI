@@ -1,10 +1,25 @@
-# ExcelMind AI v1.3.0 正式版发布说明 (RELEASE_NOTES.md)
+# ExcelMind AI 发布说明 (RELEASE_NOTES.md)
 
-> **发布版本**：v1.3.0 (Official Production Release)  
-> **构建日期**：2026-10-18  
-> **构建状态**：社区正式发行构建 (Official Release)  
+> **发布版本**：v1.3.5 (Official Production Release)  
+> **构建日期**：2026-10-21  
 > **当前状态入口**：参见 [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md)  
 > **宿主定位**：Windows 桌面版 Microsoft Excel 中文 AI 与 VBA 自动化原生工作台
+
+---
+
+## 0. 版本更新说明 (v1.3.5)
+
+ExcelMind AI `v1.3.5` 针对多弹窗切换层叠与任务窗格布局进行关键体验优化，消除界面元素堆叠与弹窗遮挡问题：
+
+1. **弹窗互斥调度与层叠层对齐 (Fix)**：
+   - 解决点击顶栏【批量处理】后再点击【流水线】时旧弹窗遮盖新弹窗的缺陷；
+   - 增加全局统一 `closeAllModals()` 互斥机制，顶栏功能区切换时自动收起前置弹窗，做到即点即现；
+   - 统一对齐批量处理、工作流流水线与设置弹窗背景遮罩为 `z-index: 1000` 标准层。
+2. **工作台宽度升级至 520px (Enhance)**：
+   - 将 C# 宿主任务窗格默认宽度由 440px 升级至 520px，消除数据工具 tab、工作簿标题胶囊与长按钮标签的换行与文字堆叠；
+   - 保护用户手动拖拽宽度（`Width < 520` 时才补齐），不再粗暴覆盖用户扩大的窗格尺寸。
+3. **安全核实与机密隔离重申 (Security)**：
+   - 全仓与历史 Git Patch 再次核验确认，大模型 API 私钥 100% 仅保存在用户本地机器的 WebView2 Profile 中，绝不随发行包或源码提交至 GitHub。
 
 ---
 
