@@ -1,17 +1,21 @@
-# ==============================================================================
+﻿# ==============================================================================
 # ExcelMind AI: Real Desktop Excel Acceptance Automation Entry
 # ==============================================================================
 
 param(
-    [string]$RunId = ""
+    [string]$RunId = "",
+    [switch]$CompileOnly
 )
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = $PSScriptRoot
 $ProjectRoot = Split-Path -Parent $ScriptDir
 
-if ([string]::IsNullOrEmpty($RunId)) {
+if ([string]::IsNullOrWhiteSpace($RunId)) {
     $RunId = "desktop_acceptance_" + (Get-Date -Format "yyyyMMdd_HHmmss")
+}
+if ($RunId -notmatch '^[A-Za-z0-9._-]+$' -or $RunId -eq '.' -or $RunId -eq '..') {
+    throw "RunId contains invalid path characters: $RunId"
 }
 
 $ArtifactsDir = Join-Path $ProjectRoot ".artifacts\tests\$RunId"
@@ -58,6 +62,7 @@ $CscArgs = @(
     "/r:System.Security.dll",
     "/r:System.IO.Compression.dll",
     "/r:System.IO.Compression.FileSystem.dll",
+    "/r:$ProjectRoot\bin\LeeExcel.dll",
     "/r:WindowsBase.dll",
     "/r:UIAutomationClient.dll",
     "/r:UIAutomationTypes.dll",
@@ -72,18 +77,47 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Host "    * Compiler success: $OutExe" -ForegroundColor Green
 
+if ($CompileOnly) {
+    Write-Host "[PASS] CompileOnly completed; Excel was not started." -ForegroundColor Green
+    exit 0
+}
+
+# Copy managed runtime dependencies beside the standalone runner.  The runner
+# directly references LeeExcel and must resolve its dependencies from its base dir.
+$runtimeDlls = Get-ChildItem -LiteralPath (Join-Path $ProjectRoot "bin") -Filter "*.dll" -File
+foreach ($runtimeDll in $runtimeDlls) {
+    Copy-Item -LiteralPath $runtimeDll.FullName -Destination (Join-Path $ArtifactsDir $runtimeDll.Name) -Force
+}
+$nativeLoader = Join-Path $ProjectRoot "bin\WebView2Loader.dll"
+if (Test-Path -LiteralPath $nativeLoader) {
+    Copy-Item -LiteralPath $nativeLoader -Destination (Join-Path $ArtifactsDir "WebView2Loader.dll") -Force
+}
+if (-not (Test-Path -LiteralPath (Join-Path $ArtifactsDir "LeeExcel.dll"))) {
+    throw "Desktop runner dependency copy failed: LeeExcel.dll is missing."
+}
+
 # 3. Offline unit tests
 Write-Host "[3/4] Running offline regression gates..." -ForegroundColor Yellow
 $unitRes = & node "$ProjectRoot\test_suite_unit.cjs"
-if ($LASTEXITCODE -ne 0) {
+$unitExit = $LASTEXITCODE
+if ($unitExit -ne 0) {
     Write-Host "[FAIL] Unit test suite failed!" -ForegroundColor Red
     exit 1
 }
-Write-Host "    * Offline unit tests 194/194 PASS" -ForegroundColor Green
+$unitSummary = ($unitRes | Select-String -Pattern 'Unit Tests Summary:.*' | Select-Object -Last 1).Line
+if ([string]::IsNullOrWhiteSpace($unitSummary)) { $unitSummary = "Unit Tests Summary: unknown" }
+Write-Host "    * $unitSummary" -ForegroundColor Green
+
+$regexRes = & node "$ProjectRoot\test_regex_counter_example.cjs"
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[FAIL] Regex counter-example gate failed!" -ForegroundColor Red
+    exit 1
+}
+Write-Host "    * Regex counter-example gate: PASS" -ForegroundColor Green
 
 # 4. Run Desktop Acceptance Tool
 Write-Host "[4/4] Executing Real Desktop Acceptance (UIA + COM + TaskPane)..." -ForegroundColor Yellow
-& $OutExe | Tee-Object -FilePath $LogFile
+& $OutExe $RunId | Tee-Object -FilePath $LogFile
 $runnerExit = $LASTEXITCODE
 
 Write-Host "================================================================================" -ForegroundColor Cyan

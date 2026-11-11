@@ -1,13 +1,25 @@
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 
 const projectRoot = path.resolve(__dirname, '../..');
-const artifactsDir = path.resolve(projectRoot, '.artifacts/acceptance/20261019');
+const artifactsRoot = path.resolve(projectRoot, '.artifacts/tests');
+const requestedRunId = String(process.env.LEE_EXCEL_TEST_RUN_ID || '').trim();
+if (requestedRunId && (!/^[A-Za-z0-9._-]+$/.test(requestedRunId) || requestedRunId === '.' || requestedRunId === '..')) {
+  throw new Error('LEE_EXCEL_TEST_RUN_ID contains invalid path characters.');
+}
+const defaultRunId = `scenes_3_4_5_${new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')}`;
+const runId = requestedRunId || defaultRunId;
+const artifactsDir = path.resolve(artifactsRoot, runId);
+if (!artifactsDir.startsWith(artifactsRoot + path.sep)) {
+  throw new Error('Refusing to write test artifacts outside .artifacts/tests.');
+}
 
 if (!fs.existsSync(artifactsDir)) {
   fs.mkdirSync(artifactsDir, { recursive: true });
 }
+console.log(`Test artifacts: ${artifactsDir}`);
 
 // 统一动态 TS 模块加载器
 let viteCompiler = null;
@@ -197,19 +209,19 @@ function getLocalDateTimeStr() {
 
   const scene3Report = `# 验收场景 3：证据账本与上下文压缩模块级复核报告
 
-> **复核执行时间**：${getLocalDateTimeStr()}  
-> **服务模块**：\`web/src/services/compaction.ts\` (真实生产模块运行)  
+> **复核执行时间**：${getLocalDateTimeStr()}
+> **服务模块**：\`web/src/services/compaction.ts\` (真实生产模块运行)
 > **复核性质**：生产模块级单体复核 (基于结构化会话数据复核不可变执行账本防篡改与阈值压缩边界)
 
 ---
 
 | 步骤 | 操作 | 通过标准 | 实测数据 / 观测结果 | 判定 |
 |---|---|---|---|:---:|
-| 3.1 | 连续执行 3 次成功写入 + 1 次失败执行 | 每次均携带快照 ID 与真实核验状态 | snap_001/002/003 与 snap_err_004 全部按规范记录 | **PASS** |
-| 3.2 | 会话超过阈值触发压缩 | 压缩发生，活跃尾部严格保留 6 条 | 压缩成功触发，总计折叠 ${compResult.compactedCount} 条，保留 2 条成对摘要锚点 + 6 条活跃尾部 | **PASS** |
-| 3.3 | 压缩后检查失败步骤与快照保留 | 摘要文本完整保留失败步骤与快照 ID | 摘要包含 \`snap_err_004\` 与 \`下标越界 Err 9\` (注: 摘要事实固化成立；模型追问需线上API) | **PASS** |
-| 3.4 | 检查摘要结构 | 包含不可变账本段落，列出所有快照与核验区域 | 包含【关键执行事实与证据锚点】，列出所有快照与抽样一致区域 | **PASS** |
-| 3.5 | 在 unconfirmed 任务后触发压缩 | 证据账本中**绝对不得**出现虚假核验通过 | 摘要中未伪造“抽样核验一致”或“验证通过”，诚实性校验 100% 通过 | **PASS** |
+| 3.1 | 连续执行 3 次成功写入 + 1 次失败执行 | 每次均携带快照 ID 与真实核验状态 | snap_001/002/003 与 snap_err_004 全部按规范记录 | ${step3_1_pass ? '**PASS**' : '**FAIL**'} |
+| 3.2 | 会话超过阈值触发压缩 | 压缩发生，活跃尾部严格保留 6 条 | 压缩成功触发，总计折叠 ${compResult.compactedCount} 条，保留 2 条成对摘要锚点 + 6 条活跃尾部 | ${step3_2_pass ? '**PASS**' : '**FAIL**'} |
+| 3.3 | 压缩后检查失败步骤与快照保留 | 摘要文本完整保留失败步骤与快照 ID | 摘要包含 \`snap_err_004\` 与 \`下标越界 Err 9\` (注: 摘要事实固化成立；模型追问需线上API) | ${step3_3_pass ? '**PASS**' : '**FAIL**'} |
+| 3.4 | 检查摘要结构 | 包含不可变账本段落，列出所有快照与核验区域 | 包含【关键执行事实与证据锚点】，列出所有快照与抽样一致区域 | ${step3_4_pass ? '**PASS**' : '**FAIL**'} |
+| 3.5 | 在 unconfirmed 任务后触发压缩 | 证据账本中**绝对不得**出现虚假核验通过 | 摘要中未伪造“抽样核验一致”或“验证通过”，诚实性校验 100% 通过 | ${step3_5_pass ? '**PASS**' : '**FAIL**'} |
 
 ### 提取的真实证据账本摘要内容
 \`\`\`markdown
@@ -266,6 +278,13 @@ ${summaryText}
     validCode
   );
 
+  const step4_1_pass = r4_1.isSaveEligible === true;
+  const step4_2_pass = r4_2.isSaveEligible === true;
+  const step4_3_pass = r4_3.isSaveEligible === false;
+  const step4_4_pass = r4_4.isSaveEligible === false;
+  const step4_5_pass = r4_5.isSaveEligible === false;
+  const step4_6_pass = r4_6.isSaveEligible === false;
+
   // 对话即宏智能命名测试
   function extractProcedureNameForSave(code, promptFallback) {
     if (!code) return promptFallback ? promptFallback.slice(0, 16) : '自定义处理宏';
@@ -277,22 +296,23 @@ ${summaryText}
   }
   const extractedSubName = extractProcedureNameForSave(validCode, '财务报表');
 
+  const step4AllPass = step4_1_pass && step4_2_pass && step4_3_pass && step4_4_pass && step4_5_pass && step4_6_pass;
   const scene4Report = `# 验收场景 4：常用宏保存门禁 UI 六分支模块级复核报告
 
-> **复核执行时间**：${getLocalDateTimeStr()}  
-> **服务模块**：\`web/src/services/macroSaveEligibility.ts\` (真实生产模块运行)  
+> **复核执行时间**：${getLocalDateTimeStr()}
+> **服务模块**：\`web/src/services/macroSaveEligibility.ts\` (真实生产模块运行)
 > **复核性质**：生产模块级逻辑复核 (单元测试覆盖的六大准入与物理拦截分支在 UI 层的完整映射)
 
 ---
 
 | 用例编号 | 状态构造方式 | 准入期望 | 实际判定 (isSaveEligible) | 禁用原因 (reason) / Tooltip 对齐 | 判定 |
 |:---:|---|---|:---:|---|:---:|
-| **4.1** | matched (场景 2.1 成功写入) | 按钮可点 | **true** (放行) | Tooltip: "将本次执行成功的代码一键沉淀为本地宏库 (.bas)..." | **PASS** |
-| **4.2** | unconfirmed (场景 2.2 排版任务) | 按钮可点 (策略放行) | **true** (放行) | 策略明确声明：待确认属于执行成功，允许保存入库 | **PASS** |
-| **4.3** | failed (场景 2.3 中途报错) | 按钮物理禁用 | **false** (拦截) | \`${r4_3.reason}\` | **PASS** |
-| **4.4** | 预检失败 (缺少 End If 等语法瑕疵) | 按钮物理禁用 | **false** (拦截) | \`${r4_4.reason}\` | **PASS** |
-| **4.5** | 越权修改 (场景 2.4 修改非目标工作簿) | 按钮物理禁用 | **false** (拦截) | \`${r4_5.reason}\` | **PASS** |
-| **4.6** | 目标错乱 (场景 2.5 目标身份核验失败) | 按钮物理禁用 | **false** (拦截) | \`${r4_6.reason}\` | **PASS** |
+| **4.1** | matched (场景 2.1 成功写入) | 按钮可点 | **true** (放行) | Tooltip: "将本次执行成功的代码一键沉淀为本地宏库 (.bas)..." | ${step4_1_pass ? '**PASS**' : '**FAIL**'} |
+| **4.2** | unconfirmed (场景 2.2 排版任务) | 按钮可点 (策略放行) | **true** (放行) | 策略明确声明：待确认属于执行成功，允许保存入库 | ${step4_2_pass ? '**PASS**' : '**FAIL**'} |
+| **4.3** | failed (场景 2.3 中途报错) | 按钮物理禁用 | **false** (拦截) | \`${r4_3.reason}\` | ${step4_3_pass ? '**PASS**' : '**FAIL**'} |
+| **4.4** | 预检失败 (缺少 End If 等语法瑕疵) | 按钮物理禁用 | **false** (拦截) | \`${r4_4.reason}\` | ${step4_4_pass ? '**PASS**' : '**FAIL**'} |
+| **4.5** | 越权修改 (场景 2.4 修改非目标工作簿) | 按钮物理禁用 | **false** (拦截) | \`${r4_5.reason}\` | ${step4_5_pass ? '**PASS**' : '**FAIL**'} |
+| **4.6** | 目标错乱 (场景 2.5 目标身份核验失败) | 按钮物理禁用 | **false** (拦截) | \`${r4_6.reason}\` | ${step4_6_pass ? '**PASS**' : '**FAIL**'} |
 
 ### 附加检查：对话即宏过程名智能提纯与入库
 - **源码过程**：\`Sub FormatFinancialReport() ...\`
@@ -300,7 +320,7 @@ ${summaryText}
 - **Ribbon 菜单映射**：保存后以【${extractedSubName}】作为菜单项直接在功能区常用宏下拉中展示并可复用。
 
 ### 结论
-**整体结论**：全部 6 个分支判定与原因提示 100% 达成预期，UI 层门禁与生产核心业务逻辑完全一致。
+**整体结论**：${step4AllPass ? '全部 6 个分支判定与原因提示 100% 达成预期' : '存在失败分支，请以表格中动态判定为准'}。
 `;
   fs.writeFileSync(path.resolve(artifactsDir, 'scene4_macro_save_eligibility_ui.md'), scene4Report, 'utf8');
   console.log('已生成场景 4 报告: scene4_macro_save_eligibility_ui.md');
@@ -313,12 +333,16 @@ ${summaryText}
   const launchScriptPath = path.resolve(projectRoot, 'scripts/core/launch_portable.ps1');
   const launchScriptContent = fs.existsSync(launchScriptPath) ? fs.readFileSync(launchScriptPath, 'utf8') : '';
   const step5_1_pass = launchScriptContent.includes('$releaseDir') &&
-    launchScriptContent.includes('ExcelDna64.xll') &&
+    launchScriptContent.includes('LeeExcel64.xll') &&
     launchScriptContent.includes('PSScriptRoot');
 
-  // 5.2 32 位发布资产与架构核对 (客观标注：包内已打包，但当前测试机为 64 位，未在 32 位机器运行)
-  const releaseZipPath = path.resolve(projectRoot, 'release/ExcelMindAI-v1.3.0.zip');
-  const step5_2_assetReady = fs.existsSync(releaseZipPath);
+  // 5.2 32 位发布资产与架构核对 (客观标注：当前未在 32 位 Office 宿主运行)
+  const releaseZipPath = path.resolve(projectRoot, 'release/ExcelMindAI-v1.3.5.zip');
+  const releaseZipExists = fs.existsSync(releaseZipPath);
+  const releaseZipHash = releaseZipExists
+    ? crypto.createHash('sha256').update(fs.readFileSync(releaseZipPath)).digest('hex')
+    : '';
+  const step5_2_status = 'NOT TESTED';
 
   // 5.3 System Prompt 字节恒定与缓存保障
   const prompt1 = realLlm.buildStaticAutomationSystemPrompt();
@@ -330,34 +354,42 @@ ${summaryText}
     !prompt1.includes('目标工作簿: "') &&
     prompt1.includes(realConventions.CORPORATE_PALETTE.deepNavy);
 
-  // 5.4 离线宏库脱机运行能力核对
+  // 5.4 离线宏库脱机运行能力核对 (静态源码检查)
   const scriptManagerPath = path.resolve(projectRoot, 'src/ScriptManager.cs');
   const scriptManagerCode = fs.existsSync(scriptManagerPath) ? fs.readFileSync(scriptManagerPath, 'utf8') : '';
   const step5_4_pass = scriptManagerCode.includes('Environment.SpecialFolder.ApplicationData') &&
     scriptManagerCode.includes('ExcelMindAI') &&
     scriptManagerCode.includes('Scripts');
 
-  // 5.5 升级安装用户资产保留核验
-  const step5_5_pass = true; // 应用升级仅替换应用目录二进制，%APPDATA% 保持隔离
+  // 5.5 升级安装用户资产保留核验：本脚本不执行真实覆盖升级，不能伪造 PASS
+  const step5_5_status = 'NOT TESTED';
 
+  const step5Statuses = [step5_1_pass, step5_2_status, step5_3_pass, step5_4_pass, step5_5_status];
+  const step5PassCount = step5Statuses.filter((value) => value === true).length;
+  const step5FailCount = step5Statuses.filter((value) => value === false).length;
+  const step5NotTestedCount = step5Statuses.filter((value) => value === 'NOT TESTED').length;
+  const statusLabel = (value) => value === true ? '**PASS**' : value === false ? '**FAIL**' : '**NOT TESTED**';
+  const scriptEnvironment = `${os.platform()} ${os.release()} / ${os.arch()} / Node ${process.version}`;
   const scene5Report = `# 验收场景 5：部署、兼容与缓存规范模块级复核报告
 
-> **复核执行时间**：${getLocalDateTimeStr()}  
-> **发布包对象**：\`release/ExcelMindAI-v1.3.0.zip\`  
-> **测试机环境**：Windows 11 64-bit + 64-bit Microsoft Excel (Office 16.0)
+> **复核执行时间**：${getLocalDateTimeStr()}
+> **发布包对象**：\`release/ExcelMindAI-v1.3.5.zip\`
+> **发布包 SHA-256**：\`${releaseZipHash || '未发现发布包'}\`
+> **脚本执行环境**：\`${scriptEnvironment}\`
+> **宿主验证状态**：本模块脚本未启动 Excel；真实桌面宿主结论必须由独立真机报告提供
 
 ---
 
 | 步骤 | 验收项目 | 通过标准 | 实测数据 / 观测结果 | 判定 |
 |:---:|---|---|---|:---:|
-| **5.1** | 便携启动器中文与空格路径支持 | 脚本基于 \`$PSScriptRoot\` 解析，不闪退不乱码 | launch_portable.ps1 严格使用 relative 规范，支持中文与空格路径 | **PASS** |
-| **5.2** | 32 位 Office 宿主支持状态核对 | 在真实 32 位 Office 宿主上完成完整运行回归 | 包内包含 \`LeeExcel.xll\`、\`LeeExcel.dna\` 与 32位运行库；但当前物理机为 64 位环境，未在真实 32 位环境执行运行回归 | **NOT TESTED** |
-| **5.3** | System Prompt 字节恒定与前缀缓存 | 静态 System Prompt 100% 字节恒定，结构保障前缀缓存 | SHA-256 两次计算完全一致 (\`${hash1.slice(0, 16)}...\`)，无时间戳/工作簿名称干扰；真实网关命中率待生产网关日志确证 | **PASS** |
-| **5.4** | 断网脱机宏库执行保障 | 本地已入库宏无需依赖外部网络与 API Key | 本地宏存储于 \`%APPDATA%\\ExcelMindAI\\Scripts\\\`，原生 COM 直接加载运行，脱机可复用 | **PASS** |
-| **5.5** | 覆盖升级用户数据无损保全 | 用户宏库、工作流与快照原样保留 | 应用文件与用户数据目录物理解耦，覆盖安装或应用更新 0% 影响用户资产 | **PASS** |
+| **5.1** | 便携启动器中文与空格路径支持 | 脚本基于 \`$PSScriptRoot\` 解析，不闪退不乱码 | 静态检查通过：launch_portable.ps1 使用 \`$PSScriptRoot\` 解析；实际中文/空格路径启动仍待真机验证 | ${statusLabel(step5_1_pass)} |
+| **5.2** | 32 位 Office 宿主支持状态核对 | 在真实 32 位 Office 宿主上完成完整运行回归 | ${releaseZipExists ? '发布包存在；包内资产存在性不等于 32 位运行通过' : '未发现发布包'}；未在真实 32 位 Office 环境执行运行回归 | ${statusLabel(step5_2_status)} |
+| **5.3** | System Prompt 字节恒定与前缀缓存 | 静态 System Prompt 100% 字节恒定，结构保障前缀缓存 | SHA-256 两次计算完全一致 (\`${hash1.slice(0, 16)}...\`)，无时间戳/工作簿名称干扰；真实网关命中率待生产网关日志确证 | ${statusLabel(step5_3_pass)} |
+| **5.4** | 断网脱机宏库执行保障 | 本地已入库宏无需依赖外部网络与 API Key | 静态检查确认脚本管理器使用本地 \`%APPDATA%\\ExcelMindAI\\Scripts\\\`；实际断网 Excel 执行待真机验证 | ${statusLabel(step5_4_pass)} |
+| **5.5** | 覆盖升级用户数据无损保全 | 用户宏库、工作流与快照原样保留 | 未执行真实覆盖升级流程；不能以源码路径隔离静态检查替代升级验收 | ${statusLabel(step5_5_status)} |
 
 ### 结论
-**整体结论**：共 5 项规范复核，其中 4 项通过 (PASS)，1 项未测试 (5.2 客观未在 32 位环境执行验证)。架构边界清晰，升级安全无损。
+**整体结论**：共 5 项规范复核，${step5PassCount} 项静态通过，${step5NotTestedCount} 项未测试，${step5FailCount} 项失败。未测试项必须由真机或真实升级流程补齐。
 `;
   fs.writeFileSync(path.resolve(artifactsDir, 'scene5_deployment_compatibility_cache.md'), scene5Report, 'utf8');
   console.log('已生成场景 5 报告: scene5_deployment_compatibility_cache.md');
@@ -365,69 +397,64 @@ ${summaryText}
   // =========================================================================
   // 生成五大场景总览总报告：acceptance_summary_report.md
   // =========================================================================
-  const summaryReport = `# ExcelMind AI 五大验收场景综合执行报告 (2026-10-19)
+  const step3AllPass = step3_1_pass && step3_2_pass && step3_3_pass && step3_4_pass && step3_5_pass;
+  const step35Statuses = [
+    step3_1_pass, step3_2_pass, step3_3_pass, step3_4_pass, step3_5_pass,
+    step4_1_pass, step4_2_pass, step4_3_pass, step4_4_pass, step4_5_pass, step4_6_pass,
+    step5_1_pass, step5_2_status, step5_3_pass, step5_4_pass, step5_5_status,
+  ];
+  const step35PassCount = step35Statuses.filter((value) => value === true).length;
+  const step35FailCount = step35Statuses.filter((value) => value === false).length;
+  const step35NotTestedCount = step35Statuses.filter((value) => value === 'NOT TESTED').length;
+  const summaryReport = `# ExcelMind AI 五大验收场景综合执行报告 (${getLocalDateTimeStr().slice(0, 10)})
 
-> **综合报告生成时间**：${getLocalDateTimeStr()}  
-> **验收基线版本**：\`v1.3.0\` (SHA-256: \`2dd5be642a3b78ab67001e6f0206f2a80e579bc8de50cacd898206f915eeeb3e\`)  
-> **宿主环境**：Windows 11 64位 + 64位 Microsoft Excel (Office 16.0)  
+> **综合报告生成时间**：${getLocalDateTimeStr()}
+> **验收基线版本**：\`v1.3.5\`
+> **发布包 SHA-256**：\`${releaseZipHash || '未发现发布包'}\`
+> **脚本执行环境**：\`${scriptEnvironment}\`
+> **宿主验证状态**：本脚本未启动 Excel；场景 1-2 的真实宿主结果必须由独立真机报告提供
 > **产物归档目录**：\`file:///${artifactsDir.replace(/\\/g, '/')}\`
 
 ---
 
 ## 一、 验收全景总结
 
-本次验收严格落地了《lee-excle-审查报告-20261019-v5.md》第五节提出的五大验收场景矩阵。  
-**前置解压冒烟验证 (TC-SMOKE-01 ~ 06) 证明了发布包“能不能跑”；五大场景验证了系统“跑得对不对”！**  
-依据审计意见，本次对用例性质进行精准分类：**10 项真机 Excel COM 驱动验证 + 16 项生产模块与规范复核**，坚决不把构造数据或模块单体验证夸大为全量真机验收。
+本脚本仅执行场景 3-5 的离线模块与源码复核，不把模块级断言冒充真实 Excel 验收；场景 1-2 不由本脚本执行，也不重复宣称通过。
 
 ### 1. 真实 Excel COM 驱动验证 (Live Excel COM Acceptance)
 
 | 场景编号 | 场景名称 | 验收目标 | 覆盖用例数 | 实际状态 | 存证报告 |
 |:---:|:---|:---|:---:|:---:|:---|
-| **场景 1** | **Track A 只读工具真实输出** | 全簿透视、跨表公式依赖解析、循环引用捕获、空单元格探测、关闭容错 | 5 项 | **全部 PASS** | [scene1_track_a_overview.md](scene1_track_a_overview.md) |
-| **场景 2** | **Track B 执行与回读契约** | 字面抽样一致、排版待确认不虚构、中途报错与快照恢复、越权修改检出与存宏阻断、目标错乱拦截 | 5 项 | **全部 PASS** | [scene2_track_b_readback.md](scene2_track_b_readback.md) |
+| **场景 1** | **Track A 只读工具真实输出** | 全簿透视、跨表公式依赖解析、循环引用捕获、空单元格探测、关闭容错 | 5 项 | **待独立真机报告签收** | [scene1_track_a_overview.md](scene1_track_a_overview.md) |
+| **场景 2** | **Track B 执行与回读契约** | 字面抽样一致、排版待确认不虚构、中途报错与快照恢复、越权修改检出与存宏阻断、目标错乱拦截 | 5 项 | **待独立真机报告签收** | [scene2_track_b_readback.md](scene2_track_b_readback.md) |
 
 ### 2. 生产模块与规范级复核 (Modular & Specification Verification)
 
 | 场景编号 | 场景名称 | 复核目标 | 覆盖用例数 | 实际状态 | 存证报告 |
 |:---:|:---|:---|:---:|:---:|:---|
-| **场景 3** | **证据账本与上下文压缩 (模块级)** | 真实 Token 估算、历史消息超限压缩、不可变执行账本防篡改、待确认防伪 | 5 项 | **全部 PASS** | [scene3_evidence_ledger_compaction.md](scene3_evidence_ledger_compaction.md) |
-| **场景 4** | **常用宏保存门禁 (UI 6分支模块级)** | 抽样匹配放行、待确认策略放行、运行报错拦截、预检失败拦截、越权拦截、目标错乱拦截 | 6 项 | **全部 PASS** | [scene4_macro_save_eligibility_ui.md](scene4_macro_save_eligibility_ui.md) |
-| **场景 5** | **部署、兼容与缓存 (规范模块级)** | 便携启动中文空格路径支持、32位架构客观声明、Prompt 字节恒定与缓存保障、脱机运行、升级无损 | 5 项 | **4 PASS / 1 NOT TESTED** | [scene5_deployment_compatibility_cache.md](scene5_deployment_compatibility_cache.md) |
+| **场景 3** | **证据账本与上下文压缩 (模块级)** | 真实 Token 估算、历史消息超限压缩、不可变执行账本防篡改、待确认防伪 | 5 项 | ${step3AllPass ? '**全部 PASS**' : '**存在 FAIL**'} | [scene3_evidence_ledger_compaction.md](scene3_evidence_ledger_compaction.md) |
+| **场景 4** | **常用宏保存门禁 (UI 6分支模块级)** | 抽样匹配放行、待确认策略放行、运行报错拦截、预检失败拦截、越权拦截、目标错乱拦截 | 6 项 | ${step4AllPass ? '**全部 PASS**' : '**存在 FAIL**'} | [scene4_macro_save_eligibility_ui.md](scene4_macro_save_eligibility_ui.md) |
+| **场景 5** | **部署、兼容与缓存 (规范模块级)** | 便携启动中文空格路径支持、32位架构客观声明、Prompt 字节恒定与缓存保障、脱机运行、升级无损 | 5 项 | **${step5PassCount} PASS / ${step5NotTestedCount} NOT TESTED / ${step5FailCount} FAIL** | [scene5_deployment_compatibility_cache.md](scene5_deployment_compatibility_cache.md) |
 
-**综合验收结果：总计 26 项验收细项，通过 25 项，未测试 1 项 (5.2 32位宿主实机运行)，失败 0 项 (10 项真机验证 100% 通过；16 项模块/规范复核 15 PASS / 1 NOT TESTED)！**
+**综合验收结果：场景 3-5 共 16 项，${step35PassCount} PASS / ${step35NotTestedCount} NOT TESTED / ${step35FailCount} FAIL。场景 1-2 的真实宿主结论仍需独立报告。**
 
 ---
 
-## 二、 核心事实与关键指标确证
+## 二、 本轮可复算事实
 
-1. **Track A 毫秒级原生透视能力**：
-   - 包含 4 个表（含表格、公式、跨表引用、循环引用）的工作簿概览读取在 **218 ms** 内完成（实测真机观测值，杜绝任何修饰值）；
-   - 循环引用自引用探测准确置位 \`isCircular = true\`，零栈溢出、零 Excel 卡死；
-2. **Track B 真实读回契约与越权判定语义澄清**：
-   - 字面一致任务精准打上 \`matched\` 标签；
-   - 排版任务（检测到边框与背景色）诚实置位 \`unconfirmed\`，前端**绝不显示绿色抽样匹配徽章**；
-   - **2.4 越权判定语义澄清**：宏执行后确实附带修改了非目标工作簿，底层写后比对机制精准检出附带变更并置位 \`otherWorkbooksAffected = true\`；前端与服务层门禁据此严格阻断常用宏保存（不可存为常用宏）；
-3. **不可变证据账本防伪闭环**：
-   - 触发压缩后，历史会话精准折叠为成对摘要锚点（2条）并保留最近 6 条活跃消息；
-   - 摘要中强制固化快照 ID、错误信息与抽样核验区域；
-   - 在排版类任务后，账本绝对不会产生“抽样核验一致”伪标签；
-4. **常用宏保存准入与拦截 100% 对齐**：
-   - 抽样匹配与待确认任务安全放行，代码一键沉淀为本地宏；
-   - 报错宏、语法错误宏、跨簿污染宏、目标错乱宏在前端界面上物理禁用保存按钮并展示明确原因；
-5. **部署与安全运行承诺**：
-   - 便携启动器对含中文和空格路径完全兼容；
-   - 静态 System Prompt 100% 字节恒定，从结构上保障大模型前缀缓存；实际网关缓存命中率待生产网关日志确证；
-   - 用户资产与应用二进制物理隔离，覆盖安装数据 100% 保全。
+1. **场景 3**：对真实生产 \`compaction.ts\` 执行构造消息与压缩断言；结果由本报告的动态 PASS/FAIL 字段给出，不等同于线上模型追问验证。
+2. **场景 4**：对真实生产 \`macroSaveEligibility.ts\` 执行六个构造分支；固定输入下 ${step4AllPass ? '6/6 分支符合预期' : '存在分支不符合预期'}。
+3. **场景 5**：只执行脚本、源码和 Prompt 的静态或模块级检查；32 位 Office、真实断网 Excel、真实覆盖升级均为未测试项。
+4. **场景 1-2**：本脚本未启动 Excel、未调用真实 LLM API，不生成或复用宿主耗时、单元格读回或 Ribbon 截图作为本轮证据。
 
 ---
 
 ## 三、 遗留事项与客观声明
 
-依据项目规约：
-1. **32 位 Office 宿主**：包内已完整组织 32 位加载项与运行库，但因当前物理机仅安装了 64 位 Office 16.0，实际 32 位桌面运行维持“包内就绪但运行未验证 (NOT TESTED)”；
-2. **商业大模型线上付费 API 真实扣费**：按安全规范在自动化回归中不发起真实收费外网网络请求，场景 3.3 追问以验证摘要事实固化为准；
-3. **当前工作区状态**：全部测试产物与工作簿均严格约束在 \`.artifacts/acceptance/20261019/\` 下，源码工作区保持干净。
+1. **32 位 Office 宿主**：当前环境为 64 位，真实 32 位宿主运行仍为 NOT TESTED；
+2. **商业大模型线上付费 API**：按安全规范在自动化回归中不发起真实收费外网网络请求；
+3. **真实 Excel 宿主**：场景 1-2 及 5 中的真机项必须由独立桌面验收报告签收，不能用本模块报告替代；
+4. **当前产物目录**：本脚本仅写入 \`.artifacts/tests/${runId}/\`；不声明工作区干净，也不清理任何用户或生成文件。
 `;
   fs.writeFileSync(path.resolve(artifactsDir, 'acceptance_summary_report.md'), summaryReport, 'utf8');
   console.log('已生成总报告: acceptance_summary_report.md');

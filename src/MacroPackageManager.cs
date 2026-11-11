@@ -488,7 +488,7 @@ namespace LeeExcel
                 var allWarnings = new List<SensitiveScanWarning>();
                 foreach (var e in manifest.entries)
                 {
-                    string filePath = Path.Combine(extractDir, e.packageRelativePath);
+                    string filePath = ResolveSafePackageEntryPath(extractDir, e.packageRelativePath);
                     if (File.Exists(filePath))
                     {
                         string code = File.ReadAllText(filePath, Encoding.UTF8);
@@ -577,7 +577,7 @@ namespace LeeExcel
 
                 foreach (var entry in entriesToImport)
                 {
-                    string srcFile = Path.Combine(extractDir, entry.packageRelativePath);
+                    string srcFile = ResolveSafePackageEntryPath(extractDir, entry.packageRelativePath);
                     if (!File.Exists(srcFile))
                     {
                         throw new InvalidOperationException("宏包内缺失源码文件: " + entry.packageRelativePath);
@@ -718,6 +718,28 @@ namespace LeeExcel
             {
                 SafeDeleteDirectory(extractDir);
             }
+        }
+
+        private static string ResolveSafePackageEntryPath(string extractDir, string packageRelativePath)
+        {
+            if (string.IsNullOrWhiteSpace(packageRelativePath))
+            {
+                throw new InvalidOperationException("宏包条目路径不能为空。");
+            }
+
+            string normalized = packageRelativePath.Replace('\\', '/');
+            if (!normalized.StartsWith("scripts/", StringComparison.OrdinalIgnoreCase) || normalized.Contains("../") || normalized.Contains("/../"))
+            {
+                throw new InvalidOperationException("宏包条目路径不在 scripts/ 白名单内，已阻断: " + packageRelativePath);
+            }
+
+            string scriptsRoot = Path.GetFullPath(Path.Combine(extractDir, "scripts")) + Path.DirectorySeparatorChar;
+            string fullPath = Path.GetFullPath(Path.Combine(extractDir, packageRelativePath));
+            if (!fullPath.StartsWith(scriptsRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("宏包条目路径穿越 scripts/ 根目录，已阻断: " + packageRelativePath);
+            }
+            return fullPath;
         }
 
         private static long ValidateAndExtractZip(string zipPath, string targetExtractDir, out MacroPackageManifest manifest)
@@ -877,7 +899,7 @@ namespace LeeExcel
                     throw new InvalidOperationException("宏条目 packageRelativePath 不能为空。");
                 }
 
-                string entryFile = Path.Combine(targetExtractDir, entry.packageRelativePath);
+                string entryFile = ResolveSafePackageEntryPath(targetExtractDir, entry.packageRelativePath);
                 if (!File.Exists(entryFile))
                 {
                     throw new InvalidOperationException("manifest 声明的文件在包内缺失: " + entry.packageRelativePath);

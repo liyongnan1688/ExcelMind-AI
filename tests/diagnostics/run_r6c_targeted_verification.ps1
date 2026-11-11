@@ -7,6 +7,11 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 
 $scriptDir = $PSScriptRoot
 $projectRoot = Split-Path -Parent (Split-Path -Parent $scriptDir)
+$packageVersion = [string](Get-Content -LiteralPath (Join-Path $projectRoot "package.json") -Raw | ConvertFrom-Json).version
+if ($packageVersion -notmatch '^\d+\.\d+\.\d+$') {
+    throw "package.json 版本格式无效: $packageVersion"
+}
+$productVersion = "v$packageVersion"
 
 $runId = "r6c_targeted_" + (Get-Date -Format "yyyyMMdd_HHmmss")
 $artifactsDir = Join-Path $projectRoot ".artifacts\tests\$runId"
@@ -40,12 +45,12 @@ $refs = @(
     "System.IO.Compression.dll",
     "System.IO.Compression.FileSystem.dll",
     "Microsoft.CSharp.dll",
-    "`"$leeDll`""
+    $leeDll
 )
 $refArgs = $refs | ForEach-Object { "/r:$_" }
 
-$buildCmd = "& `"$csc`" /nologo /target:exe /out:`"$diagExe`" $refArgs `"$diagSrc`""
-Invoke-Expression $buildCmd
+$buildArgs = @("/nologo", "/target:exe", "/out:$diagExe") + $refArgs + @($diagSrc)
+& $csc @buildArgs
 
 if ($LASTEXITCODE -ne 0) {
     throw "Build VerifyR6cInstallAndDiagnostics.cs failed with code: $LASTEXITCODE"
@@ -172,7 +177,7 @@ try {
 
     # 2.4 Version Upgrade
     Write-Host "      Step 2.4: Version upgrade with backup..." -ForegroundColor DarkGray
-    Add-Content -Path (Join-Path $mockSourceDir "LeeExcel.dll") -Value "NEW_VERSION_BYTES_v1.2.0"
+    Add-Content -Path (Join-Path $mockSourceDir "LeeExcel.dll") -Value "NEW_VERSION_BYTES_$productVersion"
     $newDllHash = (Get-FileHash -Path (Join-Path $mockSourceDir "LeeExcel.dll") -Algorithm SHA256).Hash
 
     $outUpgrade = & powershell -ExecutionPolicy Bypass -File "$installerScript" `
@@ -344,13 +349,20 @@ $counterOut = & node test_regex_counter_example.cjs
 $counterExitCode = $LASTEXITCODE
 Pop-Location
 
-$unitPass = ($unitExitCode -eq 0) -and ($unitOut -like "*Pass = 206*") -and ($counterExitCode -eq 0)
+$unitSummaryLine = ($unitOut | Select-String -Pattern 'Unit Tests Summary: Pass = (\d+), Fail = (\d+)' | Select-Object -Last 1)
+$unitPassCount = 0
+$unitFailCount = -1
+if ($unitSummaryLine -and $unitSummaryLine.Matches.Count -gt 0) {
+    $unitPassCount = [int]$unitSummaryLine.Matches[0].Groups[1].Value
+    $unitFailCount = [int]$unitSummaryLine.Matches[0].Groups[2].Value
+}
+$unitPass = ($unitExitCode -eq 0) -and ($counterExitCode -eq 0) -and ($unitFailCount -eq 0)
 $testResults += [PSCustomObject]@{
     Id = "TC-REG-R6c"
-    Name = "Offline Core Gates (206 Unit Tests + 3 Counter-Examples 100% PASS)"
+    Name = "Offline Core Gates (dynamic unit count + regex counter-examples)"
     Category = "Core Business Gate"
     Result = if ($unitPass) { "PASS" } else { "FAIL" }
-    Detail = "Suite 19 with 12 upgrade & diagnostic assertions passed; all 206 unit tests passed 100%"
+    Detail = "Unit Pass=$unitPassCount, Fail=$unitFailCount; Regex exit=$counterExitCode"
 }
 
 # -------------------------------------------------------------
@@ -360,6 +372,9 @@ Write-Host "`n[4/4] Writing markdown verification report: $reportPath ..." -Fore
 
 $passCount = ($testResults | Where-Object { $_.Result -eq "PASS" }).Count
 $totalCount = $testResults.Count
+$processingResults = @($testResults | Where-Object { $_.Category -ne "Core Business Gate" })
+$processingPass = @($processingResults | Where-Object { $_.Result -eq "PASS" }).Count
+$processingTotal = $processingResults.Count
 
 $reportMd = @"
 # TASK-R6c-01 无损安装升级与脱敏诊断导出 定向验收报告
@@ -371,8 +386,8 @@ $reportMd = @"
 
 ## 1. 结构化分类统计
 
-- **处理层/集成测试 (诊断导出与沙箱安装)**: 共 **10** 项，通过 **10** 项 (**100%**)
-- **存量核心业务门禁 (包含 Suite 19)**: 共 **1** 项 (涵盖 206 单元测试与 3 反例)，通过 **1** 项 (**100%**)
+- **处理层/集成测试 (诊断导出与沙箱安装)**: 共 **$processingTotal** 项，通过 **$processingPass** 项
+- **存量核心业务门禁**: 共 **1** 项，通过 **$(if ($unitPass) { 1 } else { 0 })** 项 (Unit Pass=$unitPassCount, Fail=$unitFailCount，Regex exit=$counterExitCode)
 - **全量结果**: 共 **$totalCount** 项，通过 **$passCount** 项 (**$([math]::Round($passCount / $totalCount * 100, 1))%**)
 
 ## 2. 详细用例结果
@@ -407,16 +422,19 @@ $reportMd += @"
    - 敏感信息扫描第二道拦截直接剔除高危私钥与密码行；
    - 诊断包纯本地生成，不联网，不自动上传，取消不生成包，异常清理临时目录。
 
-## 4. 存量桌面 UI 用例复用说明
+## 4. 存量桌面 UI 用例与范围限定
 
-依据本轮确立的测试策略（按改动影响范围验证，不默认重复执行全量桌面回归），存量 26 项真实桌面 UI 用例（含 `TC-REG-01` ~ `TC-R6b-08`）与 60 项非直接受影响集成用例均在同一构建版本（v1.2.0）的归档报告 `.artifacts/tests/desktop_acceptance_20261003_083458/acceptance_report.md` 中拥有完整 100% PASS 证据，**本轮明确注明“复用既有证据”，不虚构记作本轮重复测试**。
+- **当前基线版本**: $productVersion
+- **本轮范围**: 诊断导出、沙箱安装/升级/回滚、用户数据保护与离线核心门禁；本轮不重复启动 Excel 做全量 UI 回归。
+- **前置全量桌面证据**: 同一工作区已有 95/95 PASS 的真实桌面验收报告，见 .artifacts/tests/desktop_acceptance_20261108_140000/acceptance_report.md。该报告包含 26 项真实 Excel UI、67 项处理层/集成、1 项受控 HTTP 与 1 项离线核心门禁；本报告不把该证据伪造成本轮重新执行结果。
+- **未覆盖**: 真实 32 位 Office、真实商业 LLM API、第三方中文输入法、主观视觉验收、真实覆盖升级与 Windows 7 SP1，仍需人工环境验证。
 
 "@
 
 Set-Content -Path $reportPath -Value $reportMd -Encoding UTF8
 
 Write-Host "==========================================================" -ForegroundColor Green
-Write-Host " Verification Completed! Total: $totalCount, Passed: $passCount (100% PASS)" -ForegroundColor Green
+Write-Host " Verification Completed! Total: $totalCount, Passed: $passCount ($([math]::Round($passCount / $totalCount * 100, 1))%)" -ForegroundColor Green
 Write-Host " Report written to: $reportPath" -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Green
 

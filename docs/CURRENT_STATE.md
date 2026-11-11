@@ -1,7 +1,7 @@
-# ExcelMind AI 当前系统状态与基线入口 (CURRENT_STATE.md)
+﻿# ExcelMind AI 当前系统状态与基线入口 (CURRENT_STATE.md)
 
 > **文档定位**：后续开发者与 AI 识别项目真实状态的唯一当前入口  
-> **更新时间**：2026-10-21  
+> **更新时间**：2026-11-08
 > **维护原则**：事实驱动、基线清晰、边界分明；旧报告只证明当时测试，不作为当前假设。
 
 ---
@@ -14,38 +14,38 @@
 | **当前发布版本** | `v1.3.5` (Official Production Release) | 正式稳定发行版本 |
 | **前序发布版本** | `v1.3.4` (Release v1.3.4) | 前序稳定版本（Tag `v1.3.4`） |
 | **Git Tag** | `v1.3.5` | 正式发行 Tag |
-| **本地构建资产 (Local Release ZIP)** | **SHA-256**:<br>`cb21ffc17f0bde89a396783e0eb659dfb42c97dfd6d9812fa642c2df50879127` | **物理位置**：`release/ExcelMindAI-v1.3.5.zip`<br>由弹窗互斥与520px窗格宽度优化后最新代码打包生成（1.65 MB） |
-| **测试门禁基线** | **254/254 PASS (100%)** | 覆盖互斥弹窗管理与 520px 工作台适配 |
+| **本地构建资产 (Local Release ZIP)** | **SHA-256**：以 `release/ExcelMindAI-v1.3.5.zip` 的实际文件哈希和包内 `checksums_sha256.txt` 为准 | **物理位置**：`release/ExcelMindAI-v1.3.5.zip`<br>由 2026-11-11 诊断保存对话框 owner 修复后的最新代码重新打包生成（约 1.59 MB） |
+| **测试门禁基线** | **257/257 PASS (100%) + 40/40 安全基线 PASS** | 覆盖互斥弹窗管理、安全边界与 520px 工作台适配 |
 
 ### 独立隔离解压冒烟与五大真机验收确证
 
 1. **发行包解压冒烟验证（“能不能跑” - 6/6 PASS）**：
-   - **存证报告**：`.artifacts/tests/smoke_isolated_20261019_150904/smoke_report.md`；
-   - **动态标题**：`# ExcelMind AI v1.3.0 发行包独立隔离解压冒烟验证报告`（已彻底修复历史报告标题写死版本号的技术债）；
+   - **存证报告**：`.artifacts/tests/smoke_isolated_<timestamp>/smoke_report.md`；
+   - **报告标题**：`# ExcelMind AI v1.3.5 发行包独立隔离解压冒烟验证报告`；
    - **结果**：清单核验（26项）、便携入口、64位加载、WebView2窗格展示与Ribbon截图、脱敏诊断导出全流程、固定无害宏读回全量通过，宿主进程安全退出。
-2. **五大验收场景矩阵（“跑得对不对” - 10 项真机验证 100% PASS + 16 项模块/规范复核 15 PASS / 1 NOT TESTED）**：
-   - **存证报告**：`.artifacts/acceptance/20261019/acceptance_summary_report.md`；
-   - **场景 1 (Track A 只读工具真机验证 - 5/5 PASS)**：毫秒级全簿概览（实测 218 ms，杜绝修饰值）、跨表引用血缘分析、循环引用探测、空单元格受控、关闭容错全部通过；
-   - **场景 2 (Track B 读回契约真机验证 - 5/5 PASS)**：字面匹配 `matched`、排版样式诚实标为 `unconfirmed`（杜绝虚假抽样通过徽章）、写脏数据报错与快照物理回滚、跨簿越权附带修改精准检出（`otherWorkbooksAffected = true`）并严格阻断存宏、目标错乱拦截全部通过；
+2. **五大验收场景矩阵（本批真机 10/10 PASS；离线模块/规范复核 14 PASS / 2 NOT TESTED）**：
+   - **存证报告**：`.artifacts/tests/<run-id>/acceptance_summary_report.md`；桌面端验收报告：`.artifacts/tests/desktop_acceptance_<timestamp>/acceptance_report.md`；
+   - **场景 1 (Track A 只读工具真机报告 - 5/5 PASS)**：毫秒级全簿概览（耗时为真机报告内本批动态记录，不跨机器硬编码）、跨表引用血缘分析、循环引用探测、空单元格受控、关闭容错全部通过；
+   - **场景 2 (Track B 读回契约真机报告 - 5/5 PASS)**：字面匹配 `matched`、排版样式诚实标为 `unconfirmed`（杜绝虚假抽样通过徽章）、写脏数据报错与快照物理回滚、跨簿越权附带修改精准检出（`otherWorkbooksAffected = true`）并严格阻断存宏、目标错乱拦截全部通过；
    - **场景 3 (证据账本与压缩模块级复核 - 5/5 PASS)**：真实 Token 算子、阈值压缩保留成对锚点与 6 条活跃尾部、不可变账本生命周期固化、待确认任务防伪核查全部通过；
    - **场景 4 (UI 保存门禁 6 分支模块级复核 - 6/6 PASS)**：抽样匹配放行、待确认放行、报错拦截、预检失败拦截、越权拦截、目标错乱拦截全量与生产服务精准映射；
-   - **场景 5 (部署兼容与缓存规范模块级复核 - 4 PASS / 1 NOT TESTED)**：便携启动支持中文与空格路径、静态 System Prompt 字节恒定从结构上保障前缀缓存（真实网关命中率待生产日志确证）、脱机宏库离线运行、升级无损；32 位 Office 宿主客观声明为未在 32 位机器运行回归（`NOT TESTED`）。
+   - **场景 5 (部署兼容与缓存规范模块级复核 - 3 PASS / 2 NOT TESTED)**：静态检查确认便携启动解析、Prompt 字节恒定和本地宏库路径；真实 32 位 Office 运行、真实断网 Excel 执行和真实覆盖升级仍未测试（`NOT TESTED`）。
 
 ---
 
 ## 二、 当前 main 与发布提交的关系
 
-- **发布基线提交**：`b4402a9ead90d8e74c451ccb6683a22e20da3ae4`（包含功能收敛与 `RELEASE_NOTES.md`，构建产物即为 `v1.3.0-rc1`）。
+- **发布基线提交**：`492b378a92c7ff7424757ca0c2992f8f056ee12b`（包含功能收敛与 `RELEASE_NOTES.md`，构建产物即为 `v1.3.5`）。
 - **文档整理与测试资产手册提交**：`eac0f0b`（`docs(chore): reorganize project documentation, test inventory and release verification [skip ci]`，包含全仓文档梳理、历史归档与测试索引）。
 - **CI 发布工作流加固提交**：`4eee7b3`（`ci: harden release workflow publication guards and prerelease detection`，彻底修复 main push fallback v1.2.0、修复 prerelease 检测并增加防止覆盖已有 Release 的前置防护）。
 - **收尾文档提交**：更新当前状态与公开包冒烟证据记录。
-- **发布与整理关系铁律**：已发布的 `v1.3.0-rc1` 发行包由发布提交 `b4402a9` 构建；后续 main 上的文档与 CI 工作流加固提交**不属于该包的构建源码**，绝不宣称旧发行包由最新整理后的 main 构建。
+- **发布与整理关系铁律**：已发布的 `v1.3.5` 发行包由发布提交 `492b378` 构建；后续 main 上的文档与 CI 工作流加固提交**不属于该包的构建源码**，绝不宣称旧发行包由最新整理后的 main 构建。
 
 ---
 
 ## 三、 审计整改专项落地事实 (feat/audit-rectification)
 
-本轮针对 2026-10-19 审查报告（第一至第五轮）完成全面闭环整改，并通过全量离线核心门禁（**233/233 PASS**，100% 保持全绿）：
+本轮针对 2026-10-19 审查报告（第一至第五轮）完成全面闭环整改，并通过全量离线核心门禁（**257/257 PASS**，100% 保持全绿）：
 1. **降级分支接线完整链路断言 (解决第五轮审查 P2/接线盲区)**：
    - 增强 `loadRealTsService` 支持 `forceZeroDepFallback` 显式参数，增加 `Test 20.0b` 门禁断言；
    - 强行触发纯 Node 降级 else 分支加载并执行真实的 `macroSaveEligibility.ts` 纯函数，彻底覆盖从源码读取、语法剥离到沙箱注入执行的完整接线链路。
@@ -108,7 +108,7 @@ ExcelMind-AI/
 
 ### 1. 唯一主规划
 - **路径**：[docs/product-roadmap.md](file:///c:/Users/35651/Desktop/Google/lee-excle/docs/product-roadmap.md)
-- **范围**：R0～R6 均已完成并在 `v1.3.0-rc1` 交付；R7（DuckDB/Python）处于远期评估状态，非当前必做项。不另建第二套路线图。
+- **范围**：R0～R6 均已完成并在 `v1.3.5` 交付；R7（DuckDB/Python）处于远期评估状态，非当前必做项。不另建第二套路线图。
 
 ### 2. 有效测试命令与按影响范围测试策略
 
@@ -128,7 +128,7 @@ ExcelMind-AI/
 3. **涉及发行包与打包流程变更**：
    - 执行独立解压隔离冒烟验证（需真实 Excel 宿主，环境完全隔离）：
      ```powershell
-     pwsh -File tests/diagnostics/run_isolated_release_smoke.ps1 -ZipPath ".artifacts/tmp/ci_download_verify/ExcelMindAI-v1.3.0-rc1_from_github.zip"
+     pwsh -File tests/diagnostics/run_isolated_release_smoke.ps1 -ZipPath ".artifacts/tmp/ci_download_verify/ExcelMindAI-v1.3.5_from_github.zip"
      ```
 4. **全套桌面端自动化验收套件 (STA 完整验收，仅在重大版本发版前明确授权运行)**：
    - 源码：`tests/tools/DesktopAcceptanceRunner.cs`

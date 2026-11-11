@@ -56,11 +56,22 @@ namespace LeeExcel
     public class ScriptManager
     {
         private static string _customScriptsDir = null;
-        private static readonly string _defaultScriptsDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "ExcelMindAI",
-            "Scripts"
-        );
+        private static readonly string _defaultScriptsDir = ResolveDefaultScriptsDir();
+
+        private static string ResolveDefaultScriptsDir()
+        {
+            string overrideDir = Environment.GetEnvironmentVariable("LEE_EXCEL_SCRIPTS_DIR");
+            if (!string.IsNullOrWhiteSpace(overrideDir))
+            {
+                return Path.GetFullPath(overrideDir);
+            }
+
+            return Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "ExcelMindAI",
+                "Scripts"
+            );
+        }
 
         public static string ScriptsDir
         {
@@ -88,17 +99,20 @@ namespace LeeExcel
                 Directory.CreateDirectory(_defaultScriptsDir);
                 try
                 {
-                    string oldDir = Path.Combine(
-                        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                        "LeeExcel",
-                        "Scripts"
-                    );
-                    if (Directory.Exists(oldDir))
+                    if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LEE_EXCEL_SCRIPTS_DIR")))
                     {
-                        foreach (var file in Directory.GetFiles(oldDir, "*.bas"))
+                        string oldDir = Path.Combine(
+                            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                            "LeeExcel",
+                            "Scripts"
+                        );
+                        if (Directory.Exists(oldDir))
                         {
-                            string dest = Path.Combine(_defaultScriptsDir, Path.GetFileName(file));
-                            if (!File.Exists(dest)) File.Copy(file, dest);
+                            foreach (var file in Directory.GetFiles(oldDir, "*.bas"))
+                            {
+                                string dest = Path.Combine(_defaultScriptsDir, Path.GetFileName(file));
+                                if (!File.Exists(dest)) File.Copy(file, dest);
+                            }
                         }
                     }
                 }

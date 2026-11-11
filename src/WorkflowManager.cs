@@ -597,8 +597,9 @@ namespace LeeExcel
                 dynamic targetWb = null;
                 try
                 {
-                    if (!string.IsNullOrEmpty(targetFullName))
+                    if (!string.IsNullOrWhiteSpace(targetFullName))
                     {
+                        // FullName 一旦提供即为身份约束，路径失效时绝不降级为同名匹配。
                         foreach (dynamic wb in app.Workbooks)
                         {
                             if (string.Equals((string)wb.FullName, targetFullName, StringComparison.OrdinalIgnoreCase))
@@ -608,15 +609,26 @@ namespace LeeExcel
                             }
                         }
                     }
-                    if (targetWb == null && !string.IsNullOrEmpty(targetName))
+                    else if (!string.IsNullOrWhiteSpace(targetName))
                     {
+                        int nameMatchCount = 0;
                         foreach (dynamic wb in app.Workbooks)
                         {
                             if (string.Equals((string)wb.Name, targetName, StringComparison.OrdinalIgnoreCase))
                             {
+                                nameMatchCount++;
+                                if (nameMatchCount > 1)
+                                {
+                                    targetWb = null;
+                                    break;
+                                }
                                 targetWb = wb;
-                                break;
                             }
+                        }
+                        if (nameMatchCount > 1)
+                        {
+                            record.failureMessage = "检测到多个同名目标工作簿，已阻断执行。请使用完整路径唯一指定目标。";
+                            return record;
                         }
                     }
                 }

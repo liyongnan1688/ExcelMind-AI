@@ -123,18 +123,43 @@ namespace LeeExcel
             return list;
         }
 
-        private static void SaveSnapshots(string fullPath, List<SnapshotItem> list)
+        private static bool SaveSnapshots(string fullPath, List<SnapshotItem> list)
         {
+            string tempFile = null;
             try
             {
                 string folder = GetBackupFolderForWorkbook(fullPath);
                 string metaFile = Path.Combine(folder, "snapshots.json");
                 string json = SimpleJson.Serialize(list);
-                File.WriteAllText(metaFile, json, Encoding.UTF8);
+                tempFile = metaFile + ".tmp." + Guid.NewGuid().ToString("N");
+                File.WriteAllText(tempFile, json, Encoding.UTF8);
+                if (File.Exists(metaFile))
+                {
+                    File.Replace(tempFile, metaFile, null);
+                }
+                else
+                {
+                    File.Move(tempFile, metaFile);
+                }
+                tempFile = null;
+                string verified = File.ReadAllText(metaFile, Encoding.UTF8);
+                if (!string.Equals(verified, json, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException("快照元数据回读校验失败");
+                }
+                return true;
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine("SaveSnapshots error: " + ex.Message);
+                return false;
+            }
+            finally
+            {
+                if (!string.IsNullOrEmpty(tempFile))
+                {
+                    try { if (File.Exists(tempFile)) File.Delete(tempFile); } catch { }
+                }
             }
         }
 
@@ -182,31 +207,40 @@ namespace LeeExcel
 
             var existing = LoadSnapshots(fullPath);
             existing.Insert(0, item);
-            if (existing.Count > 30)
+
+            List<SnapshotItem> retained = existing.Count > 30 ? existing.GetRange(0, 30) : existing;
+            if (!SaveSnapshots(fullPath, retained))
             {
-                // 最多保留30个快照，清理旧文件
-                for (int i = 30; i < existing.Count; i++)
-                {
-                    try
-                    {
-                        string oldFile = Path.Combine(folder, existing[i].fileName);
-                        if (File.Exists(oldFile)) File.Delete(oldFile);
-                    }
-                    catch { }
-                }
-                existing = existing.GetRange(0, 30);
+                try { if (File.Exists(snapshotFullPath)) File.Delete(snapshotFullPath); } catch { }
+                throw new InvalidOperationException("快照元数据保存失败，已中止执行以避免不可恢复修改。");
             }
 
-            SaveSnapshots(fullPath, existing);
+            for (int i = retained.Count; i < existing.Count; i++)
+            {
+                try
+                {
+                    string oldFile = Path.Combine(folder, existing[i].fileName);
+                    if (File.Exists(oldFile)) File.Delete(oldFile);
+                }
+                catch { }
+            }
             return item;
+        }
+
+        private static void TryReopenOriginalWorkbook(dynamic app, string originalPath)
+        {
+            if (app == null || string.IsNullOrEmpty(originalPath)) return;
+            try { app.Workbooks.Open(originalPath); } catch { }
         }
 
         public static bool RestoreSnapshot(dynamic app, dynamic currentWorkbook, string snapshotId, out string errorMessage)
         {
             errorMessage = null;
+            string originalPath = null;
+            bool workbookClosed = false;
             try
             {
-                string originalPath = currentWorkbook.FullName;
+                originalPath = currentWorkbook.FullName;
                 string folder = GetBackupFolderForWorkbook(originalPath);
                 var list = LoadSnapshots(originalPath);
                 var target = list.Find(x => x.id == snapshotId);
@@ -216,14 +250,26 @@ namespace LeeExcel
                     return false;
                 }
 
-                string snapshotFullPath = Path.Combine(folder, target.fileName);
+                if (string.IsNullOrWhiteSpace(target.fileName) ||
+                    !string.Equals(Path.GetFileName(target.fileName), target.fileName, StringComparison.OrdinalIgnoreCase))
+                {
+                    errorMessage = "快照元数据中的文件名非法，已拒绝恢复。";
+                    return false;
+                }
+
+                string folderFullPath = Path.GetFullPath(folder).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                string snapshotFullPath = Path.GetFullPath(Path.Combine(folder, target.fileName));
+                if (!snapshotFullPath.StartsWith(folderFullPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    errorMessage = "快照路径越出备份目录，已拒绝恢复。";
+                    return false;
+                }
                 if (!File.Exists(snapshotFullPath) || new FileInfo(snapshotFullPath).Length == 0)
                 {
                     errorMessage = "快照物理文件已不存在或损坏(0字节): " + snapshotFullPath;
                     return false;
                 }
 
-                // 0. 检查工作簿是否有未保存的手工修改，并在覆盖前尝试保存紧急救援快照
                 bool isDirty = false;
                 try { isDirty = !(bool)currentWorkbook.Saved; } catch { }
 
@@ -243,33 +289,32 @@ namespace LeeExcel
                     System.Diagnostics.Debug.WriteLine("Rescue snapshot warning: " + rescueEx.Message);
                 }
 
-                // 若工作簿存在未保存的修改且救援快照未能生成，为防数据永久丢失，拒绝盲目覆盖回滚
                 if (isDirty && !rescueSuccess)
                 {
                     errorMessage = "恢复中止：工作簿存在未保存的手工修改，且紧急救援快照生成失败。为防止手工数据意外丢失，已安全终止回滚。";
                     return false;
                 }
 
-                // 1. 关闭当前工作簿（放弃修改）
                 currentWorkbook.Close(false);
+                workbookClosed = true;
 
                 if (Path.IsPathRooted(originalPath) && File.Exists(originalPath))
                 {
-                    // 2. 将快照文件复制覆盖原文件
                     try
                     {
                         File.Copy(snapshotFullPath, originalPath, true);
                     }
                     catch (Exception copyEx)
                     {
+                        TryReopenOriginalWorkbook(app, originalPath);
                         errorMessage = "文件覆盖失败（原文件可能被其他进程占用）: " + copyEx.Message + "。快照原件与恢复前紧急备份均完好无损。";
                         return false;
                     }
 
-                    // 3. 重新打开工作簿
                     try
                     {
                         app.Workbooks.Open(originalPath);
+                        workbookClosed = false;
                     }
                     catch (Exception openEx)
                     {
@@ -279,16 +324,17 @@ namespace LeeExcel
                 }
                 else
                 {
-                    // 未保存的工作簿，直接打开备份物理文件
                     app.Workbooks.Open(snapshotFullPath);
+                    workbookClosed = false;
                 }
                 return true;
             }
             catch (Exception ex)
             {
+                if (workbookClosed) TryReopenOriginalWorkbook(app, originalPath);
                 errorMessage = ex.Message;
                 return false;
             }
         }
-    }
+}
 }

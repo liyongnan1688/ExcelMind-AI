@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace LeeExcel
@@ -71,6 +72,9 @@ namespace LeeExcel
             }
 
             string cleanCode = string.Join("\n", cleanLines.ToArray());
+            // 关键词判断前移除字符串字面量，避免把 "Shell" 等普通文本误判为外部调用；
+            // 同时保留代码中的调用位置，确保 Call Shell(...) / Debug.Print Shell(...) 仍能被识别。
+            string keywordCode = StripStringLiterals(cleanCode);
 
             // 2. L2 规则判定 (命中任一即算 L2)
             // 2.1 删除工作表
@@ -85,33 +89,44 @@ namespace LeeExcel
             }
 
             // 2.2 外部工作簿操作 (Open / SaveAs / Close)
-            if (Regex.IsMatch(cleanCode, @"\bWorkbooks\s*\.\s*(?:Open|SaveAs|Close)\b", RegexOptions.IgnoreCase))
+            if (Regex.IsMatch(cleanCode, @"\b(?:Workbooks\s*\.\s*(?:Open|SaveAs|Close)|(?:ThisWorkbook|ActiveWorkbook|Application\.ActiveWorkbook)\s*\.\s*(?:Close|SaveAs))\b", RegexOptions.IgnoreCase))
             {
-                res.Reasons.Add("包含外部工作簿打开/另存/关闭操作 (Workbooks.Open/SaveAs/Close)");
+                res.Reasons.Add("包含工作簿打开/另存/关闭操作");
                 if (string.IsNullOrEmpty(res.TargetDetail)) res.TargetDetail = "涉及外部工作簿操作";
                 if (string.IsNullOrEmpty(res.RiskCode)) res.RiskCode = "external_workbook";
             }
 
             // 2.3 高危外部 COM 组件 (FileSystemObject / 网络请求等)
-            if (Regex.IsMatch(cleanCode, @"CreateObject\s*\(\s*[""'](?:Scripting\.FileSystemObject|MSXML2\.[^""']+|WinHttp\.[^""']+|InternetExplorer\.Application|WScript\.Shell)[""']", RegexOptions.IgnoreCase) ||
-                Regex.IsMatch(cleanCode, @"New\s+FileSystemObject\b", RegexOptions.IgnoreCase))
+            if (Regex.IsMatch(keywordCode, @"\b(?:VBA\.)?(?:CreateObject|GetObject|Shell|SendKeys)\b", RegexOptions.IgnoreCase) ||
+                Regex.IsMatch(keywordCode, @"\bNew\s+(?:FileSystemObject|ADODB\.|Scripting\.|MSXML2\.|WinHttp\.|WScript\.)", RegexOptions.IgnoreCase) ||
+                Regex.IsMatch(keywordCode, @"(?im)^\s*(?:Public\s+|Private\s+)?Declare\s+(?:PtrSafe\s+)?(?:Sub|Function)\b", RegexOptions.IgnoreCase))
             {
-                res.Reasons.Add("包含文件系统或外部网络组件调用 (FileSystemObject/WinHttp/Shell)");
+                res.Reasons.Add("包含外部 COM、Shell、SendKeys、GetObject 或 Win32 API 调用");
                 if (string.IsNullOrEmpty(res.TargetDetail)) res.TargetDetail = "涉及外部系统与文件调用";
                 if (string.IsNullOrEmpty(res.RiskCode)) res.RiskCode = "system_com";
             }
 
             // 2.4 篡改代码工程
-            if (Regex.IsMatch(cleanCode, @"\b(?:VBProject|ThisWorkbook\.VBProject)\b", RegexOptions.IgnoreCase))
+            if (Regex.IsMatch(keywordCode, @"\b(?:VBProject|ThisWorkbook\.VBProject)\b", RegexOptions.IgnoreCase))
             {
                 res.Reasons.Add("包含对 VBA 代码工程自身的访问与修改 (VBProject)");
                 if (string.IsNullOrEmpty(res.TargetDetail)) res.TargetDetail = "涉及代码工程修改";
                 if (string.IsNullOrEmpty(res.RiskCode)) res.RiskCode = "modify_vbproject";
             }
 
-            // 2.5 原生文件操作语句 (Kill / FileCopy / Name ... As ...)
-            if (Regex.IsMatch(cleanCode, @"\b(?:Kill|FileCopy|RmDir)\b", RegexOptions.IgnoreCase) ||
-                Regex.IsMatch(cleanCode, @"\bName\b\s+.+\s+\bAs\b", RegexOptions.IgnoreCase) ||
+            // 2.5 应用级动作与外部跳转
+            if (Regex.IsMatch(keywordCode, @"\bApplication\s*\.\s*(?:Run|Quit)\b", RegexOptions.IgnoreCase) ||
+                Regex.IsMatch(keywordCode, @"(?:\.\s*)?FollowHyperlink\b", RegexOptions.IgnoreCase) ||
+                Regex.IsMatch(keywordCode, @"\b(?:ADODB|MSXML2|WinHttp|WScript)\.[A-Za-z_][A-Za-z0-9_]*", RegexOptions.IgnoreCase))
+            {
+                res.Reasons.Add("包含应用级执行、退出、外部跳转或脚本对象调用");
+                if (string.IsNullOrEmpty(res.TargetDetail)) res.TargetDetail = "涉及应用级或外部系统副作用";
+                if (string.IsNullOrEmpty(res.RiskCode)) res.RiskCode = "external_side_effect";
+            }
+
+            // 2.6 原生文件操作语句 (Kill / FileCopy / Name ... As ...)
+            if (Regex.IsMatch(keywordCode, @"\b(?:Kill|FileCopy|RmDir)\b", RegexOptions.IgnoreCase) ||
+                Regex.IsMatch(keywordCode, @"\bName\b\s+.+\s+\bAs\b", RegexOptions.IgnoreCase) ||
                 Regex.IsMatch(cleanCode, @"\bOpen\b\s+[""'][^""']+[""']\s+For\s+(?:Output|Append|Binary)", RegexOptions.IgnoreCase))
             {
                 res.Reasons.Add("包含文件删除或外部磁盘写入语句 (Kill/FileCopy/Open For Output)");
@@ -150,8 +165,7 @@ namespace LeeExcel
                 Regex.IsMatch(cleanCode, @"\.(?:Name)\s*=", RegexOptions.IgnoreCase) ||
                 Regex.IsMatch(cleanCode, @"\.(?:Group|Ungroup)\b", RegexOptions.IgnoreCase) ||
                 Regex.IsMatch(cleanCode, @"\.(?:AutoFill|Replace)\b", RegexOptions.IgnoreCase) ||
-                Regex.IsMatch(cleanCode, @"\.(?:ListObjects|PivotTables|PivotCaches|QueryTables|Tables)\s*\.\s*(?:Add|Create)\b", RegexOptions.IgnoreCase) ||
-                Regex.IsMatch(cleanCode, @"\bApplication\s*\.\s*Run\b", RegexOptions.IgnoreCase);
+                Regex.IsMatch(cleanCode, @"\.(?:ListObjects|PivotTables|PivotCaches|QueryTables|Tables)\s*\.\s*(?:Add|Create)\b", RegexOptions.IgnoreCase);
 
             if (hasWrite)
             {
@@ -198,6 +212,59 @@ namespace LeeExcel
             return false;
         }
 
+        private static string GetAssignmentRightHandSide(string line)
+        {
+            int idx = line.IndexOf('=');
+            return idx >= 0 ? line.Substring(idx + 1).Trim() : "";
+        }
+
+        private static bool IsClearlyReadOnlyValueExpression(string line)
+        {
+            string rhs = GetAssignmentRightHandSide(line);
+            if (string.IsNullOrEmpty(rhs)) return false;
+
+            if (Regex.IsMatch(rhs, @"^(?:""(?:""""|[^""])*""|'(?:''|[^'])*'|[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?|True|False|Nothing|Empty|Null)$", RegexOptions.IgnoreCase))
+            {
+                return true;
+            }
+
+            return Regex.IsMatch(rhs, @"^(?:Application\.)?(?:(?:ActiveSheet|ActiveCell|Selection|ThisWorkbook|ActiveWorkbook|Worksheets\s*\([^)]*\)|Sheets\s*\([^)]*\)|Range\s*\(.*\)|Cells\s*\([^)]*\))(?:\.(?:Range|Cells)\s*\(.*\))?\.(?:Value2?|Text|Formula|FormulaR1C1|Address|Row|Column|Count|Name|Path|FullName))$", RegexOptions.IgnoreCase);
+        }
+
+        private static bool IsClearlyReadOnlySetExpression(string line)
+        {
+            string rhs = GetAssignmentRightHandSide(line);
+            if (string.IsNullOrEmpty(rhs)) return false;
+
+            return Regex.IsMatch(rhs, @"^(?:Nothing|ActiveSheet|ActiveCell|Selection|ThisWorkbook|ActiveWorkbook|(?:Application\.)?(?:Worksheets|Sheets|Range|Cells)\s*\([^)]*\)|[A-Za-z_][A-Za-z0-9_]*\.(?:Worksheets|Sheets|Range|Cells)\s*\([^)]*\))$", RegexOptions.IgnoreCase);
+        }
+
+        private static string StripStringLiterals(string code)
+        {
+            if (string.IsNullOrEmpty(code)) return "";
+            var sb = new StringBuilder(code.Length);
+            bool inString = false;
+            for (int i = 0; i < code.Length; i++)
+            {
+                char c = code[i];
+                if (c == '"')
+                {
+                    // VBA 使用两个连续双引号表示字符串内的一个字面量双引号。
+                    if (inString && i + 1 < code.Length && code[i + 1] == '"')
+                    {
+                        i++;
+                        sb.Append(' ');
+                        continue;
+                    }
+                    inString = !inString;
+                    sb.Append(' ');
+                    continue;
+                }
+                sb.Append(inString ? ' ' : c);
+            }
+            return sb.ToString();
+        }
+
         private static bool IsStrictlyReadOnly(List<string> cleanLines)
         {
             if (cleanLines == null || cleanLines.Count == 0) return true;
@@ -217,7 +284,6 @@ namespace LeeExcel
                 if (Regex.IsMatch(line, @"^(?:Public\s+|Private\s+|Friend\s+)?(?:Sub|Function)\b", RegexOptions.IgnoreCase) ||
                     Regex.IsMatch(line, @"^End\s+(?:Sub|Function)\b", RegexOptions.IgnoreCase) ||
                     Regex.IsMatch(line, @"^(?:Dim|Const|ReDim)\b", RegexOptions.IgnoreCase) ||
-                    Regex.IsMatch(line, @"^Set\s+[a-zA-Z_][a-zA-Z0-9_]*\s*=\s*(?!.*(?:\.Delete|\.Insert|\.Clear|\.Add|\.Copy|\.Paste|\.Sort|\.Group|\.Ungroup|\.AutoFill|\.Replace))", RegexOptions.IgnoreCase) ||
                     // 控制流语句只允许换行块形式（行尾无后续执行语句），带 Then <语句> 的单行 If 一律不放行
                     Regex.IsMatch(line, @"^If\b.+\bThen\s*$", RegexOptions.IgnoreCase) ||
                     Regex.IsMatch(line, @"^ElseIf\b.+\bThen\s*$", RegexOptions.IgnoreCase) ||
@@ -237,14 +303,17 @@ namespace LeeExcel
                     continue;
                 }
 
-                // 允许将工作表只读属性赋值给局部变量 (左值只能是单纯标识符变量名，不能是包含点号的对象属性)
-                if (Regex.IsMatch(line, @"^[a-zA-Z_][a-zA-Z0-9_]*\s*=\s*", RegexOptions.IgnoreCase))
+                // 仅接受可证明为读取的简单赋值；任何函数调用或未知表达式都按 fail-safe 处理
+                if (Regex.IsMatch(line, @"^[a-zA-Z_][a-zA-Z0-9_]*\s*=\s*", RegexOptions.IgnoreCase) &&
+                    IsClearlyReadOnlyValueExpression(line))
                 {
-                    // 确保等号右边没有写操作或方法调用
-                    if (!Regex.IsMatch(line, @"(?:\.Delete|\.Insert|\.Clear|\.Add|\.Copy|\.Paste|\.Sort|\.Group|\.Ungroup|\.AutoFill|\.Replace)\b", RegexOptions.IgnoreCase))
-                    {
-                        continue;
-                    }
+                    continue;
+                }
+
+                if (Regex.IsMatch(line, @"^Set\s+[a-zA-Z_][a-zA-Z0-9_]*\s*=\s*", RegexOptions.IgnoreCase) &&
+                    IsClearlyReadOnlySetExpression(line))
+                {
+                    continue;
                 }
 
                 // 一旦存在任何未在纯读白名单内的语句，即无法严格证明是纯读

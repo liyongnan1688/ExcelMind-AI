@@ -739,8 +739,23 @@ namespace LeeExcelTests
                         {
                             excelProc.WaitForExit(3000);
                         }
+                        if (!excelProc.HasExited)
+                        {
+                            // 仅针对本冒烟工具通过 Process.Start 创建的精确 PID 做最后清理；
+                            // 不按进程名扫描，也绝不触碰用户已有的 Excel 进程。
+                            try { excelProc.CloseMainWindow(); } catch { }
+                            excelProc.WaitForExit(2000);
+                        }
+                        if (!excelProc.HasExited)
+                        {
+                            excelProc.Kill();
+                            excelProc.WaitForExit(5000);
+                        }
                     }
-                    catch { }
+                    catch (Exception exCleanup)
+                    {
+                        Log("[WARN] 冒烟 Excel 清理异常: " + exCleanup.Message);
+                    }
                 }
                 Log("测试 Excel 实例已安全关闭。");
             }
@@ -861,10 +876,10 @@ namespace LeeExcelTests
             sb.AppendLine();
             sb.AppendLine("## 2. 状态、证据与架构客观声明");
             sb.AppendLine();
-            sb.AppendLine("1. **既有证据复用与构建说明**：");
-            sb.AppendLine("   - 存量桌面验收报告（位于 `.artifacts/tests/desktop_acceptance_20261003_083458/`）对应构建版本为 R0～R6b 代码基线（Commit `8c57cef`）；");
-            sb.AppendLine("   - 本轮改动范围仅包含：补充 R6c 设置页脱敏诊断真机交互流程、修正文档表述（统一为当前用户 DPAPI 与组织策略不绕过声明）、校验清单条目真实统计；");
-            sb.AppendLine("   - 复用理由：核心业务逻辑未发生改动，无需重复全量运行全部历史测试，本轮以发行 ZIP 独立解压冒烟为准。");
+            sb.AppendLine("1. **本次冒烟的范围与证据边界**：");
+            sb.AppendLine("   - 本报告仅证明当前发行 ZIP 在独立解压目录中的 6 项冒烟检查通过；");
+            sb.AppendLine("   - 本报告不把历史桌面验收、其他构建或其他测试报告重算为本轮结果；");
+            sb.AppendLine("   - 全量桌面 UI、32 位 Office、真实商业 API、第三方输入法与真实覆盖升级需按独立测试入口另行验收。");
             sb.AppendLine();
             sb.AppendLine("2. **双架构支持与运行状态客观区隔**：");
             sb.AppendLine("   - **64 位架构**：已在当前 64 位 Office 16.0 宿主完成端到端加载、WebView2 渲染、设置页诊断交互与 COM 宏读回实测通过；");

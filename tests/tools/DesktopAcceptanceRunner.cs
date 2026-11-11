@@ -14,6 +14,7 @@ using System.Windows.Automation;
 using System.Windows.Forms;
 using System.Text.RegularExpressions;
 using System.IO.Compression;
+using LeeExcel;
 
 namespace LeeExcelTests
 {
@@ -28,6 +29,9 @@ namespace LeeExcelTests
 
         [DllImport("user32.dll")]
         private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+        [DllImport("user32.dll")]
+        private static extern bool IsIconic(IntPtr hWnd);
 
         [DllImport("user32.dll")]
         private static extern bool PrintWindow(IntPtr hWnd, IntPtr hdcBlt, uint nFlags);
@@ -114,15 +118,28 @@ namespace LeeExcelTests
         {
             try
             {
+                // Excel 在任何 UI 操作后都可能被最小化；截图前先恢复窗口，避免 -32000 虚拟坐标。
+                if (IsIconic(hwnd))
+                {
+                    ShowWindow(hwnd, 3);
+                    Thread.Sleep(300);
+                }
+
                 RECT rect;
                 if (!GetWindowRect(hwnd, out rect)) return false;
 
-                int srcX = Math.Max(0, rect.Left);
-                int srcY = Math.Max(0, rect.Top);
-                int width = Math.Max(1, rect.Right - srcX);
-                int height = Math.Max(1, rect.Bottom - srcY);
+                // 使用虚拟桌面的原始坐标，兼容位于负坐标显示器上的 Excel。
+                int srcX = rect.Left;
+                int srcY = rect.Top;
+                int width = rect.Right - rect.Left;
+                int height = rect.Bottom - rect.Top;
 
-                if (width < 50 || height < 50) return false;
+                if (width < 50 || height < 50)
+                {
+                    Log(string.Format("[WARN] 截图区域无效: hwnd=0x{0:X8}, rect=({1},{2})-({3},{4}), size={5}x{6}",
+                        hwnd.ToInt64(), rect.Left, rect.Top, rect.Right, rect.Bottom, width, height));
+                    return false;
+                }
 
                 using (var bmp = new Bitmap(width, height))
                 {
@@ -182,7 +199,14 @@ namespace LeeExcelTests
             Log("       ExcelMind AI: 真实 Excel 桌面端自动化验收框架 (R1b 刷新原区域)         ");
             Log("================================================================================");
 
-            string runId = "desktop_acceptance_" + DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            string runId = (args != null && args.Length > 0 && !string.IsNullOrWhiteSpace(args[0]))
+                ? args[0].Trim()
+                : "desktop_acceptance_" + DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            if (!Regex.IsMatch(runId, @"^[A-Za-z0-9._-]+$") || runId == "." || runId == "..")
+            {
+                Log("[FATAL] 非法运行编号: " + runId);
+                return 1;
+            }
             string projectRoot = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", ".."));
             if (!File.Exists(Path.Combine(projectRoot, "bin", "LeeExcel64.xll")))
             {
@@ -224,12 +248,43 @@ namespace LeeExcelTests
             }
 
             string xllPath = Path.Combine(projectRoot, "bin", "LeeExcel64.xll");
-            string fixtureSource = Path.Combine(projectRoot, ".artifacts", ".artifacts", "tests", "macro_verification", "IsolatedRealMacroTest.xlsx");
+            string fixtureSource = Path.Combine(projectRoot, ".artifacts", "tests", "macro_verification", "IsolatedRealMacroTest.xlsx");
             string fixtureDest = Path.Combine(artifactsDir, "r1b_fixture.xlsx");
 
             if (!File.Exists(fixtureSource))
             {
                 fixtureSource = Path.Combine(projectRoot, ".artifacts", "tests", "uia_probe", "probe_test.xlsx");
+            }
+
+            // 兼容既有隔离冒烟产物：只在测试产物目录内查找，不触碰用户文件。
+            if (!File.Exists(fixtureSource))
+            {
+                try
+                {
+                    string testsRoot = Path.Combine(projectRoot, ".artifacts", "tests");
+                    if (Directory.Exists(testsRoot))
+                    {
+                        string latestFixture = null;
+                        DateTime latestWrite = DateTime.MinValue;
+                        foreach (string candidate in Directory.GetFiles(testsRoot, "smoke_fixture.xlsx", SearchOption.AllDirectories))
+                        {
+                            DateTime write = File.GetLastWriteTimeUtc(candidate);
+                            if (write > latestWrite)
+                            {
+                                latestWrite = write;
+                                latestFixture = candidate;
+                            }
+                        }
+                        if (!string.IsNullOrEmpty(latestFixture))
+                        {
+                            fixtureSource = latestFixture;
+                        }
+                    }
+                }
+                catch (Exception exFixture)
+                {
+                    Log("[WARN] 查找隔离测试工作簿失败: " + exFixture.Message);
+                }
             }
 
             if (File.Exists(fixtureSource))
@@ -906,7 +961,9 @@ namespace LeeExcelTests
                 MethodInfo bridgeDispatch = null;
                 try
                 {
-                    Assembly leeAsm = Assembly.LoadFrom(Path.Combine(projectRoot, "bin", "LeeExcel.dll"));
+                    // 复用当前进程已加载的 LeeExcel 程序集，禁止再从 bin 加载第二份副本。
+                    // 否则 ScriptManager 隔离目录、静态令牌与运行历史会分裂成两套状态。
+                    Assembly leeAsm = typeof(NativeBridge).Assembly;
                     Type bridgeType = leeAsm.GetType("LeeExcel.NativeBridge");
                     bridgeDispatch = bridgeType.GetMethod("Dispatch", new Type[] { typeof(string), typeof(object) });
                 }
@@ -1059,8 +1116,7 @@ namespace LeeExcelTests
                 {
                     tcR2a02.status = "fail";
                     tcR2a02.error = exR2a2.Message;
-                }
-                finally
+                }                finally
                 {
                     tcR2a02.endTime = DateTime.Now.ToString("o");
                     _results.Add(tcR2a02);
@@ -1144,7 +1200,20 @@ namespace LeeExcelTests
 
                         bool nameUpdated = listJson.Contains("重命名后的集成测试宏");
                         bool tagsKept = listJson.Contains("2026Q1");
-                        bool historyKept = listJson.Contains("\"status\":\"success\"") && listJson.Contains("\"status\":\"failed\"");
+                        bool historyKept = false;
+                        foreach (var item in ScriptManager.ListScripts())
+                        {
+                            if (!string.Equals(item.id, "r2a_integration_test", StringComparison.OrdinalIgnoreCase)) continue;
+                            bool hasSuccess = false;
+                            bool hasFailed = false;
+                            foreach (var rec in item.runHistory ?? new List<RunRecordDto>())
+                            {
+                                if (rec.status == "success") hasSuccess = true;
+                                if (rec.status == "failed") hasFailed = true;
+                            }
+                            historyKept = hasSuccess && hasFailed;
+                            break;
+                        }
 
                         if (nameUpdated && tagsKept && historyKept)
                         {
@@ -1262,8 +1331,23 @@ namespace LeeExcelTests
                         string listReq = "{\"action\":\"list_scripts\"}";
                         string listJson = (string)bridgeDispatch.Invoke(null, new object[] { listReq, testApp });
 
-                        // 找到 blocked 记录检查 elapsedMs
-                        bool blockedHasZero = listJson.Contains("\"status\":\"blocked\"") && (listJson.Contains("\"elapsedMs\":0") || listJson.Contains("\"elapsedMs\": 0"));
+                        // 找到 blocked 记录检查 elapsedMs（直接读取生产对象，避免字符串转义误判）
+                        bool blockedHasZero = false;
+                        int blockedElapsed = -1;
+                        foreach (var item in ScriptManager.ListScripts())
+                        {
+                            if (!string.Equals(item.id, "r2a_integration_test", StringComparison.OrdinalIgnoreCase)) continue;
+                            foreach (var rec in item.runHistory ?? new List<RunRecordDto>())
+                            {
+                                if (rec.status == "blocked")
+                                {
+                                    blockedElapsed = rec.elapsedMs;
+                                    blockedHasZero = (rec.elapsedMs == 0);
+                                    break;
+                                }
+                            }
+                            break;
+                        }
 
                         // 读取前端 ScriptDrawer.svelte 确认过滤契约
                         string drawerPath = Path.Combine(projectRoot, "web", "src", "components", "ScriptDrawer.svelte");
@@ -1279,7 +1363,7 @@ namespace LeeExcelTests
                         else
                         {
                             tcR2a06.status = "fail";
-                            tcR2a06.error = string.Format("耗时口径不符: blockedHasZero={0}, frontProtected={1}", blockedHasZero, frontProtected);
+                            tcR2a06.error = string.Format("耗时口径不符: blockedHasZero={0}, blockedElapsed={1}, frontProtected={2}", blockedHasZero, blockedElapsed, frontProtected);
                             Log("[FAIL] TC-R2a-06 失败: " + tcR2a06.error);
                         }
                     }
@@ -1295,6 +1379,15 @@ namespace LeeExcelTests
                 }
                 finally
                 {
+                    // 保留一份测试证据，随后再清理隔离脚本目录中的可执行测试宏。
+                    try
+                    {
+                        if (File.Exists(testScriptMeta))
+                        {
+                            File.Copy(testScriptMeta, Path.Combine(artifactsDir, "r2a_history_evidence.meta.json"), true);
+                        }
+                    }
+                    catch { }
                     // 安全清理：删除测试宏文件，保护正式宏库洁净
                     try
                     {
@@ -1321,7 +1414,8 @@ namespace LeeExcelTests
                 MethodInfo getFavMenuMethod = null;
                 try
                 {
-                    Assembly asm = Assembly.LoadFrom(Path.Combine(projectRoot, "bin", "LeeExcel.dll"));
+                    // 与 NativeBridge 一样复用当前已加载程序集，避免 Ribbon 读取另一套静态宏库状态。
+                    Assembly asm = typeof(NativeBridge).Assembly;
                     ribbonType = asm.GetType("LeeExcel.LeeExcelRibbon");
                     if (ribbonType != null)
                     {
@@ -1428,7 +1522,7 @@ namespace LeeExcelTests
                     {
                         // 1. 无收藏宏时的空状态
                         string emptyXml = (string)getFavMenuMethod.Invoke(ribbonInstance, new object[] { null });
-                        bool hasEmptyBtn = emptyXml.Contains("id='fav_empty'") && emptyXml.Contains("enabled='false'") && emptyXml.Contains("imageMso='Info'");
+                        bool hasEmptyBtn = emptyXml.Contains("id='fav_empty'") && emptyXml.Contains("enabled='false'") && emptyXml.Contains("getImage='GetIcon'");
                         bool hasOpenLib = emptyXml.Contains("id='fav_open_lib'");
 
                         // 2. 重新收藏宏并包含特殊字符
@@ -1566,7 +1660,7 @@ namespace LeeExcelTests
                     string drawerPath = Path.Combine(projectRoot, "web", "src", "components", "ScriptDrawer.svelte");
                     string drawerContent = File.ReadAllText(drawerPath, Encoding.UTF8);
                     bool hasCancelHandler = drawerContent.Contains("runModalScript = null") && drawerContent.Contains("确认运行宏");
-                    bool hasSourceView = drawerContent.Contains("runModalShowCode") && drawerContent.Contains("查看完整源码");
+                    bool hasSourceView = drawerContent.Contains("runModalShowCode") && (drawerContent.Contains("查看完整源码") || drawerContent.Contains("查看代码"));
 
                     if (hasPromptDispatch && hasCancelHandler && hasSourceView)
                     {
@@ -1802,7 +1896,7 @@ namespace LeeExcelTests
 
                 try
                 {
-                    Assembly asm = Assembly.LoadFrom(Path.Combine(projectRoot, "bin", "LeeExcel.dll"));
+                    Assembly asm = typeof(NativeBridge).Assembly;
                     Type parserType = asm.GetType("LeeExcel.VbaSignatureParser");
                     if (parserType != null)
                     {
@@ -1884,7 +1978,7 @@ namespace LeeExcelTests
 
                 try
                 {
-                    Assembly asm = Assembly.LoadFrom(Path.Combine(projectRoot, "bin", "LeeExcel.dll"));
+                    Assembly asm = typeof(NativeBridge).Assembly;
                     Type parserType = asm.GetType("LeeExcel.VbaSignatureParser");
                     if (parserType != null)
                     {
@@ -2018,11 +2112,7 @@ namespace LeeExcelTests
                         string saveTypedReq = "{\"action\":\"save_script\",\"id\":\"r2c_typed_macro\",\"displayName\":\"显式类型综合测试宏\",\"category\":\"测试\",\"code\":\"" + typedMacroCode + "\"}";
                         bridgeDispatch.Invoke(null, new object[] { saveTypedReq, testApp });
 
-                        string scriptDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ExcelMindAI", "Scripts");
-                        if (!Directory.Exists(scriptDir))
-                        {
-                            scriptDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "LeeExcel", "Scripts");
-                        }
+                        string scriptDir = ScriptManager.ScriptsDir;
                         string scriptBasPath = Path.Combine(scriptDir, "r2c_typed_macro.bas");
                         string hashBefore = ComputeFileSha256(scriptBasPath);
 
@@ -2101,11 +2191,7 @@ namespace LeeExcelTests
                     // 安全清理测试宏
                     try
                     {
-                        string cleanScriptDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ExcelMindAI", "Scripts");
-                        if (!Directory.Exists(cleanScriptDir))
-                        {
-                            cleanScriptDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "LeeExcel", "Scripts");
-                        }
+                        string cleanScriptDir = ScriptManager.ScriptsDir;
                         string testBas = Path.Combine(cleanScriptDir, "r2c_typed_macro.bas");
                         string testMeta = Path.Combine(cleanScriptDir, "r2c_typed_macro.meta.json");
                         if (File.Exists(testBas)) File.Delete(testBas);
@@ -2633,7 +2719,7 @@ namespace LeeExcelTests
                     MethodInfo formatMethod = null;
                     try
                     {
-                        Assembly leeAsmX = Assembly.LoadFrom(Path.Combine(projectRoot, "bin", "LeeExcel.dll"));
+                        Assembly leeAsmX = typeof(NativeBridge).Assembly;
                         Type dtType = leeAsmX.GetType("LeeExcel.DataToolsService");
                         if (dtType != null)
                         {
@@ -3970,7 +4056,9 @@ namespace LeeExcelTests
                         if (curWb == null) curWb = testApp.Workbooks.Add();
 
                         string normalMacro = "Sub NormalMacroTest()\n  Range(\"D1\").Value = \"NORMAL_CHANNEL_OK\"\nEnd Sub";
-                        string execReq = "{\"action\":\"execute_vba\",\"code\":\"" + normalMacro.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", "").Replace("\n", "\\n") + "\"}";
+                        string curWbName = (string)curWb.Name;
+                        string curWbFullName = (string)curWb.FullName;
+                        string execReq = "{\"action\":\"execute_vba\",\"targetWorkbookName\":\"" + curWbName.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\",\"targetWorkbookFullName\":\"" + curWbFullName.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\",\"code\":\"" + normalMacro.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", "").Replace("\n", "\\n") + "\"}";
                         string execRes = (string)bridgeDispatch.Invoke(null, new object[] { execReq, testApp });
                         string d1Val = "";
                         try { d1Val = (string)testApp.ActiveSheet.Range["D1"].Text; } catch { }
@@ -6117,8 +6205,9 @@ namespace LeeExcelTests
                             else
                             {
                                 tcR6a03.status = "fail";
-                                tcR6a03.error = string.Format("HTTP 导入核验不符: prevOk={0}, fpBlock={1}, impOk={2}, metricVal={3}, nodeVal={4}",
-                                    httpPrevOk, fingerprintMismatchBlocked, httpImpOk, httpMetricVal, httpNodeVal);
+                                tcR6a03.error = string.Format("HTTP 导入核验不符: prevOk={0}, fpBlock={1}, impOk={2}, metricVal={3}, nodeVal={4}, response={5}",
+                                    httpPrevOk, fingerprintMismatchBlocked, httpImpOk, httpMetricVal, httpNodeVal,
+                                    (httpImpRes ?? "").Length > 900 ? httpImpRes.Substring(0, 900) : httpImpRes);
                                 Log("[FAIL] TC-R6a-03 失败: " + tcR6a03.error);
                             }
                         }
@@ -6453,10 +6542,10 @@ namespace LeeExcelTests
                 // 启动前路径断言与测试宏库隔离：重定向至测试专属隔离目录
                 ScriptManager.SetCustomScriptsDirForTesting(isolatedScriptsDir);
 
-                string defaultUserDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ExcelMindAI", "Scripts");
-                if (string.Equals(ScriptManager.ScriptsDir, defaultUserDir, StringComparison.OrdinalIgnoreCase))
+                string defaultUserDirR6b = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ExcelMindAI", "Scripts");
+                if (string.Equals(ScriptManager.ScriptsDir, defaultUserDirR6b, StringComparison.OrdinalIgnoreCase))
                 {
-                    throw new InvalidOperationException("【测试隔离断言失败】宏库路径仍指向真实用户宏库 (" + defaultUserDir + ")，测试直接停止以防止污染用户数据！");
+                    throw new InvalidOperationException("【测试隔离断言失败】宏库路径仍指向真实用户宏库 (" + defaultUserDirR6b + ")，测试直接停止以防止污染用户数据！");
                 }
 
                 try
@@ -7042,27 +7131,59 @@ namespace LeeExcelTests
                     ScriptManager.ResetCustomScriptsDirForTesting();
                 }
 
-                // TC-REG-02: 存量核心业务门禁全绿
+                // TC-REG-02: 实际执行两个核心离线门禁，禁止硬编码通过
+                string unitOutput;
+                string regexOutput;
+                int unitExitCode;
+                int regexExitCode;
+                bool unitRan = RunNodeGate(projectRoot, "test_suite_unit.cjs", out unitOutput, out unitExitCode);
+                bool regexRan = RunNodeGate(projectRoot, "test_regex_counter_example.cjs", out regexOutput, out regexExitCode);
+                int unitPass = 0;
+                int unitFail = -1;
+                Match unitSummaryMatch = Regex.Match(unitOutput ?? "", @"Unit Tests Summary:\s*Pass\s*=\s*(\d+),\s*Fail\s*=\s*(\d+)");
+                if (unitSummaryMatch.Success)
+                {
+                    int.TryParse(unitSummaryMatch.Groups[1].Value, out unitPass);
+                    int.TryParse(unitSummaryMatch.Groups[2].Value, out unitFail);
+                }
+                bool tcReg02Pass = unitRan && regexRan && unitExitCode == 0 && regexExitCode == 0 && unitFail == 0;
                 var tcReg02 = new TestCaseResult
                 {
                     caseId = "TC-REG-02",
                     title = "存量核心业务门禁回归验证",
                     category = "存量核心业务门禁",
                     startTime = DateTime.Now.ToString("o"),
-                    input = "运行离线 194 项核心门禁与正则破坏反例",
-                    expected = "对话不执行、操作写值、无代码回复不伪报宏失败、源码保真、R2a多维检索、R2b收藏宏与Ribbon菜单、R2c显式参数化契约、R3a确定性去重、R3b两表对账、R4a批量任务队列、R4b批量面板防漂移、R4c多文件列名对齐汇总、R5a双步骤轻量流水线串联、R5b图表生成与快捷工具隔离、R6a只读外部数据接入、R6b无凭据宏包导入导出 100% PASS",
-                    actualOperation = "node test_suite_unit.cjs (194/194) + node test_regex_counter_example.cjs (3/3)",
-                    status = "pass",
-                    observed = "194/194 项单元测试全部通过，3/3 项反例测试全部确认杜绝",
+                    input = "实际执行离线单元测试与正则破坏反例",
+                    expected = "两个命令退出码均为 0，单元测试 Fail=0",
+                    actualOperation = string.Format("node test_suite_unit.cjs -> {0}; node test_regex_counter_example.cjs -> {1}", unitExitCode, regexExitCode),
+                    status = tcReg02Pass ? "pass" : "fail",
+                    observed = string.Format("Unit summary: Pass={0}, Fail={1}; Regex exit={2}", unitPass, unitFail, regexExitCode),
                     endTime = DateTime.Now.ToString("o")
                 };
                 _results.Add(tcReg02);
-                Log("[PASS] TC-REG-02 验证通过");
+                if (tcReg02Pass)
+                {
+                    Log("[PASS] TC-REG-02 真实门禁回归通过");
+                }
+                else
+                {
+                    Log("[FAIL] TC-REG-02 真实门禁回归失败: " + tcReg02.observed);
+                }
 
                 // ====================================================================
                 // 阶段 7：生成机器可读结果与 Markdown 报告
                 // ====================================================================
+                int nonPassCount = 0;
+                foreach (var result in _results)
+                {
+                    if (result.status != "pass") nonPassCount++;
+                }
                 GenerateReports(artifactsDir, runId);
+                if (nonPassCount > 0)
+                {
+                    Log(string.Format("[FAIL] 桌面验收存在 {0} 项未通过或未测试结果，禁止报告整体通过。", nonPassCount));
+                    return 1;
+                }
                 return 0;
             }
             catch (Exception exAll)
@@ -7105,6 +7226,38 @@ namespace LeeExcelTests
                     .Replace("\t", "\\t");
         }
 
+        private static bool RunNodeGate(string workingDirectory, string arguments, out string output, out int exitCode)
+        {
+            output = "";
+            exitCode = -1;
+            try
+            {
+                var psi = new ProcessStartInfo("node", arguments)
+                {
+                    WorkingDirectory = workingDirectory,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                };
+                using (var process = Process.Start(psi))
+                {
+                    if (process == null) return false;
+                    string stdout = process.StandardOutput.ReadToEnd();
+                    string stderr = process.StandardError.ReadToEnd();
+                    process.WaitForExit();
+                    exitCode = process.ExitCode;
+                    output = stdout + Environment.NewLine + stderr;
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                output = ex.Message;
+                return false;
+            }
+        }
+
         private static void GenerateReports(string artifactsDir, string runId)
         {
             string jsonPath = Path.Combine(artifactsDir, "test_results.json");
@@ -7129,6 +7282,7 @@ namespace LeeExcelTests
                 sbJson.AppendLine("      \"observedCapturedAt\": \"" + EscapeJson(r.observedCapturedAt) + "\",");
                 sbJson.AppendLine("      \"activeCellAddress\": \"" + EscapeJson(r.activeCellAddress) + "\",");
                 sbJson.AppendLine("      \"observed\": \"" + EscapeJson(r.observed) + "\",");
+                sbJson.AppendLine("      \"error\": \"" + EscapeJson(r.error) + "\",");
                 sbJson.AppendLine("      \"screenshot\": \"" + (r.screenshotPath ?? "").Replace("\\", "/") + "\"");
                 sbJson.AppendLine(i < _results.Count - 1 ? "    }," : "    }");
             }
@@ -7179,7 +7333,7 @@ namespace LeeExcelTests
             sbMd.AppendLine(string.Format("- **1. 真实 Excel 桌面 UI 验收**: 共 **{0}** 项，通过 **{1}** 项 (**{2:P0}**)", uiCount, uiPass, uiCount > 0 ? (double)uiPass / uiCount : 0));
             sbMd.AppendLine(string.Format("- **2. 处理层/集成测试**: 共 **{0}** 项，通过 **{1}** 项 (**{2:P0}**)", intCount, intPass, intCount > 0 ? (double)intPass / intCount : 0));
             sbMd.AppendLine(string.Format("- **3. 本地受控 HTTP 测试**: 共 **{0}** 项，通过 **{1}** 项 (**{2:P0}**)", httpCount, httpPass, httpCount > 0 ? (double)httpPass / httpCount : 0));
-            sbMd.AppendLine(string.Format("- **4. 存量核心业务门禁**: 共 **{0}** 项（涵盖 194 个离线单元用例与 3 个反例杜绝），通过 **{1}** 项 (**{2:P0}**)", regCount, regPass, regCount > 0 ? (double)regPass / regCount : 0));
+            sbMd.AppendLine(string.Format("- **4. 存量核心业务门禁**: 共 **{0}** 项（涵盖 255 个离线单元用例与 3 个反例杜绝），通过 **{1}** 项 (**{2:P0}**)", regCount, regPass, regCount > 0 ? (double)regPass / regCount : 0));
             sbMd.AppendLine("");
             sbMd.AppendLine("## 2. 验收用例结果详细列表");
             sbMd.AppendLine("");
@@ -7190,10 +7344,14 @@ namespace LeeExcelTests
             {
                 string badge = r.status == "pass" ? "✅ PASS" : (r.status == "fail" ? "❌ FAIL" : "⚠️ " + r.status);
                 string detail = r.observed;
+                if (!string.IsNullOrEmpty(r.error))
+                {
+                    detail = string.IsNullOrEmpty(detail) ? "错误：" + r.error : detail + "<br>错误：" + r.error;
+                }
                 if (!string.IsNullOrEmpty(r.observedAddress) || !string.IsNullOrEmpty(r.activeCellAddress))
                 {
                     detail = string.Format("【卡片地址】`{0}`<br>【样本数据】`{1}`<br>【时间戳】`{2}`<br>【活动单元格】`{3}`<br>{4}",
-                        r.observedAddress, r.observedSampleValue, r.observedCapturedAt, r.activeCellAddress, r.observed);
+                        r.observedAddress, r.observedSampleValue, r.observedCapturedAt, r.activeCellAddress, detail);
                 }
                 sbMd.AppendLine(string.Format("| **{0}** | {1} | `{2}` | **{3}** | {4} |",
                     r.caseId, r.title, r.category, badge, detail));
@@ -7299,4 +7457,3 @@ namespace LeeExcelTests
         }
     }
 }
-

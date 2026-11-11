@@ -718,11 +718,6 @@
     overflow: hidden;
   }
 
-  .unsaved-dot {
-    font-size: 11px;
-    flex-shrink: 0;
-  }
-
   .unsaved-text {
     white-space: nowrap;
     overflow: hidden;

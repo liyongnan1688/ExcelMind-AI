@@ -64,7 +64,7 @@ public class VerifyCompleteDelivery
         Console.WriteLine("===       LeeExcel 交付收尾实测：错误链、预检状态机、部分修改与快照回滚      ===");
         Console.WriteLine("================================================================================\n");
 
-        KillExcel();
+        EnsureNoRunningExcelProcess();
 
         string tempTestDir = outputDir;
         string testWbPath = Path.Combine(tempTestDir, "IsolatedCalendarTest.xlsx");
@@ -297,7 +297,6 @@ public class VerifyCompleteDelivery
         {
             try { app.Quit(); } catch { }
             Marshal.ReleaseComObject(app);
-            KillExcel();
 
             WriteRunMetadata(outputDir, toolName, status, runDetails);
             RemoveRunningLock(outputDir);
@@ -395,11 +394,13 @@ public class VerifyCompleteDelivery
         catch { }
     }
 
-    static void KillExcel()
+    static void EnsureNoRunningExcelProcess()
     {
-        foreach (var p in System.Diagnostics.Process.GetProcessesByName("excel"))
+        var procs = System.Diagnostics.Process.GetProcessesByName("EXCEL");
+        if (procs != null && procs.Length > 0)
         {
-            try { p.Kill(); p.WaitForExit(1000); } catch { }
+            string pids = string.Join(",", Array.ConvertAll(procs, p => p.Id.ToString()));
+            throw new InvalidOperationException("检测到已运行的 Excel 进程 (PID: " + pids + ")。测试不会强杀现有 Excel，请先保存并关闭后重试。");
         }
     }
 

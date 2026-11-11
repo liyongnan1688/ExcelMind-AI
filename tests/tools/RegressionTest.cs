@@ -46,7 +46,7 @@ public class RegressionTest
         Console.WriteLine("【回归验证】开始执行三项严密验收测试");
         Console.WriteLine("==========================================================================");
 
-        KillExcelProcesses();
+        EnsureNoRunningExcelProcess();
 
         Type excelType = Type.GetTypeFromProgID("Excel.Application");
         dynamic app = Activator.CreateInstance(excelType);
@@ -149,7 +149,6 @@ End Sub";
         {
             try { app.Quit(); } catch { }
             Marshal.ReleaseComObject(app);
-            KillExcelProcesses();
 
             WriteRunMetadata(outputDir, toolName, allPassed ? "completed" : "failed", runDetails);
             RemoveRunningLock(outputDir);
@@ -247,17 +246,14 @@ End Sub";
         catch { }
     }
 
-    static void KillExcelProcesses()
+    static void EnsureNoRunningExcelProcess()
     {
-        try
+        var procs = System.Diagnostics.Process.GetProcessesByName("EXCEL");
+        if (procs != null && procs.Length > 0)
         {
-            var procs = System.Diagnostics.Process.GetProcessesByName("EXCEL");
-            foreach (var p in procs)
-            {
-                try { p.Kill(); } catch { }
-            }
+            string pids = string.Join(",", Array.ConvertAll(procs, p => p.Id.ToString()));
+            throw new InvalidOperationException("检测到已运行的 Excel 进程 (PID: " + pids + ")。测试不会强杀现有 Excel，请先保存并关闭后重试。");
         }
-        catch { }
     }
 
     private static Assembly ResolveAssembly(object sender, ResolveEventArgs args)

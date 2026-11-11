@@ -62,3 +62,8 @@ if (transformed3.includes('Application.Application.Workbooks("Sales_2026.xlsx")'
 }
 
 console.log(`\nAll ${passCount} counter-examples successfully demonstrated.`);
+
+if (passCount !== 3) {
+  console.error('Counter-example gate failed: expected 3, got ' + passCount + '.');
+  process.exit(1);
+}

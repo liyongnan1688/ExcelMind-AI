@@ -65,35 +65,67 @@ namespace LeeExcel
         public List<string> riskReasons { get; set; }
         public string riskTargetDetail { get; set; }
         public string confirmToken { get; set; }
+        public string entryPoint { get; set; }
+        public string parametersJson { get; set; }
+        public string scriptId { get; set; }
+        public string prompt { get; set; }
+        public bool requiresContextConfirm { get; set; }
     }
 
     internal static class ConfirmTokenStore
     {
-        private static readonly Dictionary<string, string> _tokens = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        private static readonly object _lock = new object();
+        private sealed class Binding
+        {
+            public string Token;
+            public string CodeHash;
+            public string TargetKey;
+            public string EntryPoint;
+            public string ParameterHash;
+            public DateTime ExpiresUtc;
+        }
 
-        public static void Register(string requestId, string token)
+        private static readonly Dictionary<string, Binding> _tokens = new Dictionary<string, Binding>(StringComparer.OrdinalIgnoreCase);
+        private static readonly object _lock = new object();
+        private static readonly TimeSpan Lifetime = TimeSpan.FromMinutes(5);
+
+        public static void Register(string requestId, string token, string codeHash, string targetKey, string entryPoint, string parameterHash)
         {
             if (string.IsNullOrEmpty(requestId) || string.IsNullOrEmpty(token)) return;
             lock (_lock)
             {
-                _tokens[requestId] = token;
+                _tokens[requestId] = new Binding
+                {
+                    Token = token,
+                    CodeHash = codeHash ?? "",
+                    TargetKey = targetKey ?? "",
+                    EntryPoint = entryPoint ?? "",
+                    ParameterHash = parameterHash ?? "",
+                    ExpiresUtc = DateTime.UtcNow.Add(Lifetime)
+                };
             }
         }
 
-        public static bool ValidateAndConsume(string requestId, string token)
+        public static bool ValidateAndConsume(string requestId, string token, string codeHash, string targetKey, string entryPoint, string parameterHash)
         {
             if (string.IsNullOrEmpty(requestId) || string.IsNullOrEmpty(token)) return false;
             lock (_lock)
             {
-                string expected;
-                if (_tokens.TryGetValue(requestId, out expected))
+                Binding binding;
+                if (!_tokens.TryGetValue(requestId, out binding)) return false;
+                if (binding.ExpiresUtc < DateTime.UtcNow)
                 {
-                    if (string.Equals(expected, token, StringComparison.Ordinal))
-                    {
-                        _tokens.Remove(requestId);
-                        return true;
-                    }
+                    _tokens.Remove(requestId);
+                    return false;
+                }
+                bool matches = string.Equals(binding.Token, token, StringComparison.Ordinal)
+                    && string.Equals(binding.CodeHash, codeHash ?? "", StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(binding.TargetKey, targetKey ?? "", StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(binding.EntryPoint, entryPoint ?? "", StringComparison.Ordinal)
+                    && string.Equals(binding.ParameterHash, parameterHash ?? "", StringComparison.OrdinalIgnoreCase);
+                if (matches)
+                {
+                    _tokens.Remove(requestId);
+                    return true;
                 }
                 return false;
             }
@@ -113,6 +145,37 @@ namespace LeeExcel
 
     public class NativeBridge
     {
+        private sealed class NativeWindowOwner : System.Windows.Forms.IWin32Window
+        {
+            public IntPtr Handle { get; private set; }
+
+            public NativeWindowOwner(IntPtr handle)
+            {
+                Handle = handle;
+            }
+        }
+
+        private static IntPtr GetExcelWindowHandle(dynamic app)
+        {
+            try
+            {
+                if (app != null)
+                {
+                    return new IntPtr(Convert.ToInt64(app.Hwnd));
+                }
+            }
+            catch { }
+
+            try
+            {
+                dynamic excelApp = ExcelDna.Integration.ExcelDnaUtil.Application;
+                return new IntPtr(Convert.ToInt64(excelApp.Hwnd));
+            }
+            catch { }
+
+            return IntPtr.Zero;
+        }
+
         public static string Dispatch(string jsonString, dynamic app)
         {
             string requestId = null;
@@ -363,8 +426,8 @@ namespace LeeExcel
                 targetFullName = "";
             }
 
-            // 1. 优先按 FullName 匹配
-            if (!string.IsNullOrEmpty(targetFullName))
+            // 1. 指定 FullName 时只做全路径身份匹配；路径失效绝不能降级为同名匹配
+            if (!string.IsNullOrWhiteSpace(targetFullName))
             {
                 try
                 {
@@ -377,22 +440,29 @@ namespace LeeExcel
                     }
                 }
                 catch { }
+                return null;
             }
 
-            // 2. 次选按 Name 匹配
-            if (!string.IsNullOrEmpty(targetName))
+            // 2. 仅未提供 FullName 时才按 Name 唯一匹配
+            if (!string.IsNullOrWhiteSpace(targetName))
             {
                 try
                 {
+                    dynamic nameMatch = null;
+                    int matchCount = 0;
                     foreach (dynamic wb in app.Workbooks)
                     {
                         if (string.Equals((string)wb.Name, targetName, StringComparison.OrdinalIgnoreCase))
                         {
-                            return wb;
+                            matchCount++;
+                            if (matchCount > 1) return null;
+                            nameMatch = wb;
                         }
                     }
+                    if (matchCount == 1) return nameMatch;
                 }
                 catch { }
+                return null;
             }
 
             // 若调用方明确指定了目标工作簿但未能匹配到已打开的工作簿，拒绝保底回退，防止误在活动工作簿执行
@@ -432,6 +502,7 @@ namespace LeeExcel
                 string targetFullName = req.ContainsKey("targetWorkbookFullName") ? req["targetWorkbookFullName"] : "";
                 string targetName = req.ContainsKey("targetWorkbookName") ? req["targetWorkbookName"] : "";
 
+
                 if (string.Equals(targetName, "未检测到活动工作簿", StringComparison.OrdinalIgnoreCase))
                 {
                     targetName = "";
@@ -439,34 +510,37 @@ namespace LeeExcel
                 }
 
                 dynamic wb = null;
+                bool hasExplicitTarget = !string.IsNullOrWhiteSpace(targetFullName) || !string.IsNullOrWhiteSpace(targetName);
 
-                // 优先直接获取当前前台活动的 ActiveWorkbook（实时感知另存为重命名、新建、切换窗口）
-                try
+                if (hasExplicitTarget)
                 {
-                    if (app != null)
-                    {
-                        wb = app.ActiveWorkbook;
-                    }
-                }
-                catch { }
-
-                // 若 ActiveWorkbook 为空（例如失去焦点），按参数查找特定工作簿
-                if (wb == null)
-                {
+                    // 调用方锁定目标时，只返回该身份；路径失效不得回退 ActiveWorkbook。
                     wb = FindTargetWorkbook(app, targetFullName, targetName);
                 }
-
-                // 再次保底：如果依然为空，取首个打开的工作簿
-                if (wb == null && app != null)
+                else
                 {
+                    // 未指定目标时才允许实时读取当前前台活动工作簿。
                     try
                     {
-                        if (app.Workbooks != null && app.Workbooks.Count > 0)
+                        if (app != null)
                         {
-                            wb = app.Workbooks[1];
+                            wb = app.ActiveWorkbook;
                         }
                     }
                     catch { }
+
+                    // 仅在未指定目标且 ActiveWorkbook 为空时，取首个打开的工作簿。
+                    if (wb == null && app != null)
+                    {
+                        try
+                        {
+                            if (app.Workbooks != null && app.Workbooks.Count > 0)
+                            {
+                                wb = app.Workbooks[1];
+                            }
+                        }
+                        catch { }
+                    }
                 }
 
                 if (wb == null)
@@ -553,6 +627,21 @@ namespace LeeExcel
         {
             string targetFullName = req.ContainsKey("targetWorkbookFullName") ? req["targetWorkbookFullName"] : "";
             string targetName = req.ContainsKey("targetWorkbookName") ? req["targetWorkbookName"] : "";
+            if (string.Equals((targetName ?? "").Trim(), "未检测到活动工作簿", StringComparison.OrdinalIgnoreCase))
+            {
+                targetName = "";
+                targetFullName = "";
+            }
+            if (string.IsNullOrWhiteSpace(targetFullName) && string.IsNullOrWhiteSpace(targetName))
+            {
+                return new BridgeResponse
+                {
+                    ok = false,
+                    action = "execute_vba",
+                    error = "执行已阻断：未锁定有效目标工作簿。自动化执行必须携带发送时的工作簿名称或完整路径。"
+                };
+            }
+
 
             string code = req.ContainsKey("code") ? req["code"] : "";
             string prompt = req.ContainsKey("prompt") ? req["prompt"] : "自然语言操作";
@@ -585,6 +674,12 @@ namespace LeeExcel
 
             string rawModelResponse = req.ContainsKey("rawModelResponse") ? req["rawModelResponse"] : "";
             string entryPoint = req.ContainsKey("entryPoint") ? req["entryPoint"] : null;
+            string parametersJson = req.ContainsKey("parameters") ? req["parameters"] : "";
+            string scriptId = req.ContainsKey("scriptId") ? req["scriptId"] : "";
+            string confirmTargetKey = (targetFullName ?? "") + "|" + (targetName ?? "");
+            string confirmCodeHash = VbaRunner.ComputeSha256(code);
+            string confirmParamHash = VbaRunner.ComputeSha256(parametersJson ?? "");
+            bool requireContextConfirm = req.ContainsKey("requireUserConfirm") && string.Equals(req["requireUserConfirm"], "true", StringComparison.OrdinalIgnoreCase);
 
             // 解析参数列表 (支持 JSON 数组 [ {name, value} ] 或 JSON 对象字典 { key: val })
             List<VbaParameterInput> parsedParams = null;
@@ -639,32 +734,39 @@ namespace LeeExcel
             string providedToken = req.ContainsKey("confirmToken") ? req["confirmToken"] : null;
 
             // 若命中 L2 且未提供有效确认 Token，则绝对不执行、不改工作簿、不建快照，返回 L2 确认卡数据
-            if (riskAnalysis.RiskLevel == VbaRiskLevel.L2)
+            if (riskAnalysis.RiskLevel == VbaRiskLevel.L2 || requireContextConfirm)
             {
-                bool isConfirmed = !string.IsNullOrEmpty(providedToken) && ConfirmTokenStore.ValidateAndConsume(reqRequestId, providedToken);
+                bool isConfirmed = !string.IsNullOrEmpty(providedToken) && ConfirmTokenStore.ValidateAndConsume(reqRequestId, providedToken, confirmCodeHash, confirmTargetKey, entryPoint ?? "", confirmParamHash);
                 if (!isConfirmed)
                 {
                     string newToken = Guid.NewGuid().ToString("N");
-                    ConfirmTokenStore.Register(reqRequestId, newToken);
+                    ConfirmTokenStore.Register(reqRequestId, newToken, confirmCodeHash, confirmTargetKey, entryPoint ?? "", confirmParamHash);
                     return new BridgeResponse
                     {
                         ok = true,
                         action = "execute_vba",
                         requestId = reqRequestId,
-                        message = "该操作具有不可逆风险，需用户确认",
+                        message = riskAnalysis.RiskLevel == VbaRiskLevel.L2 ? "该操作具有不可逆风险，需用户确认" : "附加表格数据来自低信任上下文，需确认后执行",
                         data = new ExecutionDataDto
                         {
                             requestId = reqRequestId,
                             needsConfirm = true,
-                            riskLevel = "L2",
-                            riskCode = riskAnalysis.RiskCode,
+                            riskLevel = riskAnalysis.RiskLevel.ToString(),
+                            riskCode = requireContextConfirm ? "untrusted_context" : riskAnalysis.RiskCode,
                             riskReasons = riskAnalysis.Reasons,
                             riskTargetDetail = riskAnalysis.TargetDetail,
                             confirmToken = newToken,
                             canUndo = false,
                             targetWorkbookName = targetName,
                             targetWorkbookFullName = targetFullName,
-                            summary = "该操作具有不可逆风险，需用户确认后方可执行",
+                            summary = riskAnalysis.RiskLevel == VbaRiskLevel.L2 ? "该操作具有不可逆风险，需用户确认后方可执行" : "附加表格数据可能包含提示注入内容，请核验代码后确认执行",
+                            originalVbaCode = code,
+                            executedVbaCode = code,
+                            entryPoint = entryPoint ?? "",
+                            parametersJson = parametersJson ?? "",
+                            scriptId = scriptId ?? "",
+                            prompt = prompt,
+                            requiresContextConfirm = requireContextConfirm,
                             readback = null
                         }
                     };
@@ -741,7 +843,7 @@ namespace LeeExcel
             }
 
             // 2. 在目标工作簿中执行动态 VBA 并读回实际状态
-            var result = VbaRunner.RunVbaCode(app, targetWb, code, rawModelResponse, entryPoint, parsedParams);
+            var result = VbaRunner.RunVbaCode(app, targetWb, code, rawModelResponse, entryPoint, parsedParams, riskAnalysis.RiskLevel == VbaRiskLevel.L2);
 
             // 安全获取工作簿名称与路径：宏可能关闭了工作簿导致 COM 引用失效
             string resolvedTargetName = targetName;
@@ -2143,6 +2245,8 @@ namespace LeeExcel
                 string filter = req != null && req.ContainsKey("filter") ? req["filter"] : "ExcelMind 宏包 (*.exmpack)|*.exmpack|所有文件 (*.*)|*.*";
                 string selectedPath = "";
 
+                IntPtr ownerHandle = GetExcelWindowHandle(null);
+                NativeWindowOwner owner = ownerHandle != IntPtr.Zero ? new NativeWindowOwner(ownerHandle) : null;
                 Thread t = new Thread(() =>
                 {
                     using (var sfd = new System.Windows.Forms.SaveFileDialog())
@@ -2152,7 +2256,7 @@ namespace LeeExcel
                         sfd.Filter = filter;
                         sfd.DefaultExt = "exmpack";
                         sfd.AddExtension = true;
-                        if (sfd.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+                        if (sfd.ShowDialog(owner) == System.Windows.Forms.DialogResult.OK)
                         {
                             selectedPath = sfd.FileName;
                         }
@@ -2864,9 +2968,12 @@ namespace LeeExcel
                     };
                 }
 
-                // 若未传入路径，调起原生另存为对话框
+                // 若未传入路径，调起绑定 Excel 主窗口的原生另存为对话框。
+                // 必须使用 owner，否则对话框可能隐藏在 Excel 后方，表现为“正在打包”假死。
                 if (string.IsNullOrEmpty(targetZipPath))
                 {
+                    IntPtr ownerHandle = GetExcelWindowHandle(app);
+                    NativeWindowOwner owner = ownerHandle != IntPtr.Zero ? new NativeWindowOwner(ownerHandle) : null;
                     Thread t = new Thread(() =>
                     {
                         using (var sfd = new System.Windows.Forms.SaveFileDialog())
@@ -2876,7 +2983,7 @@ namespace LeeExcel
                             sfd.Filter = "ZIP 压缩包 (*.zip)|*.zip|所有文件 (*.*)|*.*";
                             sfd.DefaultExt = "zip";
                             sfd.AddExtension = true;
-                            if (sfd.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+                            if (sfd.ShowDialog(owner) == System.Windows.Forms.DialogResult.OK)
                             {
                                 targetZipPath = sfd.FileName;
                             }
@@ -3024,4 +3131,3 @@ namespace LeeExcel
         }
     }
 }
-

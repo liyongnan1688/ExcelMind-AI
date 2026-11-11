@@ -368,6 +368,7 @@
     const text = currentRequest.text || assistantMsg.prompt || '';
     const targetWbName = currentRequest.targetWbName || '当前工作簿';
     let effectiveRequestMode = currentRequest.requestMode;
+    const requiresContextConfirm = Boolean(currentRequest.requestMode === 'AUTOMATION' && currentRequest.selectionSnapshot && (currentRequest.selectionSnapshot.options?.includeSamples || currentRequest.selectionSnapshot.options?.includeFormulas));
 
     // Phase 3: 双轨自主分流 (Track A: 原生 COM / MCP 轻量感知与即时审计闭环)
     if (currentRequest.requestMode === 'AUTOMATION') {
@@ -512,6 +513,7 @@
         targetWorkbookName: currentRequest.targetWbName,
         targetWorkbookFullName: currentRequest.targetWbFullName,
         rawModelResponse: rawResponse,
+        requireUserConfirm: requiresContextConfirm ? 'true' : 'false',
       });
 
       let wasRepaired = false;
@@ -564,6 +566,7 @@
               targetWorkbookName: currentRequest.targetWbName,
               targetWorkbookFullName: currentRequest.targetWbFullName,
               rawModelResponse: repairedResponse,
+              requireUserConfirm: requiresContextConfirm ? 'true' : 'false',
             });
 
             if (secondExecRes.ok && secondExecRes.data) {
@@ -690,6 +693,7 @@
       role: 'assistant',
       content: `正在向【${targetWbName || '当前活动工作簿'}】运行宏: ${macroDisplayName}...`,
       prompt: `运行宏: ${macroDisplayName}`,
+      streamVbaCode: script.code,
       isExecuting: true,
       execution: null,
     };
@@ -1096,10 +1100,6 @@
     border-radius: 4px;
     font-size: 11px;
     color: #107c41;
-  }
-
-  .badge-icon {
-    font-size: 11px;
   }
 
   .badge-text {

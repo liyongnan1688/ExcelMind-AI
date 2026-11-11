@@ -455,6 +455,31 @@ namespace LeeExcel
     /// </summary>
     public static class DataToolsService
     {
+        private sealed class ExcelGlobalState
+        {
+            public int? AutomationSecurity;
+            public bool? EnableEvents;
+            public bool? DisplayAlerts;
+        }
+
+        private static ExcelGlobalState CaptureExcelGlobalState(dynamic app)
+        {
+            var state = new ExcelGlobalState();
+            if (app == null) return state;
+            try { state.AutomationSecurity = (int)app.AutomationSecurity; } catch { }
+            try { state.EnableEvents = (bool)app.EnableEvents; } catch { }
+            try { state.DisplayAlerts = (bool)app.DisplayAlerts; } catch { }
+            return state;
+        }
+
+        private static void RestoreExcelGlobalState(dynamic app, ExcelGlobalState state)
+        {
+            if (app == null || state == null) return;
+            if (state.AutomationSecurity.HasValue) { try { app.AutomationSecurity = state.AutomationSecurity.Value; } catch { } }
+            if (state.EnableEvents.HasValue) { try { app.EnableEvents = state.EnableEvents.Value; } catch { } }
+            if (state.DisplayAlerts.HasValue) { try { app.DisplayAlerts = state.DisplayAlerts.Value; } catch { } }
+        }
+
         public const int MaxRowsSafetyLimit = 50000;
         public const int MaxCellsSafetyLimit = 1000000;
 
@@ -1107,22 +1132,28 @@ namespace LeeExcel
             }
 
             // 1. 查找左表与右表工作簿
-            dynamic leftWb = FindWorkbookByName(app, leftWbName);
+            bool leftWbAmbiguous = false;
+            dynamic leftWb = FindWorkbookByName(app, leftWbName, out leftWbAmbiguous);
             if (leftWb == null)
             {
                 res.ok = false;
                 res.failureStage = "left_wb_missing";
-                res.error = string.Format("未找到左表目标工作簿【{0}】，已阻断，不回退活动工作簿。", leftWbName ?? "未指定");
+                res.error = leftWbAmbiguous
+                    ? "检测到多个同名左表工作簿，已阻断。请使用完整路径唯一指定目标。"
+                    : string.Format("未找到左表目标工作簿【{0}】，已阻断，不回退活动工作簿。", leftWbName ?? "未指定");
                 return res;
             }
             res.leftWorkbookName = (string)leftWb.Name;
 
-            dynamic rightWb = FindWorkbookByName(app, rightWbName);
+            bool rightWbAmbiguous = false;
+            dynamic rightWb = FindWorkbookByName(app, rightWbName, out rightWbAmbiguous);
             if (rightWb == null)
             {
                 res.ok = false;
                 res.failureStage = "right_wb_missing";
-                res.error = string.Format("未找到右表目标工作簿【{0}】，已阻断，不回退活动工作簿。", rightWbName ?? "未指定");
+                res.error = rightWbAmbiguous
+                    ? "检测到多个同名右表工作簿，已阻断。请使用完整路径唯一指定目标。"
+                    : string.Format("未找到右表目标工作簿【{0}】，已阻断，不回退活动工作簿。", rightWbName ?? "未指定");
                 return res;
             }
             res.rightWorkbookName = (string)rightWb.Name;
@@ -1683,10 +1714,13 @@ namespace LeeExcel
 
             // 3. 确定目标输出工作簿
             string targetOutWbName = string.IsNullOrEmpty(outputWbName) ? analysis.leftWorkbookName : outputWbName;
-            dynamic targetWb = FindWorkbookByName(app, targetOutWbName);
+            bool targetWbAmbiguous = false;
+            dynamic targetWb = FindWorkbookByName(app, targetOutWbName, out targetWbAmbiguous);
             if (targetWb == null)
             {
-                execRes.error = string.Format("未找到对账结果输出目标工作簿【{0}】，已阻断。", targetOutWbName);
+                execRes.error = targetWbAmbiguous
+                    ? "检测到多个同名对账输出目标工作簿，已阻断。请使用完整路径唯一指定目标。"
+                    : string.Format("未找到对账结果输出目标工作簿【{0}】，已阻断。", targetOutWbName);
                 return execRes;
             }
             execRes.targetWorkbookName = (string)targetWb.Name;
@@ -1890,8 +1924,9 @@ namespace LeeExcel
             }
         }
 
-        private static dynamic FindWorkbookByName(dynamic app, string name)
+        private static dynamic FindWorkbookByName(dynamic app, string name, out bool ambiguous)
         {
+            ambiguous = false;
             if (app == null) return null;
             if (string.IsNullOrEmpty(name))
             {
@@ -1899,20 +1934,43 @@ namespace LeeExcel
                 try { return app.ActiveWorkbook; } catch { return null; }
             }
             string cleanTarget = name.Trim();
-            foreach (dynamic wb in app.Workbooks)
+            try
             {
-                try
+                // 全路径是强身份约束：路径失效时绝不降级为同名匹配。
+                if (Path.IsPathRooted(cleanTarget))
                 {
-                    string wbName = (string)wb.Name;
-                    string wbFullName = (string)wb.FullName;
-                    if (string.Equals(wbName, cleanTarget, StringComparison.OrdinalIgnoreCase) ||
-                        string.Equals(wbFullName, cleanTarget, StringComparison.OrdinalIgnoreCase))
+                    foreach (dynamic wb in app.Workbooks)
+                    {
+                        if (string.Equals((string)wb.FullName, cleanTarget, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return wb;
+                        }
+                    }
+                    return null;
+                }
+
+                dynamic nameMatch = null;
+                int nameMatchCount = 0;
+                foreach (dynamic wb in app.Workbooks)
+                {
+                    if (string.Equals((string)wb.FullName, cleanTarget, StringComparison.OrdinalIgnoreCase))
                     {
                         return wb;
                     }
+                    if (string.Equals((string)wb.Name, cleanTarget, StringComparison.OrdinalIgnoreCase))
+                    {
+                        nameMatchCount++;
+                        if (nameMatchCount > 1)
+                        {
+                            ambiguous = true;
+                            return null;
+                        }
+                        nameMatch = wb;
+                    }
                 }
-                catch { }
+                return nameMatch;
             }
+            catch { }
             // 若显式指定了目标工作簿但未能找到，拒绝隐式回退当前活动工作簿，以防误操作！
             return null;
         }
@@ -2070,6 +2128,7 @@ namespace LeeExcel
                 hashes.Append(fileHash).Append(";");
 
                 dynamic wb = null;
+                var priorAppState = CaptureExcelGlobalState(app);
                 try
                 {
                     app.AutomationSecurity = 3; // ForceDisable
@@ -2192,6 +2251,7 @@ namespace LeeExcel
                 }
                 finally
                 {
+                    // 先关闭来源工作簿，再恢复全局事件/安全状态，避免恢复事件后触发关闭动作。
                     if (wb != null)
                     {
                         try
@@ -2201,6 +2261,7 @@ namespace LeeExcel
                         }
                         catch { }
                     }
+                    RestoreExcelGlobalState(app, priorAppState);
                 }
             }
 
@@ -2468,6 +2529,7 @@ namespace LeeExcel
             {
                 var prof = analysis.sources[f];
                 dynamic wb = null;
+                var priorAppState = CaptureExcelGlobalState(app);
                 try
                 {
                     app.AutomationSecurity = 3;
@@ -2546,6 +2608,7 @@ namespace LeeExcel
                 }
                 finally
                 {
+                    // 先关闭来源工作簿，再恢复全局事件/安全状态，避免恢复事件后触发关闭动作。
                     if (wb != null)
                     {
                         try
@@ -2555,6 +2618,7 @@ namespace LeeExcel
                         }
                         catch { }
                     }
+                    RestoreExcelGlobalState(app, priorAppState);
                 }
             }
 
@@ -2643,4 +2707,3 @@ namespace LeeExcel
         #endregion
     }
 }
-

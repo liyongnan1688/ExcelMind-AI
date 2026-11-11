@@ -1,9 +1,10 @@
-# ==============================================================================
-# ExcelMind AI: Five Scenes Live Acceptance Verification Suite (2026-10-19)
+﻿# ==============================================================================
+# ExcelMind AI: Five Scenes Live Acceptance Verification Suite
 # ==============================================================================
 
 param(
-    [string]$ArtifactsDir = ""
+    [string]$RunId = "",
+    [switch]$CompileOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -11,9 +12,13 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = $PSScriptRoot
 $ProjectRoot = Split-Path -Parent (Split-Path -Parent $ScriptDir)
 
-if ([string]::IsNullOrEmpty($ArtifactsDir)) {
-    $ArtifactsDir = Join-Path $ProjectRoot ".artifacts\acceptance\20261019"
+if ([string]::IsNullOrWhiteSpace($RunId)) {
+    $RunId = "five_scenes_" + (Get-Date -Format "yyyyMMdd_HHmmss")
 }
+if ($RunId -notmatch '^[A-Za-z0-9._-]+$' -or $RunId -eq '.' -or $RunId -eq '..') {
+    throw "RunId contains invalid path characters: $RunId"
+}
+$ArtifactsDir = Join-Path $ProjectRoot ".artifacts\tests\$RunId"
 
 if (-not (Test-Path $ArtifactsDir)) {
     New-Item -ItemType Directory -Force -Path $ArtifactsDir | Out-Null
@@ -25,7 +30,7 @@ if (-not (Test-Path $ScreenshotsDir)) {
 }
 
 Write-Host "================================================================================" -ForegroundColor Cyan
-Write-Host "      ExcelMind AI: Five Scenes Live Acceptance Suite (2026-10-19)              " -ForegroundColor Cyan
+Write-Host "      ExcelMind AI: Five Scenes Live Acceptance Suite                         " -ForegroundColor Cyan
 Write-Host "================================================================================" -ForegroundColor Cyan
 Write-Host "Project Root   : $ProjectRoot"
 Write-Host "Artifacts Dir  : $ArtifactsDir"
@@ -53,8 +58,7 @@ $CscArgs = @(
     "`"$DriverSource`""
 )
 
-$compileCmd = "& `"$CscPath`" " + ($CscArgs -join " ")
-Invoke-Expression $compileCmd
+& $CscPath @CscArgs
 if ($LASTEXITCODE -ne 0 -or !(Test-Path $DriverExe)) {
     Write-Host "[ERROR] Failed to compile FiveScenesExcelDriver.exe, code: $LASTEXITCODE" -ForegroundColor Red
     exit 1
@@ -68,10 +72,14 @@ if (Test-Path $ExcelDnaDll) {
     Copy-Item $ExcelDnaDll (Join-Path $ArtifactsDir "ExcelDna.Integration.dll") -Force
 }
 
+if ($CompileOnly) {
+    Write-Host "[PASS] CompileOnly completed; Excel was not started." -ForegroundColor Green
+    exit 0
+}
+
 # 2. Run Scene 1 and Scene 2 (Native Excel COM)
 Write-Host "`n[2/3] Launching real Excel instance and executing Scene 1 & Scene 2..." -ForegroundColor Yellow
-$driverCmd = "& `"$DriverExe`" `"$ArtifactsDir`""
-Invoke-Expression $driverCmd
+& $DriverExe $ArtifactsDir
 $driverExitCode = $LASTEXITCODE
 if ($driverExitCode -ne 0) {
     Write-Host "[ERROR] Live Excel COM test failed, code: $driverExitCode" -ForegroundColor Red
@@ -82,15 +90,17 @@ Write-Host "      Scene 1 and Scene 2 verified successfully!" -ForegroundColor G
 # 3. Run Scene 3, 4, 5 and Generate Summary Report
 Write-Host "`n[3/3] Executing Scene 3, 4, 5 and generating summary report..." -ForegroundColor Yellow
 $nodeScript = Join-Path $ProjectRoot "tests\diagnostics\run_scenes_3_4_5.cjs"
-$nodeCmd = "node `"$nodeScript`""
-Invoke-Expression $nodeCmd
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "[ERROR] Node test execution failed, code: $LASTEXITCODE" -ForegroundColor Red
-    exit $LASTEXITCODE
+$env:LEE_EXCEL_TEST_RUN_ID = $RunId
+& node $nodeScript
+$nodeExitCode = $LASTEXITCODE
+Remove-Item Env:\LEE_EXCEL_TEST_RUN_ID -ErrorAction SilentlyContinue
+if ($nodeExitCode -ne 0) {
+    Write-Host "[ERROR] Node test execution failed, code: $nodeExitCode" -ForegroundColor Red
+    exit $nodeExitCode
 }
 
 Write-Host "`n================================================================================" -ForegroundColor Green
-Write-Host "      All 5 Live Acceptance Scenes PASSED (26/26 PASS)                          " -ForegroundColor Green
+Write-Host "      Acceptance run completed. Dynamic results are in the generated reports." -ForegroundColor Green
 Write-Host "================================================================================" -ForegroundColor Green
 Write-Host "Reports archived:"
 Write-Host "  - Scene 1 Report: $ArtifactsDir\scene1_track_a_overview.md" -ForegroundColor Magenta

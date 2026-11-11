@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -68,7 +69,7 @@ public class RunTaskPaneFrontEndRegression
         Console.WriteLine("===       LeeExcel 真实任务窗格前台端到端全流程回归实测 (WebView2 前台)      ===");
         Console.WriteLine("================================================================================\n");
 
-        KillExcel();
+        EnsureNoRunningExcelProcess();
 
         string testDir = outputDir;
         string testWbPath = Path.Combine(testDir, "Calendar_FrontEnd_Test.xlsx");
@@ -97,8 +98,8 @@ public class RunTaskPaneFrontEndRegression
         Console.WriteLine("    • 执行前 Sheet1 UsedRange: " + (string)ws1.UsedRange.Address + ", A1 值: [" + ws1.Cells[1, 1].Value2 + "]");
 
         Console.WriteLine("\n【步骤 1：同一 API 原文与前端提取源码核验】");
-        Console.WriteLine("    • API 原始回复 SHA256 : " + VbaRunner.ComputeSha256(rawModelApiText).Substring(0, 16));
-        Console.WriteLine("    • 提取后 VBA 源码 SHA256: " + VbaRunner.ComputeSha256(originalVbaCode).Substring(0, 16));
+        Console.WriteLine("    • API 原始回复 SHA256 : " + ComputeSha256(rawModelApiText).Substring(0, 16));
+        Console.WriteLine("    • 提取后 VBA 源码 SHA256: " + ComputeSha256(originalVbaCode).Substring(0, 16));
         Console.WriteLine("    • 确认关键行存在性     : originalVbaCode 包含 'ws.Cells(1, 1).Select' -> " + originalVbaCode.Contains("ws.Cells(1, 1).Select"));
 
         // 创建真实宿主窗体与 TaskPaneControl
@@ -380,7 +381,6 @@ public class RunTaskPaneFrontEndRegression
         {
             try { app.Quit(); } catch { }
             Marshal.ReleaseComObject(app);
-            KillExcel();
 
             WriteRunMetadata(outputDir, toolName, regressionFinished ? "completed" : "failed", regressionFinished ? "Frontend regression finished successfully" : "Frontend regression did not complete");
             RemoveRunningLock(outputDir);
@@ -478,11 +478,24 @@ public class RunTaskPaneFrontEndRegression
         catch { }
     }
 
-    static void KillExcel()
+    static void EnsureNoRunningExcelProcess()
     {
-        foreach (var p in System.Diagnostics.Process.GetProcessesByName("excel"))
+        var procs = System.Diagnostics.Process.GetProcessesByName("EXCEL");
+        if (procs != null && procs.Length > 0)
         {
-            try { p.Kill(); p.WaitForExit(1000); } catch { }
+            string pids = string.Join(",", Array.ConvertAll(procs, p => p.Id.ToString()));
+            throw new InvalidOperationException("检测到已运行的 Excel 进程 (PID: " + pids + ")。测试不会强杀现有 Excel，请先保存并关闭后重试。");
+        }
+    }
+
+    private static string ComputeSha256(string text)
+    {
+        using (var sha = SHA256.Create())
+        {
+            byte[] bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(text ?? ""));
+            var sb = new StringBuilder(bytes.Length * 2);
+            foreach (byte b in bytes) sb.Append(b.ToString("x2"));
+            return sb.ToString();
         }
     }
 

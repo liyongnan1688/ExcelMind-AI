@@ -534,10 +534,10 @@ namespace LeeExcel
 
         public static VbaExecutionResult RunVbaCode(dynamic app, dynamic targetWorkbook, string vbaCode, string rawModelResponse = "", string selectedEntryPoint = null)
         {
-            return RunVbaCode(app, targetWorkbook, vbaCode, rawModelResponse, selectedEntryPoint, null);
+            return RunVbaCode(app, targetWorkbook, vbaCode, rawModelResponse, selectedEntryPoint, null, false);
         }
 
-        public static VbaExecutionResult RunVbaCode(dynamic app, dynamic targetWorkbook, string vbaCode, string rawModelResponse = "", string selectedEntryPoint = null, List<VbaParameterInput> parameters = null)
+        public static VbaExecutionResult RunVbaCode(dynamic app, dynamic targetWorkbook, string vbaCode, string rawModelResponse = "", string selectedEntryPoint = null, List<VbaParameterInput> parameters = null, bool allowHighRisk = false)
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
             var transformSteps = new List<string>();
@@ -575,6 +575,32 @@ namespace LeeExcel
                 };
             }
 
+            // 0. 所有入口统一风险门禁：无人值守路径默认不允许 L2 外部副作用
+            string riskTargetFullName = "";
+            try { riskTargetFullName = targetWorkbook != null ? (string)targetWorkbook.FullName : ""; } catch { }
+            var executionRisk = VbaRiskScanner.Analyze(vbaCode, riskTargetFullName);
+            if (executionRisk.RiskLevel == VbaRiskLevel.L2 && !allowHighRisk)
+            {
+                return new VbaExecutionResult
+                {
+                    success = false,
+                    summary = "执行已阻断：检测到需要人工确认的高危操作",
+                    error = string.Join("；", executionRisk.Reasons.ToArray()),
+                    rawModelResponse = rawModelResponse ?? "",
+                    originalVbaCode = vbaCode,
+                    executedVbaCode = vbaCode,
+                    wrapperCode = null,
+                    originalCodeHash = ComputeSha256(vbaCode),
+                    executedCodeHash = ComputeSha256(vbaCode),
+                    isSourceIdentical = true,
+                    transformSteps = transformSteps,
+                    precheckStatus = "risk_blocked",
+                    executionPhase = "intercepted_before_run",
+                    failureStage = "risk_blocked",
+                    riskNotice = executionRisk.TargetDetail,
+                    elapsedMs = sw.ElapsedMilliseconds
+                };
+            }
             // 1. 结构完整性预检：必须包含有效过程定义 (Sub 或 Function) 与闭合语句 (防止模型响应残缺)
             // 使用负向后行断言严格排除 End Sub / End Function / Exit Sub
             var procMatches = Regex.Matches(vbaCode, @"(?<!End\s+|Exit\s+)\b(Sub|Function)\s+([a-zA-Z0-9_\u4e00-\u9fa5]+)\s*(?:\(([^)]*)\))?", RegexOptions.IgnoreCase);

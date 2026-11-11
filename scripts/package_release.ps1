@@ -2,7 +2,7 @@
 # 职责：编译前端与后端、组织双架构依赖、生成安装卸载套件、打包为独立 ZIP
 
 param(
-    [string]$Version = "v1.3.0-rc1"
+    [string]$Version = "v1.3.5"
 )
 
 $ErrorActionPreference = "Stop"
@@ -12,6 +12,21 @@ $ErrorActionPreference = "Stop"
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
+
+$versionPattern = '^v\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$'
+if ($Version -notmatch $versionPattern) {
+    throw "Invalid version format: $Version. Expected strict SemVer starting with v."
+}
+
+function Assert-SafeChildPath([string]$CandidatePath, [string]$RootPath) {
+    $rootFull = [IO.Path]::GetFullPath($RootPath).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+    $candidateFull = [IO.Path]::GetFullPath($CandidatePath)
+    if (-not $candidateFull.StartsWith($rootFull, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing path outside allowed root: $candidateFull"
+    }
+    return $candidateFull
+}
+
 
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host "         ExcelMind AI 跨平台/跨版本 发布包自动化打包流水线      " -ForegroundColor Cyan
@@ -74,6 +89,26 @@ if (!(Test-Path $csc)) {
 $binDir = Join-Path $projectRoot "bin"
 $dllOut = Join-Path $binDir "LeeExcel.dll"
 
+if ($Version -notmatch '^v(\d+\.\d+\.\d+)') {
+    throw "无法从发布版本提取程序集版本: $Version"
+}
+$numericVersion = $Matches[1]
+$buildCommit = "Unknown"
+$gitCommit = & git -C $projectRoot rev-parse --short HEAD 2>$null
+if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($gitCommit)) {
+    $buildCommit = $gitCommit.Trim()
+}
+$buildMetadataDir = Join-Path $projectRoot (".artifacts\tmp\build_metadata_" + [Guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $buildMetadataDir | Out-Null
+$buildMetadataSource = Join-Path $buildMetadataDir "BuildMetadata.cs"
+$buildMetadataText = @(
+    'using System.Reflection;'
+    ('[assembly: AssemblyVersion("{0}")]' -f "$numericVersion.0")
+    ('[assembly: AssemblyFileVersion("{0}")]' -f "$numericVersion.0")
+    ('[assembly: AssemblyInformationalVersion("{0}")]' -f $Version)
+    ('[assembly: AssemblyMetadata("Commit", "{0}")]' -f $buildCommit)
+) -join "`r`n"
+[IO.File]::WriteAllText($buildMetadataSource, $buildMetadataText, (New-Object Text.UTF8Encoding($false)))
 $refs = @(
     "System.dll",
     "System.Core.dll",
@@ -89,10 +124,12 @@ $refs = @(
     (Resolve-Path (Join-Path $projectRoot "packages\Microsoft.Web.WebView2.1.0.4191.47\lib\net462\Microsoft.Web.WebView2.WinForms.dll")).Path
 )
 $refArgs = $refs | ForEach-Object { "/r:`"$_`"" }
-$sources = (Get-ChildItem -Path (Join-Path $projectRoot "src\*.cs") | Select-Object -ExpandProperty FullName) | ForEach-Object { "`"$_`"" }
+$sources = @((Get-ChildItem -Path (Join-Path $projectRoot "src\*.cs") | Select-Object -ExpandProperty FullName) | ForEach-Object { "`"$_`"" }) + @("`"$buildMetadataSource`"")
 
-$buildCmd = "& `"$csc`" /nologo /target:library /out:`"$dllOut`" $refArgs $sources"
-Invoke-Expression $buildCmd
+$cscArgs = @("/nologo", "/target:library", "/out:`"$dllOut`"")
+$cscArgs += $refArgs
+$cscArgs += $sources
+& $csc @cscArgs
 if ($LASTEXITCODE -ne 0) {
     throw "C# 编译失败，退出码: $LASTEXITCODE"
 }
@@ -176,6 +213,7 @@ Write-Host "      校验清单已生成: $checksumFile" -ForegroundColor Green
 
 # 6. 生成未压缩的发布候选目录
 $rcTargetDir = Join-Path $releaseDir "ExcelMindAI-$Version"
+Assert-SafeChildPath $rcTargetDir $releaseDir | Out-Null
 if (Test-Path $rcTargetDir) {
     Remove-Item -Path $rcTargetDir -Recurse -Force
 }
@@ -185,6 +223,7 @@ Write-Host "      发布候选目录已同步: $rcTargetDir" -ForegroundColor Gr
 # 7. 压缩为发布 ZIP 归档包
 $zipName = "ExcelMindAI-${Version}.zip"
 $zipPath = Join-Path $releaseDir $zipName
+Assert-SafeChildPath $zipPath $releaseDir | Out-Null
 
 Write-Host "`n[5/6] 正在打包压缩发布文件包: $zipName ..." -ForegroundColor Yellow
 if (Test-Path $zipPath) {
@@ -209,6 +248,7 @@ if (!(Test-Path $visibleReleaseDir)) {
 $visibleZipPath = Join-Path $visibleReleaseDir $zipName
 Copy-Item -Path $zipPath -Destination $visibleZipPath -Force
 $visibleTargetDir = Join-Path $visibleReleaseDir "ExcelMindAI-$Version"
+Assert-SafeChildPath $visibleTargetDir $visibleReleaseDir | Out-Null
 if (Test-Path $visibleTargetDir) {
     Remove-Item -Path $visibleTargetDir -Recurse -Force
 }
@@ -223,4 +263,3 @@ Write-Host "归档大小:         $zipSizeMB MB" -ForegroundColor Cyan
 Write-Host "归档 SHA-256:     $zipHash" -ForegroundColor Cyan
 Write-Host "构建声明:         未签名发布候选构建 (Unsigned Release Candidate)" -ForegroundColor Yellow
 Write-Host "==========================================================" -ForegroundColor Green
-

@@ -13,6 +13,8 @@ namespace LeeExcel
         private dynamic _app;
         private string _pendingAction = null;
         private TaskPaneFocusMessageFilter _focusFilter = null;
+        private const string TrustedAppHost = "app.lee-excel";
+        private const string TrustedAppIndexPath = "/index.html";
 
         public TaskPaneControl(dynamic excelApp)
         {
@@ -130,10 +132,17 @@ namespace LeeExcel
                 await _webView.EnsureCoreWebView2Async(env);
 
                 _webView.CoreWebView2.Settings.IsWebMessageEnabled = true;
-                _webView.CoreWebView2.Settings.AreDevToolsEnabled = true;
+                _webView.CoreWebView2.Settings.AreDevToolsEnabled = false;
+                _webView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
+                _webView.CoreWebView2.Settings.AreDefaultScriptDialogsEnabled = false;
                 _webView.CoreWebView2.Settings.IsStatusBarEnabled = false;
 
+
                 _webView.CoreWebView2.WebMessageReceived += OnWebMessageReceived;
+                _webView.CoreWebView2.NavigationStarting += OnNavigationStarting;
+                _webView.CoreWebView2.NewWindowRequested += OnNewWindowRequested;
+                _webView.CoreWebView2.PermissionRequested += OnPermissionRequested;
+                _webView.CoreWebView2.DownloadStarting += OnDownloadStarting;
                 _webView.CoreWebView2.NavigationCompleted += (s, e) =>
                 {
                     if (!string.IsNullOrEmpty(_pendingAction))
@@ -193,7 +202,7 @@ namespace LeeExcel
                         _webView.CoreWebView2.SetVirtualHostNameToFolderMapping(
                             "app.lee-excel",
                             distFolder,
-                            CoreWebView2HostResourceAccessKind.Allow
+                            CoreWebView2HostResourceAccessKind.DenyCors
                         );
                         _webView.CoreWebView2.Navigate(string.Format("https://app.lee-excel/index.html?v={0}", buildFingerprint));
                         return;
@@ -203,9 +212,8 @@ namespace LeeExcel
                         System.Diagnostics.Debug.WriteLine("VirtualHost mapping warning: " + mapEx.Message);
                     }
 
-                    // 备用 file 协议导航
-                    string fileUri = new Uri(Path.Combine(distFolder, "index.html")).AbsoluteUri;
-                    _webView.CoreWebView2.Navigate(string.Format("{0}?v={1}", fileUri, buildFingerprint));
+                    string fallbackHtml = "<!DOCTYPE html><html><head><meta charset='utf-8'/></head><body style='font-family:Segoe UI,Microsoft YaHei;padding:24px'><h2>ExcelMind AI</h2><p>安全虚拟主机映射失败，已阻止 file:// 降级加载。请重新安装完整发行包。</p></body></html>";
+                    _webView.CoreWebView2.NavigateToString(fallbackHtml);
                 }
                 else
                 {
@@ -239,10 +247,61 @@ namespace LeeExcel
             }
         }
 
+        private static bool IsTrustedWebMessageSource(string source)
+        {
+            Uri uri;
+            if (string.IsNullOrEmpty(source) || !Uri.TryCreate(source, UriKind.Absolute, out uri)) return false;
+            return uri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase)
+                && uri.Host.Equals(TrustedAppHost, StringComparison.OrdinalIgnoreCase)
+                && uri.IsDefaultPort
+                && uri.AbsolutePath.Equals(TrustedAppIndexPath, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void OnNavigationStarting(object sender, CoreWebView2NavigationStartingEventArgs e)
+        {
+            Uri uri;
+            bool isAboutBlank = string.Equals(e.Uri, "about:blank", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(e.Uri, "about:srcdoc", StringComparison.OrdinalIgnoreCase);
+            bool isTrustedIndex = Uri.TryCreate(e.Uri, UriKind.Absolute, out uri)
+                && uri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase)
+                && uri.Host.Equals(TrustedAppHost, StringComparison.OrdinalIgnoreCase)
+                && uri.IsDefaultPort
+                && uri.AbsolutePath.Equals(TrustedAppIndexPath, StringComparison.OrdinalIgnoreCase);
+            if (!isAboutBlank && !isTrustedIndex)
+            {
+                e.Cancel = true;
+                System.Diagnostics.Debug.WriteLine("Blocked untrusted WebView navigation: " + e.Uri);
+            }
+        }
+
+        private void OnNewWindowRequested(object sender, CoreWebView2NewWindowRequestedEventArgs e)
+        {
+            e.Handled = true;
+            System.Diagnostics.Debug.WriteLine("Blocked WebView new window request: " + e.Uri);
+        }
+
+        private void OnPermissionRequested(object sender, CoreWebView2PermissionRequestedEventArgs e)
+        {
+            e.State = CoreWebView2PermissionState.Deny;
+            System.Diagnostics.Debug.WriteLine("Denied WebView permission request: " + e.PermissionKind);
+        }
+
+        private void OnDownloadStarting(object sender, CoreWebView2DownloadStartingEventArgs e)
+        {
+            e.Cancel = true;
+            System.Diagnostics.Debug.WriteLine("Blocked WebView download: " + e.DownloadOperation.Uri);
+        }
+
         private void OnWebMessageReceived(object sender, CoreWebView2WebMessageReceivedEventArgs e)
         {
             try
             {
+                if (!IsTrustedWebMessageSource(e.Source))
+                {
+                    System.Diagnostics.Debug.WriteLine("Blocked WebMessage from untrusted source: " + e.Source);
+                    return;
+                }
+
                 string msg = null;
                 try { msg = e.TryGetWebMessageAsString(); } catch { }
                 if (string.IsNullOrEmpty(msg))

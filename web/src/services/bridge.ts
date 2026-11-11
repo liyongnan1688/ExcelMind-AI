@@ -373,6 +373,11 @@ export interface VbaExecutionData {
   riskReasons?: string[];
   riskTargetDetail?: string;
   confirmToken?: string;
+  entryPoint?: string;
+  parametersJson?: string;
+  scriptId?: string;
+  prompt?: string;
+  requiresContextConfirm?: boolean;
   metaSaveError?: string;
   elapsedMs: number;
   snapshot?: SnapshotItem;
@@ -390,7 +395,7 @@ export interface VbaExecutionData {
   targetWorkbookFullName?: string;
   verificationStatus?: 'matched' | 'unconfirmed' | 'failed';
   verificationNote?: string;
-  precheckStatus?: 'passed' | 'warning' | 'failed' | 'unavailable' | 'scope_risk_intercepted' | 'workbook_locked' | 'skipped';
+  precheckStatus?: 'passed' | 'warning' | 'failed' | 'unavailable' | 'scope_risk_intercepted' | 'risk_blocked' | 'workbook_locked' | 'skipped';
   executionPhase?:
     | 'macro_completed'
     | 'hang_suspected_interrupt_sent'
@@ -1971,6 +1976,7 @@ export interface ExternalDataImportResult {
   elapsedMs: number;
   recoveryNotice?: string;
   sanitizedSource?: string;
+  readbackVerified?: boolean;
 }
 
 export interface DataSourceConfigDto {

@@ -208,12 +208,14 @@
   }
 
   let showRestoreConfirm = false;
+  let restoreIsExecutionSnapshot = false;
   let restoreTargetId = '';
   let restoreErrorMsg = '';
 
   function openRestoreConfirm(targetId: string) {
     if (!targetId) return;
     restoreTargetId = targetId;
+    restoreIsExecutionSnapshot = Boolean(execution?.snapshot?.id && targetId === execution.snapshot.id);
     restoreErrorMsg = '';
     showRestoreConfirm = true;
   }
@@ -259,11 +261,16 @@
     isExecutingL2 = true;
     try {
       const res = await bridge.send<any>('execute_vba', {
-        code: displayCode,
+        code: execution.originalVbaCode || execution.executedVbaCode || displayCode,
         requestId: execution.requestId,
         confirmToken: execution.confirmToken,
         targetWorkbookName: execution.targetWorkbookName || '',
         targetWorkbookFullName: execution.targetWorkbookFullName || '',
+        entryPoint: execution.entryPoint || '',
+        parameters: execution.parametersJson || '',
+        scriptId: execution.scriptId || '',
+        prompt: execution.prompt || '',
+        requireUserConfirm: execution.requiresContextConfirm ? 'true' : 'false',
       });
       if (res.ok && res.data) {
         execution = {
@@ -402,13 +409,13 @@
 
     <div class="summary-right-actions">
       <!-- L1 结果卡首行撤销按钮 (P5 规范) -->
-      {#if !isExecuting && !execution?.needsConfirm && (execution?.canUndo || execution?.snapshot?.id)}
+      {#if !isExecuting && !execution?.needsConfirm && execution?.snapshot?.id}
         <button
           class="btn-rollback-top"
           type="button"
           title="一键撤销对目标工作簿的这次改动"
           disabled={isRestoring}
-          on:click|stopPropagation={() => openRestoreConfirm(selectedSnapshotId || execution?.snapshot?.id || '')}
+          on:click|stopPropagation={() => openRestoreConfirm(execution?.snapshot?.id || '')}
         >
           <RotateCcw size={12} class={isRestoring ? 'animate-spin' : ''} />
           <span>{restoreSuccess ? '已撤销' : (isRestoring ? '正在撤销...' : '撤销改动')}</span>
@@ -452,7 +459,7 @@
       <div class="partial-mod-right">
         <button
           class="btn btn-sm btn-rollback"
-          on:click|stopPropagation={() => openRestoreConfirm(selectedSnapshotId || execution?.snapshot?.id || '')}
+          on:click|stopPropagation={() => openRestoreConfirm(execution?.snapshot?.id || '')}
         >
           <RotateCcw size={12} />
           <span>撤销改动</span>
@@ -865,10 +872,10 @@
             <div class="log-row flex-col partial-warning-box">
               <div class="partial-warning-header">
                 <span class="partial-warning-title">宏运行异常中断：工作簿已发生部分修改！</span>
-                {#if selectedSnapshotId || execution?.snapshot?.id}
+                {#if execution?.snapshot?.id}
                   <button
                     class="btn btn-sm btn-danger"
-                    on:click={() => openRestoreConfirm(selectedSnapshotId || execution?.snapshot?.id || '')}
+                    on:click={() => openRestoreConfirm(execution?.snapshot?.id || '')}
                   >
                     撤销改动
                   </button>
@@ -1029,21 +1036,32 @@
             </button>
           {/if}
 
-          {#if selectedSnapshotId || execution?.snapshot?.id}
+          {#if execution?.snapshot?.id}
             <button
               class="btn btn-sm btn-rollback"
-              on:click={() => openRestoreConfirm(selectedSnapshotId || execution?.snapshot?.id || '')}
+              on:click={() => openRestoreConfirm(execution?.snapshot?.id || '')}
               disabled={isRestoring}
             >
-              {#if restoreSuccess}
+              {#if restoreSuccess && restoreIsExecutionSnapshot}
                 <Check size={13} color="#107C41" />
                 <span class="restore-success-text">已恢复整本！</span>
-              {:else if isRestoring}
+              {:else if isRestoring && restoreIsExecutionSnapshot}
                 <Loader2 size={13} class="spinner" /> 恢复中...
               {:else}
                 <RotateCcw size={13} />
                 <span>恢复到执行前</span>
               {/if}
+            </button>
+          {/if}
+
+          {#if selectedSnapshotId && selectedSnapshotId !== execution?.snapshot?.id}
+            <button
+              class="btn btn-sm btn-rollback"
+              on:click={() => openRestoreConfirm(selectedSnapshotId)}
+              disabled={isRestoring}
+            >
+              <RotateCcw size={13} />
+              <span>恢复所选版本</span>
             </button>
           {/if}
         </div>
@@ -1056,7 +1074,7 @@
             <span class="rcp-title">确认回滚整本工作簿？</span>
           </div>
           <p class="rcp-desc">
-            确定将工作簿恢复到该宏执行前的快照吗？
+            确定将工作簿恢复到{restoreIsExecutionSnapshot ? '该宏执行前' : '所选历史版本'}的快照吗？
             <br />
             <strong>注意</strong>：宏执行后产生的所有新增手工修改、单元格编辑都将被覆盖！
             <br />

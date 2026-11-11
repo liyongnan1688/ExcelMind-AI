@@ -581,6 +581,20 @@ namespace LeeExcel
                 createdOwnExcel = false;
             }
 
+            int runningOrigAutomationSecurity = 1;
+            bool runningOrigEnableEvents = true;
+            try
+            {
+                if (runningApp != null)
+                {
+                    runningOrigAutomationSecurity = (int)runningApp.AutomationSecurity;
+                    runningOrigEnableEvents = (bool)runningApp.EnableEvents;
+                    runningApp.AutomationSecurity = 3; // msoAutomationSecurityForceDisable
+                    runningApp.EnableEvents = false;
+                }
+            }
+            catch { }
+
             var summary = new BatchJobSummary
             {
                 jobId = jobDef.jobId,
@@ -756,6 +770,8 @@ namespace LeeExcel
                     {
                         runningApp.DisplayAlerts = origDisplayAlerts;
                         runningApp.AskToUpdateLinks = origAskToUpdateLinks;
+                        runningApp.AutomationSecurity = runningOrigAutomationSecurity;
+                        runningApp.EnableEvents = runningOrigEnableEvents;
                     }
                 }
                 catch { }

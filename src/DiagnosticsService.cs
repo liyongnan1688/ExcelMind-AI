@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -31,8 +32,8 @@ namespace LeeExcel
         public DiagnosticsEnvironmentSummary()
         {
             appName = "ExcelMind AI";
-            appVersion = "v1.2.0";
-            buildCommit = "231ae3a";
+            appVersion = GetApplicationVersion();
+            buildCommit = GetBuildCommit();
             clrVersion = Environment.Version.ToString();
             osVersion = Environment.OSVersion.ToString();
             osArchitecture = Environment.Is64BitOperatingSystem ? "64-bit" : "32-bit";
@@ -46,6 +47,47 @@ namespace LeeExcel
             lastFailureStage = "None";
             lastErrorSummary = "None";
             generatedAtUtc = DateTime.UtcNow.ToString("o");
+        }
+
+        private static string GetApplicationVersion()
+        {
+            Assembly assembly = typeof(DiagnosticsEnvironmentSummary).Assembly;
+            object[] attributes = assembly.GetCustomAttributes(typeof(AssemblyInformationalVersionAttribute), false);
+            if (attributes.Length > 0)
+            {
+                AssemblyInformationalVersionAttribute informational = attributes[0] as AssemblyInformationalVersionAttribute;
+                if (informational != null && !string.IsNullOrWhiteSpace(informational.InformationalVersion))
+                {
+                    return informational.InformationalVersion.Trim();
+                }
+            }
+
+            Version version = assembly.GetName().Version;
+            if (version == null || (version.Major == 0 && version.Minor == 0 && version.Build <= 0))
+            {
+                return "Unknown";
+            }
+
+            return "v" + version.ToString(3);
+        }
+
+        private static string GetBuildCommit()
+        {
+            try
+            {
+                object[] attributes = typeof(DiagnosticsEnvironmentSummary).Assembly.GetCustomAttributes(typeof(AssemblyMetadataAttribute), false);
+                foreach (object item in attributes)
+                {
+                    AssemblyMetadataAttribute metadata = item as AssemblyMetadataAttribute;
+                    if (metadata != null && string.Equals(metadata.Key, "Commit", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(metadata.Value))
+                    {
+                        return metadata.Value.Trim();
+                    }
+                }
+            }
+            catch { }
+
+            return "Not Embedded";
         }
     }
 

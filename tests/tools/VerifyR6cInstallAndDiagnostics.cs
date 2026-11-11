@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using LeeExcel;
@@ -49,10 +50,25 @@ namespace LeeExcel.Tests
                 "[ERROR] DB connection failed with password := \"PlainTextPass123\"\r\n";
 
             var previewRes = DiagnosticsService.PreviewDiagnostics(null, mockLogs);
+            Assembly appAssembly = typeof(DiagnosticsService).Assembly;
+            AssemblyInformationalVersionAttribute versionAttribute =
+                (AssemblyInformationalVersionAttribute)Attribute.GetCustomAttribute(appAssembly, typeof(AssemblyInformationalVersionAttribute));
+            string expectedAppVersion = versionAttribute != null ? versionAttribute.InformationalVersion : null;
+            if (string.IsNullOrWhiteSpace(expectedAppVersion))
+            {
+                Version assemblyVersion = appAssembly.GetName().Version;
+                expectedAppVersion = assemblyVersion != null && assemblyVersion.Build > 0
+                    ? "v" + assemblyVersion.ToString(3)
+                    : "Unknown";
+            }
 
             AssertTest("TC-R6c-D01: 诊断预览返回成功且包含系统环境白名单",
-                previewRes.ok && previewRes.summary != null && previewRes.summary.appName == "ExcelMind AI" && previewRes.summary.appVersion == "v1.2.0",
-                "previewRes.ok=" + previewRes.ok);
+                previewRes.ok && previewRes.summary != null && previewRes.summary.appName == "ExcelMind AI" &&
+                previewRes.summary.appVersion == expectedAppVersion && previewRes.summary.appVersion != "Unknown" &&
+                !string.IsNullOrWhiteSpace(previewRes.summary.buildCommit) && previewRes.summary.buildCommit != "Not Embedded",
+                "previewRes.ok=" + previewRes.ok + ", expectedVersion=" + expectedAppVersion + ", actualVersion=" +
+                (previewRes.summary != null ? previewRes.summary.appVersion : "<null>") + ", buildCommit=" +
+                (previewRes.summary != null ? previewRes.summary.buildCommit : "<null>"));
 
             AssertTest("TC-R6c-D02: 诊断预览严格声明 8 类排除项与 3 类包含分类",
                 previewRes.includedCategories.Count == 3 && previewRes.excludedCategories.Count == 8,

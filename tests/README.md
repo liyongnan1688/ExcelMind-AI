@@ -1,7 +1,7 @@
-# ExcelMind AI 测试与诊断资产手册 (tests/README.md)
+﻿# ExcelMind AI 测试与诊断资产手册 (tests/README.md)
 
 > **定位**：项目长期测试资产目录索引、有效命令、环境要求与隔离规范  
-> **更新时间**：2026-10-07  
+> **更新时间**：2026-11-08
 > **当前状态入口**：参见 [docs/CURRENT_STATE.md](../docs/CURRENT_STATE.md)  
 > **质量准则**：证据驱动、测试隔离、安全无损；严禁以内存模拟冒充真实宿主验证，未验证范围明确如实声明。
 
@@ -14,11 +14,14 @@
 > **适用场景**：日常提交、CI/CD 构建及任何代码修改后的必跑门禁。
 
 ```bash
-# 1. 核心单元与契约测试 (204+ 项用例)
+# 1. 核心单元与契约测试 (257 项用例)
 node test_suite_unit.cjs
 
 # 2. VBA 源码保真正则反例守卫测试 (3 项反例)
 node test_regex_counter_example.cjs
+
+# 3. C# 安全基线 (需先构建 bin/LeeExcel.dll；不启动 Excel)
+pwsh -File tests/diagnostics/verify_security_baseline.ps1
 ```
 
 - **测试范围**：
@@ -42,7 +45,7 @@ node test_regex_counter_example.cjs
 
 ```powershell
 # 针对官方发布包或本地构建包执行解压隔离冒烟
-pwsh -File tests/diagnostics/run_isolated_release_smoke.ps1 -ZipPath ".artifacts/release/ExcelMindAI-v1.3.0-rc1.zip"
+pwsh -File tests/diagnostics/run_isolated_release_smoke.ps1 -ZipPath ".artifacts/release/ExcelMindAI-v1.3.5.zip"
 ```
 
 - **检查项 (6 项 100% PASS)**：

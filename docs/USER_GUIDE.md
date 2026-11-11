@@ -1,8 +1,8 @@
 # ExcelMind AI 用户操作使用手册 (USER_GUIDE.md)
 
-> **版本**：v1.3.0-rc1  
-> **当前状态入口**：参见 [docs/CURRENT_STATE.md](CURRENT_STATE.md)  
-> **适用对象**：表格分析师、业务专员、自动化开发者及日常 Excel 用户  
+> **版本**：v1.3.5
+> **当前状态入口**：参见 [docs/CURRENT_STATE.md](CURRENT_STATE.md)
+> **适用对象**：表格分析师、业务专员、自动化开发者及日常 Excel 用户
 > **宿主架构**：Windows 桌面 Excel + C# COM Interop + WebView2 (Svelte 5)
 
 ---

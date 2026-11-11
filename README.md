@@ -1,4 +1,4 @@
-# ExcelMind AI
+﻿# ExcelMind AI
 
 > **智能表格助手 · 桌面原生 · 安全可逆**  
 > 专为 Windows Microsoft Excel 打造的 AI 智能加载项。结合大语言模型意图理解与 Office COM 原生自动化，让数据清洗、复杂计算、多维汇总与 VBA 宏复用像日常对话一样自然。
@@ -9,10 +9,9 @@
 
 - **当前发布版本**：[v1.3.5](https://github.com/liyongnan1688/ExcelMind-AI/releases/tag/v1.3.5)
 - **官方发行包**：`ExcelMindAI-v1.3.5.zip`
-- **本地构建 SHA-256 校验值**：  
-  `cb21ffc17f0bde89a396783e0eb659dfb42c97dfd6d9812fa642c2df50879127`
+- **本地构建 SHA-256 校验值**：以 `release/ExcelMindAI-v1.3.5.zip` 的实际文件哈希和包内 `checksums_sha256.txt` 为准。
 - **构建方式**：Windows 原生编译 + 独立双架构 XLL 自动组织 + SHA-256 校验清单保障
-- **测试状态**：**254/254 单元测试门禁 100% PASS**（包含互斥弹窗管理与 520px 工作台适配）
+- **测试状态**：**257/257 单元测试门禁 100% PASS + 40/40 安全基线 PASS**（包含互斥弹窗管理与 520px 工作台适配）
 
 ---
 

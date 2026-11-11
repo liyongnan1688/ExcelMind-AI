@@ -28,4 +28,5 @@ export const CORPORATE_CONVENTIONS_BLOCK = `【企业排版与视觉公约规范
    - 标题表头填充推荐科技深蓝 RGB(24, 45, 123)（十六进制 #182D7B）或科技蓝 RGB(0, 104, 183)（十六进制 #0068B7），搭配纯白加粗文字；
    - 汇总行/合计行采用浅冰蓝底色 RGB(219, 239, 249)（十六进制 #DBEFF9）并加粗；
    - 边框采用细实线（xlContinuous）；
-4. 对齐规范：文本靠左，数值靠右，日期、代码与状态居中，表头居中并设置 WrapText = True。`;
+4. 对齐规范：文本靠左，数值靠右，日期、代码与状态居中，表头居中并设置 WrapText = True；
+5. 严禁整行整列批量设置格式：严禁对 Rows(1)、Columns("A") 等整行/整列直接设置 Interior 或 Borders（单行包含1.6万列，会造成文件暴增卡死被宿主严格阻断）。设置表头底色必须限定在有效数据列（如 Range("A1:B1").Interior.Color 或 ws.Range("A1").CurrentRegion.Rows(1).Interior.Color）；多单元格区域必须使用 Range("A2:B10") 语法，严禁写成非法的 Cells(2:B10)。`;

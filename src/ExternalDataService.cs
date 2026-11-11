@@ -156,6 +156,7 @@ namespace LeeExcel
         public long elapsedMs { get; set; }
         public string recoveryNotice { get; set; }
         public string sanitizedSource { get; set; }
+        public bool readbackVerified { get; set; }
     }
 
     public class DataSourceConfigDto
@@ -1122,8 +1123,7 @@ namespace LeeExcel
 
                         if (isCrossOrigin)
                         {
-                            client.DefaultRequestHeaders.Remove("Authorization");
-                            client.DefaultRequestHeaders.Remove("Cookie");
+                            client.DefaultRequestHeaders.Clear();
                         }
 
                         currentUrl = nextUrl;
@@ -1166,6 +1166,32 @@ namespace LeeExcel
         #endregion
 
         #region 类型推断辅助与数字检测
+
+        private static object PrepareCellValueForExcel(string rawVal)
+        {
+            if (string.IsNullOrEmpty(rawVal)) return "";
+            // 与前端转义契约保持一致：公式起始字符、制表/回车前缀、已有单引号都必须保值写入。
+            bool isFormula = rawVal.StartsWith("=") || rawVal.StartsWith("@") ||
+                (rawVal.StartsWith("+") && !IsNormalNumber(rawVal)) ||
+                (rawVal.StartsWith("-") && !IsNormalNumber(rawVal)) ||
+                rawVal.StartsWith("\t") || rawVal.StartsWith("\r");
+            // Excel 会把 "42.5%" 自动转换为数值 0.425；外部数据导入必须保留原始文本。
+            bool isPercentText = rawVal.EndsWith("%", StringComparison.Ordinal);
+            string digitsOnly = rawVal.StartsWith("-") ? rawVal.Substring(1) : rawVal;
+            bool isLongInteger = digitsOnly.Length >= 12 && IsAllDigits(digitsOnly);
+            bool isLeadingZero = rawVal.Length > 1 && rawVal.StartsWith("0") && char.IsDigit(rawVal[1]);
+            bool isHighPrecisionNum = rawVal.Length >= 16 && (rawVal.Contains(".") || rawVal.Contains("e") || rawVal.Contains("E")) && IsNormalNumber(rawVal);
+            bool hasLeadingQuote = rawVal.StartsWith("'");
+            if (isFormula || isPercentText || hasLeadingQuote || isLongInteger || isLeadingZero || isHighPrecisionNum) return "'" + rawVal;
+            return rawVal;
+        }
+
+        private static string NormalizeReadbackText(object value)
+        {
+            string text = value == null ? "" : Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture);
+            if (text != null && text.StartsWith("'")) text = text.Substring(1);
+            return text ?? "";
+        }
 
         private static bool IsNormalNumber(string s)
         {
@@ -1452,10 +1478,13 @@ namespace LeeExcel
                     return res;
                 }
 
-                dynamic targetWb = FindWorkbook(excelApp, p.targetWorkbookFullName);
+                bool targetNameAmbiguous = false;
+                dynamic targetWb = FindWorkbook(excelApp, p.targetWorkbookFullName, out targetNameAmbiguous);
                 if (targetWb == null)
                 {
-                    res.error = "未找到指定的目标工作簿【" + (p.targetWorkbookFullName ?? "未指定") + "】（可能已被关闭或重命名）。已安全阻断，杜绝回退当前活动工作簿！";
+                    res.error = targetNameAmbiguous
+                        ? "检测到多个同名目标工作簿，已阻断导入。请使用完整路径唯一指定目标工作簿。"
+                        : "未找到指定的目标工作簿【" + (p.targetWorkbookFullName ?? "未指定") + "】（可能已被关闭或重命名）。已安全阻断，杜绝回退当前活动工作簿！";
                     return res;
                 }
 
@@ -1642,7 +1671,7 @@ namespace LeeExcel
                 // 表头行
                 for (int c = 0; c < totalMatrixCols; c++)
                 {
-                    matrix[0, c] = finalColNames[c];
+                    matrix[0, c] = PrepareCellValueForExcel(finalColNames[c]);
                 }
 
                 // 数据行
@@ -1660,25 +1689,7 @@ namespace LeeExcel
                             continue;
                         }
 
-                        // 公式样文本防御：以 '=', '@' 开头，或以 '+', '-' 开头且不是纯数字时强制添加单引号保真
-                        bool isFormula = rawVal.StartsWith("=") || rawVal.StartsWith("@") ||
-                            (rawVal.StartsWith("+") && !IsNormalNumber(rawVal)) ||
-                            (rawVal.StartsWith("-") && !IsNormalNumber(rawVal));
-
-                        // 19位长数字、大整数编号、前导零文本保真：添加单引号，防止 Excel 科学计数法或精度截断
-                        string digitsOnly = rawVal.StartsWith("-") ? rawVal.Substring(1) : rawVal;
-                        bool isLongInteger = digitsOnly.Length >= 12 && IsAllDigits(digitsOnly);
-                        bool isLeadingZero = rawVal.Length > 1 && rawVal.StartsWith("0") && char.IsDigit(rawVal[1]);
-                        bool isHighPrecisionNum = rawVal.Length >= 16 && (rawVal.Contains(".") || rawVal.Contains("e") || rawVal.Contains("E")) && IsNormalNumber(rawVal);
-
-                        if (isFormula || isLongInteger || isLeadingZero || isHighPrecisionNum)
-                        {
-                            matrix[r + 1, c] = "'" + rawVal;
-                        }
-                        else
-                        {
-                            matrix[r + 1, c] = rawVal;
-                        }
+                        matrix[r + 1, c] = PrepareCellValueForExcel(rawVal);
                     }
                 }
 
@@ -1687,6 +1698,53 @@ namespace LeeExcel
 
                 // 8. 读回客观核验
                 res.failureStage = "readback";
+                object readbackValue = destRange.Value2;
+                object[,] readbackMatrix = readbackValue as object[,];
+                if (readbackMatrix == null && totalMatrixRows == 1 && totalMatrixCols == 1)
+                {
+                    readbackMatrix = new object[1, 1];
+                    readbackMatrix[0, 0] = readbackValue;
+                }
+                if (readbackMatrix == null)
+                {
+                    res.ok = false;
+                    res.failureStage = "readback_unavailable";
+                    res.error = "写入后无法读取二维结果矩阵，已拒绝报告成功。";
+                    return res;
+                }
+
+                int readRows = readbackMatrix.GetLength(0);
+                int readCols = readbackMatrix.GetLength(1);
+                if (readRows != totalMatrixRows || readCols != totalMatrixCols)
+                {
+                    res.ok = false;
+                    res.failureStage = "readback_dimension_mismatch";
+                    res.error = string.Format("写入后尺寸核验失败：预期 {0}x{1}，实际 {2}x{3}。", totalMatrixRows, totalMatrixCols, readRows, readCols);
+                    return res;
+                }
+
+                int sampleRows = Math.Min(3, totalMatrixRows);
+                int sampleCols = Math.Min(3, totalMatrixCols);
+                int rowLower = readbackMatrix.GetLowerBound(0);
+                int colLower = readbackMatrix.GetLowerBound(1);
+                for (int rr = 0; rr < sampleRows; rr++)
+                {
+                    for (int cc = 0; cc < sampleCols; cc++)
+                    {
+                        string expectedText = NormalizeReadbackText(matrix[rr, cc]);
+                        string actualText = NormalizeReadbackText(readbackMatrix[rowLower + rr, colLower + cc]);
+                        if (!string.Equals(expectedText, actualText, StringComparison.Ordinal))
+                        {
+                            res.ok = false;
+                            res.failureStage = "readback_value_mismatch";
+                            res.error = string.Format("写入后读回值不一致：行 {0}，列 {1}，预期【{2}】，实际【{3}】。", rr + 1, cc + 1, expectedText, actualText);
+                            return res;
+                        }
+                    }
+                }
+
+                res.failureStage = null;
+                res.readbackVerified = true;
                 res.importedRowCount = table.Rows.Count;
                 res.importedColCount = totalMatrixCols;
 
@@ -1712,23 +1770,51 @@ namespace LeeExcel
             }
         }
 
-        private static dynamic FindWorkbook(dynamic excelApp, string targetFullName)
+        private static dynamic FindWorkbook(dynamic excelApp, string targetFullName, out bool ambiguous)
         {
-            if (excelApp == null || string.IsNullOrEmpty(targetFullName)) return null;
+            ambiguous = false;
+            if (excelApp == null || string.IsNullOrWhiteSpace(targetFullName)) return null;
             string cleanTarget = targetFullName.Trim();
             try
             {
+                // 全路径是强身份约束：路径失效时绝不降级为同名匹配。
+                if (Path.IsPathRooted(cleanTarget))
+                {
+                    foreach (dynamic wb in excelApp.Workbooks)
+                    {
+                        if (string.Equals((string)wb.FullName, cleanTarget, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return wb;
+                        }
+                    }
+                    return null;
+                }
+
+                dynamic nameMatch = null;
+                int nameMatchCount = 0;
                 foreach (dynamic wb in excelApp.Workbooks)
                 {
-                    if (string.Equals((string)wb.FullName, cleanTarget, StringComparison.OrdinalIgnoreCase) ||
-                        string.Equals((string)wb.Name, cleanTarget, StringComparison.OrdinalIgnoreCase))
+                    if (string.Equals((string)wb.FullName, cleanTarget, StringComparison.OrdinalIgnoreCase))
                     {
                         return wb;
                     }
+                    if (string.Equals((string)wb.Name, cleanTarget, StringComparison.OrdinalIgnoreCase))
+                    {
+                        nameMatchCount++;
+                        if (nameMatchCount > 1)
+                        {
+                            ambiguous = true;
+                            return null;
+                        }
+                        nameMatch = wb;
+                    }
                 }
+                return nameMatch;
             }
-            catch { }
-            return null;
+            catch
+            {
+                return null;
+            }
         }
 
         private static bool IsAllDigits(string s)

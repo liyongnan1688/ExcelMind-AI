@@ -52,7 +52,7 @@ public class TestThreeConditions
         string vbaWithSelect = File.ReadAllText(vbaPath, Encoding.UTF8);
         string vbaWithoutSelect = vbaWithSelect.Replace("ws.Cells(1, 1).Select", "' [Removed ws.Cells(1, 1).Select]");
 
-        KillExcelProcesses();
+        EnsureNoRunningExcelProcess();
 
         Type excelType = Type.GetTypeFromProgID("Excel.Application");
         dynamic app = Activator.CreateInstance(excelType);
@@ -120,7 +120,6 @@ public class TestThreeConditions
         {
             try { app.Quit(); } catch { }
             Marshal.ReleaseComObject(app);
-            KillExcelProcesses();
 
             WriteRunMetadata(outputDir, toolName, status, runDetails);
             RemoveRunningLock(outputDir);
@@ -237,17 +236,14 @@ public class TestThreeConditions
         }
     }
 
-    static void KillExcelProcesses()
+    static void EnsureNoRunningExcelProcess()
     {
-        try
+        var procs = System.Diagnostics.Process.GetProcessesByName("EXCEL");
+        if (procs != null && procs.Length > 0)
         {
-            var procs = System.Diagnostics.Process.GetProcessesByName("EXCEL");
-            foreach (var p in procs)
-            {
-                try { p.Kill(); } catch { }
-            }
+            string pids = string.Join(",", Array.ConvertAll(procs, p => p.Id.ToString()));
+            throw new InvalidOperationException("检测到已运行的 Excel 进程 (PID: " + pids + ")。测试不会强杀现有 Excel，请先保存并关闭后重试。");
         }
-        catch { }
     }
 
     private static string ResolveProjectRoot()

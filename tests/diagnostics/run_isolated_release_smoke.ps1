@@ -63,11 +63,10 @@ $CscArgs = @(
     "/r:UIAutomationClient.dll",
     "/r:UIAutomationTypes.dll",
     "/r:WindowsBase.dll",
-    "`"$SourceFile`""
+    $SourceFile
 )
 
-$cmd = "& `"$CscPath`" " + ($CscArgs -join " ")
-Invoke-Expression $cmd
+& $CscPath @CscArgs
 if ($LASTEXITCODE -ne 0 -or !(Test-Path $OutExe)) {
     Write-Host "[ERROR] Failed to compile VerifyIsolatedReleaseSmoke.exe, code: $LASTEXITCODE" -ForegroundColor Red
     exit 1
@@ -76,8 +75,7 @@ Write-Host "      Compilation successful: $OutExe" -ForegroundColor Green
 
 # 2. Run isolated smoke check
 Write-Host "`n[2/3] Running isolated release smoke check..." -ForegroundColor Yellow
-$runnerCmd = "& `"$OutExe`" `"$ArtifactsDir`" `"$ZipPath`""
-Invoke-Expression $runnerCmd
+& $OutExe $ArtifactsDir $ZipPath
 $smokeExitCode = $LASTEXITCODE
 
 # 3. Archive report
