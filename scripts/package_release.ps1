@@ -2,7 +2,7 @@
 # 职责：编译前端与后端、组织双架构依赖、生成安装卸载套件、打包为独立 ZIP
 
 param(
-    [string]$Version = "v1.3.5"
+    [string]$Version = "v1.3.6"
 )
 
 $ErrorActionPreference = "Stop"

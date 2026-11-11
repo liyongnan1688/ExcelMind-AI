@@ -45,7 +45,7 @@ pwsh -File tests/diagnostics/verify_security_baseline.ps1
 
 ```powershell
 # 针对官方发布包或本地构建包执行解压隔离冒烟
-pwsh -File tests/diagnostics/run_isolated_release_smoke.ps1 -ZipPath ".artifacts/release/ExcelMindAI-v1.3.5.zip"
+pwsh -File tests/diagnostics/run_isolated_release_smoke.ps1 -ZipPath ".artifacts/release/ExcelMindAI-v1.3.6.zip"
 ```
 
 - **检查项 (6 项 100% PASS)**：

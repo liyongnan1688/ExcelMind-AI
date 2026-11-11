@@ -337,7 +337,7 @@ ${summaryText}
     launchScriptContent.includes('PSScriptRoot');
 
   // 5.2 32 位发布资产与架构核对 (客观标注：当前未在 32 位 Office 宿主运行)
-  const releaseZipPath = path.resolve(projectRoot, 'release/ExcelMindAI-v1.3.5.zip');
+  const releaseZipPath = path.resolve(projectRoot, 'release/ExcelMindAI-v1.3.6.zip');
   const releaseZipExists = fs.existsSync(releaseZipPath);
   const releaseZipHash = releaseZipExists
     ? crypto.createHash('sha256').update(fs.readFileSync(releaseZipPath)).digest('hex')
@@ -373,7 +373,7 @@ ${summaryText}
   const scene5Report = `# 验收场景 5：部署、兼容与缓存规范模块级复核报告
 
 > **复核执行时间**：${getLocalDateTimeStr()}
-> **发布包对象**：\`release/ExcelMindAI-v1.3.5.zip\`
+> **发布包对象**：\`release/ExcelMindAI-v1.3.6.zip\`
 > **发布包 SHA-256**：\`${releaseZipHash || '未发现发布包'}\`
 > **脚本执行环境**：\`${scriptEnvironment}\`
 > **宿主验证状态**：本模块脚本未启动 Excel；真实桌面宿主结论必须由独立真机报告提供
@@ -409,7 +409,7 @@ ${summaryText}
   const summaryReport = `# ExcelMind AI 五大验收场景综合执行报告 (${getLocalDateTimeStr().slice(0, 10)})
 
 > **综合报告生成时间**：${getLocalDateTimeStr()}
-> **验收基线版本**：\`v1.3.5\`
+> **验收基线版本**：\`v1.3.6\`
 > **发布包 SHA-256**：\`${releaseZipHash || '未发现发布包'}\`
 > **脚本执行环境**：\`${scriptEnvironment}\`
 > **宿主验证状态**：本脚本未启动 Excel；场景 1-2 的真实宿主结果必须由独立真机报告提供

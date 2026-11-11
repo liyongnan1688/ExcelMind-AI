@@ -1,6 +1,6 @@
 # ExcelMind AI 安装与升级指南 (INSTALL.md)
 
-> **版本**：v1.3.5 (发布候选版本 / Release Candidate)
+> **版本**：v1.3.6 (发布候选版本 / Release Candidate)
 > **状态**：未签名发布候选构建 (Unsigned Release Candidate)
 > **当前状态入口**：参见 [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md)
 > **适用环境**：Windows 10 / Windows 11 (32 位 / 64 位)，Microsoft Excel 2010 / 2013 / 2016 / 2019 / 2021 / Microsoft 365 (桌面版)
@@ -59,7 +59,7 @@ ExcelMind AI 在底层实现上坚决遵守**三态物理绝对隔离**原则：
 
 ## 4. 版本升级与失败补偿回滚机制
 
-从旧版本（如 v1.1.0 / v1.2.0）升级至 v1.3.5 时：
+从旧版本（如 v1.1.0 / v1.2.0）升级至 v1.3.6 时：
 
 1. **正常升级步骤**：
    - 保存所有已打开的工作簿并**完全退出 Microsoft Excel**；

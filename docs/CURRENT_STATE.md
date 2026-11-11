@@ -1,7 +1,7 @@
 ﻿# ExcelMind AI 当前系统状态与基线入口 (CURRENT_STATE.md)
 
 > **文档定位**：后续开发者与 AI 识别项目真实状态的唯一当前入口  
-> **更新时间**：2026-11-08
+> **更新时间**：2026-11-11
 > **维护原则**：事实驱动、基线清晰、边界分明；旧报告只证明当时测试，不作为当前假设。
 
 ---
@@ -11,17 +11,17 @@
 | 属性 | 状态 / 事实 | 核对来源与说明 |
 | :--- | :--- | :--- |
 | **所属仓库** | `liyongnan1688/ExcelMind-AI` | GitHub 远端权威仓库 |
-| **当前发布版本** | `v1.3.5` (Official Production Release) | 正式稳定发行版本 |
-| **前序发布版本** | `v1.3.4` (Release v1.3.4) | 前序稳定版本（Tag `v1.3.4`） |
-| **Git Tag** | `v1.3.5` | 正式发行 Tag |
-| **本地构建资产 (Local Release ZIP)** | **SHA-256**：以 `release/ExcelMindAI-v1.3.5.zip` 的实际文件哈希和包内 `checksums_sha256.txt` 为准 | **物理位置**：`release/ExcelMindAI-v1.3.5.zip`<br>由 2026-11-11 诊断保存对话框 owner 修复后的最新代码重新打包生成（约 1.59 MB） |
+| **当前发布版本** | `v1.3.6` (Official Production Release) | 正式稳定发行版本，由 `v1.3.6` Tag 对应的 GitHub Actions 构建 |
+| **前序发布版本** | `v1.3.5` (Release v1.3.5) | 前一稳定版本（Tag `v1.3.5`） |
+| **Git Tag** | `v1.3.6` | 正式发行 Tag |
+| **本地构建资产 (Local Release ZIP)** | **SHA-256**：以 `release/ExcelMindAI-v1.3.6.zip` 的实际文件哈希和包内 `checksums_sha256.txt` 为准 | **物理位置**：`release/ExcelMindAI-v1.3.6.zip`<br>包含诊断包导出 owner 修复、安全边界加固与 PowerShell 7 / GitHub Actions 打包流程修复 |
 | **测试门禁基线** | **257/257 PASS (100%) + 40/40 安全基线 PASS** | 覆盖互斥弹窗管理、安全边界与 520px 工作台适配 |
 
 ### 独立隔离解压冒烟与五大真机验收确证
 
 1. **发行包解压冒烟验证（“能不能跑” - 6/6 PASS）**：
    - **存证报告**：`.artifacts/tests/smoke_isolated_<timestamp>/smoke_report.md`；
-   - **报告标题**：`# ExcelMind AI v1.3.5 发行包独立隔离解压冒烟验证报告`；
+   - **报告标题**：`# ExcelMind AI v1.3.6 发行包独立隔离解压冒烟验证报告`；
    - **结果**：清单核验（26项）、便携入口、64位加载、WebView2窗格展示与Ribbon截图、脱敏诊断导出全流程、固定无害宏读回全量通过，宿主进程安全退出。
 2. **五大验收场景矩阵（本批真机 10/10 PASS；离线模块/规范复核 14 PASS / 2 NOT TESTED）**：
    - **存证报告**：`.artifacts/tests/<run-id>/acceptance_summary_report.md`；桌面端验收报告：`.artifacts/tests/desktop_acceptance_<timestamp>/acceptance_report.md`；
@@ -35,11 +35,10 @@
 
 ## 二、 当前 main 与发布提交的关系
 
-- **发布基线提交**：`492b378a92c7ff7424757ca0c2992f8f056ee12b`（包含功能收敛与 `RELEASE_NOTES.md`，构建产物即为 `v1.3.5`）。
-- **文档整理与测试资产手册提交**：`eac0f0b`（`docs(chore): reorganize project documentation, test inventory and release verification [skip ci]`，包含全仓文档梳理、历史归档与测试索引）。
-- **CI 发布工作流加固提交**：`4eee7b3`（`ci: harden release workflow publication guards and prerelease detection`，彻底修复 main push fallback v1.2.0、修复 prerelease 检测并增加防止覆盖已有 Release 的前置防护）。
-- **收尾文档提交**：更新当前状态与公开包冒烟证据记录。
-- **发布与整理关系铁律**：已发布的 `v1.3.5` 发行包由发布提交 `492b378` 构建；后续 main 上的文档与 CI 工作流加固提交**不属于该包的构建源码**，绝不宣称旧发行包由最新整理后的 main 构建。
+- **`v1.3.6` 发布基线提交**：以 GitHub Tag `v1.3.6` 指向的提交为准；GitHub Actions 从同一提交构建并发布资产。
+- **`v1.3.6` 修复来源提交**：`11ac0fd`（诊断导出与安全基线）、`8bcdbcc`（PowerShell 7 csc 参数）、`549a2d9`（CI 版本契约）、`b3f552c`（发布打包门禁），以及版本与文档收口提交。
+- **前一发布基线**：`v1.3.5` 保持由提交 `492b378` 构建，历史 Tag 与 Release 资产不重写。
+- **发布与整理关系铁律**：每个 Tag 对应不可变发布资产；禁止用后续提交冒充旧发行包构建源码，也禁止覆盖已发布 Release。
 
 ---
 
@@ -108,7 +107,7 @@ ExcelMind-AI/
 
 ### 1. 唯一主规划
 - **路径**：[docs/product-roadmap.md](file:///c:/Users/35651/Desktop/Google/lee-excle/docs/product-roadmap.md)
-- **范围**：R0～R6 均已完成并在 `v1.3.5` 交付；R7（DuckDB/Python）处于远期评估状态，非当前必做项。不另建第二套路线图。
+- **范围**：R0～R6 均已完成并持续维护至 `v1.3.6`；R7（DuckDB/Python）处于远期评估状态，非当前必做项。不另建第二套路线图。
 
 ### 2. 有效测试命令与按影响范围测试策略
 
@@ -128,7 +127,7 @@ ExcelMind-AI/
 3. **涉及发行包与打包流程变更**：
    - 执行独立解压隔离冒烟验证（需真实 Excel 宿主，环境完全隔离）：
      ```powershell
-     pwsh -File tests/diagnostics/run_isolated_release_smoke.ps1 -ZipPath ".artifacts/tmp/ci_download_verify/ExcelMindAI-v1.3.5_from_github.zip"
+     pwsh -File tests/diagnostics/run_isolated_release_smoke.ps1 -ZipPath ".artifacts/tmp/ci_download_verify/ExcelMindAI-v1.3.6_from_github.zip"
      ```
 4. **全套桌面端自动化验收套件 (STA 完整验收，仅在重大版本发版前明确授权运行)**：
    - 源码：`tests/tools/DesktopAcceptanceRunner.cs`
