@@ -45,12 +45,12 @@ $refs = @(
     (Resolve-Path (Join-Path $projectRoot "packages\Microsoft.Web.WebView2.1.0.4191.47\lib\net462\Microsoft.Web.WebView2.WinForms.dll")).Path
 )
 
-$refArgs = $refs | ForEach-Object { "/r:`"$_`"" }
-$sources = @((Get-ChildItem -Path (Join-Path $projectRoot "src\*.cs") | Select-Object -ExpandProperty FullName) | ForEach-Object { "`"$_`"" }) + @("`"$buildMetadataSource`"")
+$refArgs = $refs | ForEach-Object { "/r:$_" }
+$sources = @((Get-ChildItem -Path (Join-Path $projectRoot "src\*.cs") | Select-Object -ExpandProperty FullName)) + @($buildMetadataSource)
 
 Write-Host "正在使用系统 .NET Framework 4.8 编译 LeeExcel.dll..." -ForegroundColor Cyan
 
-$cscArgs = @("/nologo", "/target:library", "/out:`"$outDir\LeeExcel.dll`"")
+$cscArgs = @("/nologo", "/target:library", "/out:$outDir\LeeExcel.dll")
 $cscArgs += $refArgs
 $cscArgs += $sources
 & $csc @cscArgs
