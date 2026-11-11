@@ -46,16 +46,16 @@ $LeeExcelDll = Join-Path $ProjectRoot "bin\LeeExcel.dll"
 $CscArgs = @(
     "/nologo",
     "/target:exe",
-    "/out:`"$DriverExe`"",
-    "/lib:`"$WpfLib`"",
+    "/out:$DriverExe",
+    "/lib:$WpfLib",
     "/r:System.dll",
     "/r:System.Core.dll",
     "/r:System.Drawing.dll",
     "/r:System.Windows.Forms.dll",
     "/r:Microsoft.CSharp.dll",
     "/r:WindowsBase.dll",
-    "/r:`"$LeeExcelDll`"",
-    "`"$DriverSource`""
+    "/r:$LeeExcelDll",
+    $DriverSource
 )
 
 & $CscPath @CscArgs

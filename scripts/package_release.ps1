@@ -54,22 +54,35 @@ New-Item -ItemType Directory -Path $packRoot -Force | Out-Null
 Write-Host "`n[1/5] 正在构建前端生产包 (pnpm run build)..." -ForegroundColor Yellow
 $webDir = Join-Path $projectRoot "web"
 $pnpmCmd = Get-Command pnpm -ErrorAction SilentlyContinue
-if (!$pnpmCmd) {
-    Write-Host "      未找到 pnpm 命令，尝试使用 npm..." -ForegroundColor DarkGray
-    Push-Location $webDir
-    if (!(Test-Path "node_modules")) {
-        Write-Host "      正在安装前端依赖 (npm install)..." -ForegroundColor Yellow
-        npm install
+Push-Location $webDir
+try {
+    if (!$pnpmCmd) {
+        Write-Host "      未找到 pnpm 命令，尝试使用 npm..." -ForegroundColor DarkGray
+        if (!(Test-Path "node_modules")) {
+            Write-Host "      正在安装前端依赖 (npm install)..." -ForegroundColor Yellow
+            npm install
+            if ($LASTEXITCODE -ne 0) {
+                throw "前端依赖安装失败 (npm install)，退出码: $LASTEXITCODE"
+            }
+        }
+        npm run build
+        if ($LASTEXITCODE -ne 0) {
+            throw "前端生产构建失败 (npm run build)，退出码: $LASTEXITCODE"
+        }
+    } else {
+        if (!(Test-Path "node_modules")) {
+            Write-Host "      正在安装前端依赖 (pnpm install)..." -ForegroundColor Yellow
+            pnpm install
+            if ($LASTEXITCODE -ne 0) {
+                throw "前端依赖安装失败 (pnpm install)，退出码: $LASTEXITCODE"
+            }
+        }
+        pnpm run build
+        if ($LASTEXITCODE -ne 0) {
+            throw "前端生产构建失败 (pnpm run build)，退出码: $LASTEXITCODE"
+        }
     }
-    npm run build
-    Pop-Location
-} else {
-    Push-Location $webDir
-    if (!(Test-Path "node_modules")) {
-        Write-Host "      正在安装前端依赖 (pnpm install)..." -ForegroundColor Yellow
-        pnpm install
-    }
-    pnpm run build
+} finally {
     Pop-Location
 }
 
@@ -123,10 +136,10 @@ $refs = @(
     (Resolve-Path (Join-Path $projectRoot "packages\Microsoft.Web.WebView2.1.0.4191.47\lib\net462\Microsoft.Web.WebView2.Core.dll")).Path,
     (Resolve-Path (Join-Path $projectRoot "packages\Microsoft.Web.WebView2.1.0.4191.47\lib\net462\Microsoft.Web.WebView2.WinForms.dll")).Path
 )
-$refArgs = $refs | ForEach-Object { "/r:`"$_`"" }
-$sources = @((Get-ChildItem -Path (Join-Path $projectRoot "src\*.cs") | Select-Object -ExpandProperty FullName) | ForEach-Object { "`"$_`"" }) + @("`"$buildMetadataSource`"")
+$refArgs = $refs | ForEach-Object { "/r:$_" }
+$sources = @((Get-ChildItem -Path (Join-Path $projectRoot "src\*.cs") | Select-Object -ExpandProperty FullName)) + @($buildMetadataSource)
 
-$cscArgs = @("/nologo", "/target:library", "/out:`"$dllOut`"")
+$cscArgs = @("/nologo", "/target:library", "/out:$dllOut")
 $cscArgs += $refArgs
 $cscArgs += $sources
 & $csc @cscArgs
