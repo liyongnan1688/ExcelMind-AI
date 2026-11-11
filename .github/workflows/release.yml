@@ -85,6 +85,12 @@ jobs:
           $tag = ""
           $isPre = $false
           $versionPattern = '^v\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$'
+          $packageManifest = Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE "package.json") -Raw | ConvertFrom-Json
+          $ciVersion = "v$([string]$packageManifest.version)"
+          if ($ciVersion -notmatch $versionPattern) {
+              Write-Error "Invalid package.json version: $ciVersion. CI package build requires strict SemVer."
+              exit 1
+          }
 
           if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
               $inputVer = [string]$env:INPUT_VERSION
@@ -114,7 +120,7 @@ jobs:
               if ($tag -notmatch $versionPattern) {
                   Write-Host "Tag '$tag' does not match strict SemVer. Skipping publication."
                   $shouldPublish = $false
-                  $v = "ci-build"
+                  $v = $ciVersion
               } else {
                   $v = $tag
                   $isPre = ($v -match '-(rc|alpha|beta|preview|dev)')
@@ -125,7 +131,7 @@ jobs:
               Write-Host "Triggered by branch push or pull request without version tag."
               Write-Host "Running CI build & quality checks only. Release publication is DISABLED."
               $shouldPublish = $false
-              $v = "ci-build"
+              $v = $ciVersion
           }
 
           echo "should_publish=$shouldPublish" >> $env:GITHUB_OUTPUT
